@@ -12,9 +12,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ── Project-local docs & logs (not for git) ───────────────────
-/docs/
-
 # ── Rust / Tauri ──────────────────────────────────────────────
 src-tauri/target/
 src-tauri/target2/
@@ -74,8 +71,8 @@ public/models/**/*.onnx
 # build:prod generates this locally (~1.4 MB); committed stub is katex-inlined.stub.ts
 src/lib/katex-inlined.css.ts
 
-# ── Documents (project-local, not for git) ──
-documents/
-
 # ── NSIS installer output ──
 src-tauri/target/release/bundle/nsis/*.exe
+
+# ── Documents (project-local, not for git) ──
+documents/
