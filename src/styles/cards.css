@@ -1,0 +1,151 @@
+/* ── Card ────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  transition: border-color 300ms var(--ease-out),
+              box-shadow 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card:hover {
+  border-color: var(--border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+
+/* ── Stat Card ───────────────────────────────────────────────────── */
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-5);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 300ms var(--ease-out);
+}
+
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.08),
+              0 2px 8px rgba(0, 0, 0, 0.04);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.stat-card:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 100ms;
+}
+
+.stat-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 300ms var(--ease-out);
+  position: relative;
+}
+
+/* Soft glow behind icon on hover */
+.stat-card:hover .stat-card-icon {
+  transform: scale(1.08);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);
+}
+
+.stat-card-value {
+  font-size: var(--text-3xl);
+  font-weight: 800;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.stat-card-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  margin-top: var(--space-1);
+}
+
+.stat-card-value--compact {
+  font-size: var(--text-lg);
+}
+
+.dashboard-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  width: 100%;
+  margin-bottom: var(--space-6);
+}
+
+.dashboard-stat-grid .stat-card {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .dashboard-stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ── Info/Error Cards ────────────────────────────────────────────── */
+
+.info-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--info-bg);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.success-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--success-bg);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--success);
+}
+
+.warning-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--warning-bg);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--warning);
+}
+
+.error-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-bg);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--danger);
+}
+
+
+/* ── Spinner ─────────────────────────────────────────────────────── */
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: var(--radius-full);
+  animation: spin 0.6s linear infinite;
+}

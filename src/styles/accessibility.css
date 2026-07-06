@@ -1,0 +1,251 @@
+/* ── Accessibility ───────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ── Global Interactive Element Styles (UI/UX Pro Max Compliance) ── */
+
+/* Ensure all interactive elements have cursor-pointer */
+[role="button"],
+[role="tab"],
+[role="switch"],
+[role="checkbox"],
+.btn,
+.button,
+.clickable,
+.interactive {
+  cursor: pointer;
+}
+
+/* Consistent focus ring for keyboard navigation */
+*:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Remove outline for mouse clicks */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Button press feedback */
+.btn:active,
+.button:active,
+[role="button"]:active {
+  transform: scale(0.97);
+  transition-duration: 50ms;
+}
+
+/* Disabled state clarity */
+.btn:disabled,
+.button:disabled,
+[role="button"][aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .modal-container {
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .modal-content {
+    padding: var(--space-4);
+  }
+}
+
+
+/* ── Dark mode ── */
+[data-theme="dark"] .editor-suggestion-scanning,
+.dark-theme .editor-suggestion-scanning {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: rgba(129, 140, 248, 0.9);
+}
+
+[data-theme="dark"] .editor-suggestion-card,
+.dark-theme .editor-suggestion-card {
+  box-shadow: 0 2px 12px -4px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .editor-suggestion-header:hover,
+.dark-theme .editor-suggestion-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .editor-suggestion-confidence,
+.dark-theme .editor-suggestion-confidence {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .editor-suggestion-quote,
+.dark-theme .editor-suggestion-quote {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .editor-suggestion-quote.conflicting,
+.dark-theme .editor-suggestion-quote.conflicting {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* ═══ ProseMirror Suggestion Wave Decorations ═══ */
+/* Inline decoration: wavy underline on conflict text */
+.ProseMirror .suggestion-wave {
+  text-decoration: underline wavy;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 0.15s;
+}
+
+.ProseMirror .suggestion-wave:hover {
+  background-color: rgba(239, 68, 68, 0.04);
+}
+
+.ProseMirror .suggestion-wave-temporal_conflict {
+  text-decoration-color: #eab308;
+}
+.ProseMirror .suggestion-wave-factual_conflict {
+  text-decoration-color: #ef4444;
+}
+.ProseMirror .suggestion-wave-outdated_claim {
+  text-decoration-color: #f97316;
+}
+.ProseMirror .suggestion-wave-reconciliation_conflict {
+  text-decoration-color: #8b5cf6;
+}
+
+/* Widget badge: small clickable ⚠ after the conflict text */
+.ProseMirror .suggestion-wave-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+  border: 1.5px solid;
+  line-height: 1;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.ProseMirror .suggestion-wave-badge:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
+.ProseMirror .suggestion-wave-badge-temporal_conflict {
+  border-color: #eab308;
+  background: rgba(234, 179, 8, 0.12);
+  color: #b45309;
+}
+.ProseMirror .suggestion-wave-badge-factual_conflict {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+.ProseMirror .suggestion-wave-badge-outdated_claim {
+  border-color: #f97316;
+  background: rgba(249, 115, 22, 0.12);
+  color: #c2410c;
+}
+.ProseMirror .suggestion-wave-badge-reconciliation_conflict {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+/* ═══ Anchored Suggestion Card (positioned via ProseMirror coords) ═══ */
+.editor-suggestion-card.anchored {
+  position: absolute;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px -6px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  animation: suggestion-card-in 0.14s ease-out;
+}
+
+@keyframes suggestion-card-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Suggestion count pill (corner, floating mode) */
+.editor-suggestion-count-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #dc2626;
+  cursor: default;
+  white-space: nowrap;
+}
+
+/* Apply Fix button — accent green */
+.editor-suggestion-btn-accept {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #059669;
+}
+.editor-suggestion-btn-accept:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+/* Dark mode badge + wave */
+[data-theme="dark"] .ProseMirror .suggestion-wave-badge,
+.dark-theme .ProseMirror .suggestion-wave-badge {
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
+}
+
+[data-theme="dark"] .ProseMirror .suggestion-wave:hover,
+.dark-theme .ProseMirror .suggestion-wave:hover {
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+[data-theme="dark"] .editor-suggestion-card.anchored,
+.dark-theme .editor-suggestion-card.anchored {
+  box-shadow: 0 4px 24px -6px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .editor-suggestion-count-pill,
+.dark-theme .editor-suggestion-count-pill {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgba(248, 113, 113, 0.9);
+}
+
+[data-theme="dark"] .editor-suggestion-btn-accept,
+.dark-theme .editor-suggestion-btn-accept {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: rgba(52, 211, 153, 0.9);
+}

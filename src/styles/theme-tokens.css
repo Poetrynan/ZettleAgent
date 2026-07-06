@@ -1,0 +1,272 @@
+/**
+ * Theme tokens — single source of truth for colors & surface tints.
+ * JS (theme.ts) only sets data-theme on <html>.
+ *
+ * Cascade: use :root[data-theme="dark"] (higher specificity than bare :root)
+ * so late :root rules in index.css cannot clobber dark mode.
+ */
+
+/* ── Light palette (default) ─────────────────────────────────────── */
+:root,
+:root[data-theme="light"] {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F8FAFC;
+  --bg-tertiary: #F1F5F9;
+  --bg-elevated: #FFFFFF;
+  --bg-glass: rgba(255, 255, 255, 0.85);
+  --bg-hover: #E2E8F0;
+  --bg-active: #CBD5E1;
+
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --text-inverse: #F8FAFC;
+
+  --accent-primary: #16A34A;
+  --accent-secondary: #2563EB;
+  --accent-gradient: linear-gradient(135deg, #16A34A, #2563EB);
+  --accent-glow: 0 0 20px rgba(22, 163, 74, 0.2);
+
+  --success: #16A34A;
+  --success-bg: rgba(22, 163, 74, 0.1);
+  --success-border: rgba(22, 163, 74, 0.25);
+  --warning: #D97706;
+  --warning-bg: rgba(217, 119, 6, 0.1);
+  --warning-border: rgba(217, 119, 6, 0.25);
+  --danger: #DC2626;
+  --danger-bg: rgba(220, 38, 38, 0.1);
+  --danger-border: rgba(220, 38, 38, 0.3);
+  --info: #2563EB;
+  --info-bg: rgba(37, 99, 235, 0.1);
+  --info-border: rgba(37, 99, 235, 0.25);
+
+  --canvas-accent: #A855F7;
+  --canvas-accent-bg: rgba(168, 85, 247, 0.12);
+  --canvas-accent-border: rgba(168, 85, 247, 0.25);
+  --canvas-accent-subtle: rgba(168, 85, 247, 0.08);
+  --canvas-accent-muted: rgba(168, 85, 247, 0.15);
+
+  --accent-secondary-bg: rgba(59, 130, 246, 0.12);
+  --accent-secondary-border: rgba(59, 130, 246, 0.25);
+
+  --overlay-bg: rgba(15, 23, 42, 0.45);
+
+  --border: #E2E8F0;
+  --border-subtle: #F1F5F9;
+  --border-focus: #16A34A;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 20px rgba(22, 163, 74, 0.1);
+
+  --slider-thumb-bg: #FFFFFF;
+  --slider-thumb-border: rgba(203, 213, 225, 0.7);
+  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.8);
+
+  --dash-welcome-tint-start: rgba(16, 185, 129, 0.08);
+  --dash-welcome-tint-end: rgba(59, 130, 246, 0.04);
+  --dash-welcome-glow: rgba(16, 185, 129, 0.08);
+  --dash-welcome-border: rgba(16, 185, 129, 0.15);
+
+  --dash-glass-tint-start: rgba(255, 255, 255, 0.06);
+  --dash-glass-tint-end: rgba(255, 255, 255, 0.02);
+  --dash-glass-border: rgba(255, 255, 255, 0.08);
+  --dash-glass-border-hover: rgba(255, 255, 255, 0.14);
+  --dash-glass-surface: color-mix(in srgb, var(--bg-secondary) 92%, var(--text-primary) 8%);
+  --dash-glass-surface-hover: color-mix(in srgb, var(--bg-secondary) 85%, var(--text-primary) 15%);
+  --dash-glass-surface-border: var(--border-subtle);
+  --dash-glass-surface-border-hover: var(--border);
+  --dash-glass-tag-bg: var(--bg-tertiary);
+  --dash-glass-tag-border: var(--border);
+
+  --dash-btn-bg: color-mix(in srgb, var(--bg-elevated) 75%, transparent);
+  --dash-btn-border: var(--border);
+  --dash-btn-inset: inset 0 1px 0 color-mix(in srgb, var(--bg-elevated) 60%, transparent);
+  --dash-btn-hover: color-mix(in srgb, var(--bg-hover) 80%, transparent);
+  --dash-btn-active: var(--bg-tertiary);
+
+  --dash-progress-track: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  --dash-progress-inset: inset 0 1px 3px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  --dash-scheduler-tint-a: rgba(16, 185, 129, 0.06);
+  --dash-scheduler-tint-b: rgba(59, 130, 246, 0.04);
+  --dash-icon-well: color-mix(in srgb, var(--text-primary) 3%, transparent);
+
+  --step-sync-tint: rgba(6, 182, 212, 0.12);
+  --step-sync-border: rgba(6, 182, 212, 0.22);
+  --step-sync-accent: #06B6D4;
+  --step-sync-btn: #0891B2;
+
+  --step-index-tint: rgba(59, 130, 246, 0.12);
+  --step-index-border: rgba(59, 130, 246, 0.22);
+  --step-index-accent: #3B82F6;
+  --step-index-btn: var(--accent-secondary);
+
+  --step-organize-tint-a: rgba(16, 185, 129, 0.14);
+  --step-organize-tint-b: rgba(245, 158, 11, 0.06);
+  --step-organize-border: rgba(16, 185, 129, 0.24);
+  --step-organize-accent: #10B981;
+  --step-organize-btn: var(--accent-primary);
+
+  --step-export-tint: rgba(139, 92, 246, 0.12);
+  --step-export-border: rgba(139, 92, 246, 0.22);
+  --step-export-accent: #8B5CF6;
+  --step-export-btn: #7c3aed;
+
+  --step-health-tint: rgba(245, 158, 11, 0.12);
+  --step-health-border: rgba(245, 158, 11, 0.22);
+  --step-health-accent: #F59E0B;
+  --step-health-btn: var(--warning);
+
+  --gap-tint-a: rgba(59, 130, 246, 0.06);
+  --gap-tint-b: rgba(139, 92, 246, 0.04);
+
+  /* Vault insight severity (AgentPanel) */
+  --severity-critical: #DC2626;
+  --severity-critical-bg: rgba(220, 38, 38, 0.1);
+  --severity-critical-border: rgba(220, 38, 38, 0.24);
+  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 10%, var(--bg-elevated));
+
+  --severity-warning: #D97706;
+  --severity-warning-bg: rgba(217, 119, 6, 0.1);
+  --severity-warning-border: rgba(217, 119, 6, 0.24);
+  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 11%, var(--bg-elevated));
+
+  --severity-info: #2563EB;
+  --severity-info-bg: rgba(37, 99, 235, 0.08);
+  --severity-info-border: rgba(37, 99, 235, 0.22);
+  --severity-info-surface: color-mix(in srgb, var(--severity-info) 10%, var(--bg-elevated));
+
+  --insight-chip-bg: var(--bg-tertiary);
+  --insight-chip-border: var(--border);
+}
+
+/* ── Dark: Zettel Midnight ─────────────────────────────────────── */
+:root[data-theme="dark"],
+:root.dark-theme {
+  --bg-primary: #0F172A;
+  --bg-secondary: #1E293B;
+  --bg-tertiary: #273449;
+  --bg-elevated: #1E293B;
+  --bg-glass: rgba(15, 23, 42, 0.92);
+  --bg-hover: #334155;
+  --bg-active: #475569;
+
+  --text-primary: #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --text-tertiary: #94A3B8;
+  --text-inverse: #0F172A;
+
+  --accent-primary: #22C55E;
+  --accent-secondary: #60A5FA;
+  --accent-gradient: linear-gradient(135deg, #22C55E, #60A5FA);
+  --accent-glow: 0 0 24px rgba(34, 197, 94, 0.25);
+
+  --success: #4ADE80;
+  --success-bg: rgba(74, 222, 128, 0.12);
+  --success-border: rgba(74, 222, 128, 0.35);
+  --warning: #FBBF24;
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --warning-border: rgba(251, 191, 36, 0.35);
+  --danger: #F87171;
+  --danger-bg: rgba(248, 113, 113, 0.12);
+  --danger-border: rgba(248, 113, 113, 0.38);
+  --info: #60A5FA;
+  --info-bg: rgba(96, 165, 250, 0.12);
+  --info-border: rgba(96, 165, 250, 0.35);
+
+  --canvas-accent: #C084FC;
+  --canvas-accent-bg: rgba(192, 132, 252, 0.16);
+  --canvas-accent-border: rgba(192, 132, 252, 0.38);
+  --canvas-accent-subtle: rgba(192, 132, 252, 0.1);
+  --canvas-accent-muted: rgba(192, 132, 252, 0.2);
+
+  --accent-secondary-bg: rgba(96, 165, 250, 0.16);
+  --accent-secondary-border: rgba(96, 165, 250, 0.35);
+
+  --overlay-bg: rgba(0, 0, 0, 0.65);
+
+  --border: #334155;
+  --border-subtle: #1E293B;
+  --border-focus: #22C55E;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 0 24px rgba(34, 197, 94, 0.15);
+
+  --slider-thumb-bg: #F1F5F9;
+  --slider-thumb-border: #475569;
+  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(51, 65, 85, 0.8);
+
+  --dash-welcome-tint-start: rgba(34, 197, 94, 0.16);
+  --dash-welcome-tint-end: rgba(96, 165, 250, 0.12);
+  --dash-welcome-glow: rgba(34, 197, 94, 0.12);
+  --dash-welcome-border: rgba(34, 197, 94, 0.28);
+
+  --dash-glass-tint-start: rgba(30, 41, 59, 0.85);
+  --dash-glass-tint-end: rgba(15, 23, 42, 0.55);
+  --dash-glass-border: rgba(51, 65, 85, 0.85);
+  --dash-glass-border-hover: rgba(71, 85, 105, 0.95);
+  --dash-glass-surface: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+  --dash-glass-surface-hover: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  --dash-glass-surface-border: rgba(51, 65, 85, 0.65);
+  --dash-glass-surface-border-hover: rgba(71, 85, 105, 0.85);
+  --dash-glass-tag-bg: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  --dash-glass-tag-border: rgba(51, 65, 85, 0.75);
+
+  --dash-btn-bg: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  --dash-btn-border: rgba(51, 65, 85, 0.9);
+  --dash-btn-inset: inset 0 1px 0 rgba(71, 85, 105, 0.45);
+  --dash-btn-hover: color-mix(in srgb, var(--bg-hover) 85%, transparent);
+  --dash-btn-active: color-mix(in srgb, var(--bg-primary) 65%, transparent);
+
+  --dash-progress-track: color-mix(in srgb, var(--text-primary) 35%, transparent);
+  --dash-progress-inset: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  --dash-scheduler-tint-a: rgba(16, 185, 129, 0.14);
+  --dash-scheduler-tint-b: rgba(59, 130, 246, 0.1);
+  --dash-icon-well: color-mix(in srgb, var(--text-primary) 25%, transparent);
+
+  --step-sync-tint: rgba(6, 182, 212, 0.22);
+  --step-sync-border: rgba(6, 182, 212, 0.38);
+  --step-sync-btn: #22D3EE;
+
+  --step-index-tint: rgba(59, 130, 246, 0.22);
+  --step-index-border: rgba(59, 130, 246, 0.38);
+  --step-index-btn: var(--accent-secondary);
+
+  --step-organize-tint-a: rgba(16, 185, 129, 0.24);
+  --step-organize-tint-b: rgba(139, 92, 246, 0.12);
+  --step-organize-border: rgba(16, 185, 129, 0.38);
+  --step-organize-btn: var(--accent-primary);
+
+  --step-export-tint: rgba(139, 92, 246, 0.22);
+  --step-export-border: rgba(139, 92, 246, 0.38);
+  --step-export-btn: #A78BFA;
+
+  --step-health-tint: rgba(245, 158, 11, 0.22);
+  --step-health-border: rgba(245, 158, 11, 0.38);
+  --step-health-btn: var(--warning);
+
+  --gap-tint-a: rgba(59, 130, 246, 0.12);
+  --gap-tint-b: rgba(139, 92, 246, 0.08);
+
+  /* Vault insight severity — higher contrast on dark surfaces */
+  --severity-critical: #F87171;
+  --severity-critical-bg: rgba(248, 113, 113, 0.18);
+  --severity-critical-border: rgba(248, 113, 113, 0.42);
+  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 14%, var(--bg-secondary));
+
+  --severity-warning: #FBBF24;
+  --severity-warning-bg: rgba(251, 191, 36, 0.16);
+  --severity-warning-border: rgba(251, 191, 36, 0.38);
+  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 14%, var(--bg-secondary));
+
+  --severity-info: #60A5FA;
+  --severity-info-bg: rgba(96, 165, 250, 0.16);
+  --severity-info-border: rgba(96, 165, 250, 0.36);
+  --severity-info-surface: color-mix(in srgb, var(--severity-info) 14%, var(--bg-secondary));
+
+  --insight-chip-bg: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-primary) 4%);
+  --insight-chip-border: var(--border);
+}

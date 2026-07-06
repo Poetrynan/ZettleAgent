@@ -1,0 +1,398 @@
+/* ── Diff Approval Card ───────────────────────────────────────── */
+
+.diff-approval-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
+  animation: fadeIn 0.2s ease;
+}
+
+.diff-approval-card.diff-approval-processing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.diff-approval-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.diff-approval-icon {
+  font-size: 16px;
+}
+
+.diff-approval-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.diff-approval-content {
+  margin-bottom: var(--space-3);
+}
+
+.diff-approval-preview {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.diff-approval-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.diff-approval-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  min-height: 36px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.diff-approval-btn:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 2px;
+}
+
+.diff-approval-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.diff-approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diff-approval-btn-approve {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.diff-approval-btn-approve:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 20%, var(--bg-elevated));
+}
+
+.diff-approval-btn-reject {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.diff-approval-btn-reject:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 20%, var(--bg-elevated));
+}
+
+
+/* ── Structured Diff View (new DiffApprovalCard) ──────────────── */
+
+.diff-approval-icon-warn {
+  font-size: 16px;
+}
+
+.diff-approval-title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diff-approval-subtitle {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.diff-approval-body {
+  margin-bottom: var(--space-3);
+}
+
+
+/* ── Diff view container (shared by all diff types) ───────────── */
+
+.diff-view-container {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.diff-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-xs);
+  flex-wrap: wrap;
+}
+
+.diff-summary-filename {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-summary-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.diff-summary-warning {
+  color: var(--warning);
+  font-weight: 600;
+  font-size: var(--text-2xs);
+}
+
+.diff-summary-danger {
+  color: var(--danger);
+  font-weight: 600;
+  font-size: var(--text-2xs);
+}
+
+.diff-summary-lines {
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.diff-expand-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  min-height: 24px;
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.diff-expand-toggle:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.diff-expand-toggle:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 2px;
+}
+
+
+/* ── Diff hunk list ─────────────────────────────────────────────── */
+
+.diff-hunks {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.diff-hunks-expanded {
+  max-height: 600px;
+}
+
+
+/* ── Single diff hunk ──────────────────────────────────────────── */
+
+.diff-hunk {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.diff-hunk:last-child {
+  border-bottom: none;
+}
+
+.diff-hunk-header {
+  padding: var(--space-1) var(--space-3);
+  background: rgba(59, 130, 246, 0.06);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.diff-hunk-body {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+
+/* ── Diff lines ────────────────────────────────────────────────── */
+
+.diff-line {
+  padding: 1px var(--space-3);
+  min-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-prefix {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  margin-right: 4px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-line-removed {
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger);
+}
+
+.diff-line-removed .diff-prefix {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.diff-line-added {
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--success);
+}
+
+.diff-line-added .diff-prefix {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.diff-line-unchanged {
+  color: var(--text-tertiary);
+}
+
+.diff-line-unchanged .diff-prefix {
+  color: var(--text-quaternary);
+}
+
+.diff-line-more {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-quaternary);
+  font-style: italic;
+  font-size: var(--text-2xs);
+}
+
+
+/* ── Diff insertion block (create / edit / append) ─────────────── */
+
+.diff-insertion-block {
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.diff-insertion-block.expanded {
+  max-height: 600px;
+}
+
+
+/* ── Delete warning ────────────────────────────────────────────── */
+
+.diff-delete-warning {
+  padding: var(--space-4);
+  color: var(--danger);
+  font-size: var(--text-sm);
+  text-align: center;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+
+/* ── Rename / Move path display ────────────────────────────────── */
+
+.diff-rename-path {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.diff-rename-old {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-rename-arrow {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.diff-rename-new {
+  color: var(--success);
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* ── Fallback JSON display ─────────────────────────────────────── */
+
+.diff-approval-fallback {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+
+/* ── Reduced motion ────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .diff-approval-card {
+    animation: none;
+  }
+  .diff-approval-btn,
+  .diff-expand-toggle {
+    transition: none;
+  }
+}

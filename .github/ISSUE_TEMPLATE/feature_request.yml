@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please describe the use case so we can find the best solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this feature solve? What's the use case?
+      placeholder: "I often need to ... but currently ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How do you envision this working?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches you've thought of?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      options:
+        - AI Agent / Multi-Agent
+        - Knowledge Graph
+        - Intelligent Canvas
+        - Editor / Markdown
+        - Search (FTS / Vector)
+        - Chat / RAG
+        - Temporal Knowledge
+        - MCP / Skills
+        - Import / Export
+        - UI / UX
+        - Settings / Configuration
+        - Performance
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Screenshots, mockups, links to similar features in other tools, etc.

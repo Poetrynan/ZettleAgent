@@ -1,0 +1,150 @@
+/* ── Button ──────────────────────────────────────────────────────── */
+/* Only two states: hover = gray, active/selected = frosted glass blue */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+  user-select: none;
+  background: transparent;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.btn-icon:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+/* Hover: subtle surface lift */
+.btn:hover:not(:disabled):not(.active):not(.btn-primary) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Active / Selected: subtle neutral effect (no blue) */
+.btn.active,
+.btn.btn-primary {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.btn.active:hover,
+.btn.btn-primary:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: hsl(0, 75%, 50%);
+}
+
+.btn-sm {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.btn-lg {
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-base);
+}
+
+.btn-icon {
+  padding: var(--space-2);
+  width: 32px;
+  height: 32px;
+}
+
+.btn-icon-sm {
+  padding: var(--space-1);
+  width: 24px;
+  height: 24px;
+}
+
+.chat-toggle-btn {
+  transition: all var(--duration-fast) var(--ease-out) !important;
+  position: relative;
+}
+
+.chat-toggle-btn:hover {
+  transform: scale(1.08);
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.chat-toggle-btn.active {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+  transform: scale(1.04);
+}
+
+
+/* ── Button Variants ─────────────────────────────────────────────── */
+
+.btn-success {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: hsl(142, 71%, 50%);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

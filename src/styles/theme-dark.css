@@ -1,0 +1,434 @@
+/**
+ * Zettel Midnight — component overrides for hardcoded light values.
+ * Layout & dashboard surfaces use theme-tokens.css; only legacy patches here.
+ */
+
+/* ── Range / slider thumbs ─────────────────────────────────────────── */
+[data-theme="dark"] input[type="range"]::-webkit-slider-thumb,
+.dark-theme input[type="range"]::-webkit-slider-thumb,
+[data-theme="dark"] .kg-slider::-webkit-slider-thumb,
+[data-theme="dark"] .kg-time-input::-webkit-slider-thumb {
+  background: var(--slider-thumb-bg);
+  border-color: var(--slider-thumb-border);
+  box-shadow: var(--slider-thumb-shadow);
+}
+
+[data-theme="dark"] input[type="range"]::-moz-range-thumb,
+.dark-theme input[type="range"]::-moz-range-thumb,
+[data-theme="dark"] .kg-slider::-moz-range-thumb,
+[data-theme="dark"] .kg-time-input::-moz-range-thumb {
+  background: var(--slider-thumb-bg);
+  border-color: var(--slider-thumb-border);
+  box-shadow: var(--slider-thumb-shadow);
+}
+
+/* ── Knowledge Graph ─────────────────────────────────────────────── */
+[data-theme="dark"] .kg-context-menu {
+  background: var(--bg-glass);
+  border-color: var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+[data-theme="dark"] .kg-context-menu-item {
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .kg-context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+[data-theme="dark"] .kg-time-slider {
+  background: var(--bg-glass);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .kg-hud-panel,
+[data-theme="dark"] .kg-filter-panel,
+[data-theme="dark"] .kg-hover-card {
+  background: var(--bg-glass);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .kg-time-badge {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+/* ── Agent panel — opaque shell so insight cards read clearly ──── */
+[data-theme="dark"] .agent-sidebar-panel {
+  background: var(--bg-secondary);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+[data-theme="dark"] .agent-floating-toggle {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+
+/* ── Settings toggles ────────────────────────────────────────────── */
+[data-theme="dark"] .settings-toggle-thumb {
+  background: var(--slider-thumb-bg);
+}
+
+/* ── Dashboard cards with hardcoded white ────────────────────────── */
+[data-theme="dark"] .stat-card-white,
+[data-theme="dark"] .dashboard-card-light {
+  background: var(--bg-elevated);
+}
+
+[data-theme="dark"] .dashboard-white-panel {
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .stat-card:hover {
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent-primary) 12%, transparent),
+              var(--shadow-sm);
+  border-color: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+}
+
+[data-theme="dark"] .step-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+[data-theme="dark"] .agent-status-card.running .agent-mini-stat-value {
+  color: var(--accent-primary);
+}
+
+[data-theme="dark"] .timeline-event-card {
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .timeline-event-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+[data-theme="dark"] .timeline-stat-card {
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── React Flow canvas chrome ──────────────────────────────────────── */
+[data-theme="dark"] .react-flow {
+  background: var(--bg-primary);
+}
+
+[data-theme="dark"] .react-flow__background pattern circle {
+  fill: var(--border-subtle);
+}
+
+/* ── Milkdown / Crepe editor chrome ──────────────────────────────── */
+[data-theme="dark"] .milkdown-editor-container .crepe-block-handle,
+[data-theme="dark"] .milkdown-editor-container .crepe-toolbar,
+[data-theme="dark"] .milkdown .milkdown-toolbar {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+/* ── Milkdown/Crepe CSS Custom Properties (overrides all library UI) ── */
+[data-theme="dark"] {
+  --crepe-color-background: var(--bg-primary) !important;
+  --crepe-color-on-background: var(--text-primary) !important;
+  --crepe-color-surface: var(--bg-secondary) !important;
+  --crepe-color-surface-low: var(--bg-elevated) !important;
+  --crepe-color-on-surface: var(--text-primary) !important;
+  --crepe-color-on-surface-variant: var(--text-secondary) !important;
+  --crepe-color-outline: var(--border) !important;
+  --crepe-color-primary: var(--accent-primary) !important;
+  --crepe-color-on-primary: #ffffff !important;
+  --crepe-color-secondary: var(--bg-tertiary) !important;
+  --crepe-color-on-secondary: var(--text-primary) !important;
+  --crepe-color-hover: var(--bg-hover) !important;
+  --crepe-color-selected: var(--bg-active) !important;
+  --crepe-color-error: #ef4444 !important;
+  --crepe-color-shadow: rgba(0, 0, 0, 0.4) !important;
+  --crepe-shadow-1:
+    0px 1px 2px 0px rgba(0, 0, 0, 0.3),
+    0px 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --crepe-shadow-2:
+    0px 1px 2px 0px rgba(0, 0, 0, 0.3),
+    0px 2px 6px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Force dark bg on all Crepe/Milkdown popups & menus ──────────────── */
+[data-theme="dark"] [class*="milkdown"] div,
+[data-theme="dark"] [class*="crepe"] div,
+[data-theme="dark"] [class*="editor"] div {
+  --crepe-color-background: #1e293b;
+  --crepe-color-surface: #334155;
+}
+
+/* Nuclear option: override ANY div with light inline bg in dark mode */
+[data-theme="dark"] div[style*="background"]:not([style*="background: transparent"]):not([style*="background: inherit"]) {
+  background: var(--bg-elevated) !important;
+}
+
+/* Force dark bg on any child of Milkdown with inline background */
+[data-theme="dark"] .milkdown-editor-container div[style*="background"],
+[data-theme="dark"] .crepe div[style*="background"],
+[data-theme="dark"] .milkdown div[style*="background"] {
+  background: var(--bg-elevated) !important;
+}
+
+/* ── Crepe editor frame/container background */
+[data-theme="dark"] .crepe > div,
+[data-theme="dark"] .milkdown > div,
+[data-theme="dark"] .milkdown-editor-container > div {
+  background: var(--bg-primary) !important;
+}
+
+/* ── Crepe block handle (+ / :: hover background clipped fix) ──────── */
+[data-theme="dark"] .milkdown-block-handle .operation-item:hover {
+  background: var(--crepe-color-hover) !important;
+}
+[data-theme="dark"] .milkdown-block-handle .operation-item svg {
+  fill: var(--text-secondary) !important;
+}
+
+/* ── Crepe code block Copy button background fix ───────────────────── */
+[data-theme="dark"] .milkdown-code-block .tools-button-group button,
+[data-theme="dark"] .milkdown-code-block .tools-button-group button svg {
+  background: var(--crepe-color-surface-low) !important;
+  color: var(--crepe-color-on-surface) !important;
+  fill: var(--crepe-color-on-surface) !important;
+}
+[data-theme="dark"] .milkdown-code-block .tools-button-group button:hover {
+  background: var(--crepe-color-hover) !important;
+}
+[data-theme="dark"] .milkdown-code-block .language-button {
+  background: var(--crepe-color-surface-low) !important;
+  color: var(--crepe-color-on-surface) !important;
+}
+
+/* Toolbar & menu items in Crepe */
+[data-theme="dark"] [class*="toolbar"],
+[data-theme="dark"] [class*="Toolbar"],
+[data-theme="dark"] [class*="menu"],
+[data-theme="dark"] [class*="Menu"],
+[data-theme="dark"] [class*="bubble"],
+[data-theme="dark"] [class*="Bubble"] {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Block type selector popup specifically */
+[data-theme="dark"] div[class*="block"],
+[data-theme="dark"] div[class*="Block"] {
+  background: var(--bg-elevated) !important;
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror code {
+  background: var(--bg-tertiary);
+  color: var(--accent-secondary);
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror pre {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror blockquote {
+  border-left-color: var(--accent-primary);
+  color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror hr {
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror a {
+  color: var(--accent-secondary);
+}
+
+[data-theme="dark"] .milkdown-editor-container .ProseMirror ::selection {
+  background: rgba(34, 197, 94, 0.25);
+}
+
+[data-theme="dark"] .milkdown-editor-container,
+[data-theme="dark"] .milkdown-editor-container .ProseMirror {
+  background: var(--bg-primary) !important;
+}
+
+/* ── KaTeX Math (light text on dark background) ───────────────────── */
+[data-theme="dark"] .katex,
+[data-theme="dark"] .katex-display,
+[data-theme="dark"] .katex .katex-html,
+[data-theme="dark"] .katex .katex-html * {
+  color: #e2e8f0 !important;
+}
+[data-theme="dark"] .katex .mord,
+[data-theme="dark"] .katex .mbin,
+[data-theme="dark"] .katex .mrel,
+[data-theme="dark"] .katex .mop,
+[data-theme="dark"] .katex .mpunct,
+[data-theme="dark"] .katex .mopen,
+[data-theme="dark"] .katex .mclose {
+  color: #e2e8f0 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* ── Mermaid diagrams (dark mode) ─────────────────────────────────── */
+[data-theme="dark"] .mermaid-render-container,
+[data-theme="dark"] .mermaid-preview-container {
+  background: var(--bg-secondary) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .mermaid-render-container svg,
+[data-theme="dark"] .mermaid-preview-container svg {
+  background: transparent !important;
+}
+
+/* ── Code blocks (dark mode) ──────────────────────────────────────── */
+[data-theme="dark"] .md-code-block {
+  background: var(--bg-secondary) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .hljs {
+  background: var(--bg-secondary) !important;
+  color: #e2e8f0 !important;
+}
+[data-theme="dark"] .hljs-keyword,
+[data-theme="dark"] .hljs-selector-tag {
+  color: #c678dd !important;
+}
+[data-theme="dark"] .hljs-string,
+[data-theme="dark"] .hljs-attr {
+  color: #98c379 !important;
+}
+[data-theme="dark"] .hljs-number,
+[data-theme="dark"] .hljs-literal {
+  color: #d19a66 !important;
+}
+[data-theme="dark"] .hljs-comment {
+  color: #5c6370 !important;
+  font-style: italic;
+}
+[data-theme="dark"] .hljs-function,
+[data-theme="dark"] .hljs-title {
+  color: #61afef !important;
+}
+[data-theme="dark"] .hljs-built_in,
+[data-theme="dark"] .hljs-type {
+  color: #e5c07b !important;
+}
+[data-theme="dark"] .md-inline-code {
+  background: var(--bg-secondary) !important;
+  border-color: var(--border) !important;
+  color: #e2e8f0 !important;
+}
+
+/* ── Table (rows invisible if bg = editor bg) ─────────────────────── */
+[data-theme="dark"] .md-table th {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .md-table td {
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .md-table tr:nth-child(even) {
+  background: var(--bg-secondary) !important;
+}
+
+/* ── Blockquote (needs contrast against editor bg) ─────────────────── */
+[data-theme="dark"] .md-blockquote {
+  background: var(--bg-secondary) !important;
+  border-left-color: var(--accent-primary) !important;
+}
+[data-theme="dark"] .markdown-content blockquote {
+  background: var(--bg-secondary) !important;
+  border-left-color: var(--accent-primary) !important;
+}
+
+/* ── Tag chips (bg-primary = invisible on dark editor) ──────────────── */
+[data-theme="dark"] .tag {
+  background: var(--bg-tertiary) !important;
+  color: var(--accent-primary) !important;
+}
+[data-theme="dark"] .markdown-content a.tag {
+  background: rgba(34, 197, 94, 0.12) !important;
+  color: var(--accent-primary) !important;
+}
+
+/* ── Callouts / Admonitions (Obsidian-style) ───────────────────────── */
+[data-theme="dark"] .callout {
+  background: var(--bg-secondary) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .callout-title {
+  color: var(--text-primary) !important;
+}
+
+/* ── Wikilink embeds (embed-link styled spans) ─────────────────────── */
+[data-theme="dark"] .embed-link {
+  color: var(--accent-primary) !important;
+  background: rgba(34, 197, 94, 0.08) !important;
+}
+[data-theme="dark"] .embed-link:hover {
+  background: rgba(34, 197, 94, 0.15) !important;
+}
+
+/* ── Task checkboxes ────────────────────────────────────────────────── */
+[data-theme="dark"] .markdown-content input[type="checkbox"],
+[data-theme="dark"] .chat-markdown input[type="checkbox"] {
+  accent-color: var(--accent-primary) !important;
+}
+
+/* ── Horizontal rule ────────────────────────────────────────────────── */
+[data-theme="dark"] .md-hr,
+[data-theme="dark"] .markdown-content hr {
+  border-top-color: var(--border) !important;
+}
+
+/* ── Selection AI Toolbar ──────────────────────────────────────────── */
+[data-theme="dark"] .selection-ai-toolbar {
+  background: var(--bg-elevated) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ── Highlight / mark ────────────────────────────────────────────────── */
+[data-theme="dark"] .markdown-content mark,
+[data-theme="dark"] mark {
+  background: rgba(255, 214, 10, 0.25) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── Footnotes ───────────────────────────────────────────────────────── */
+[data-theme="dark"] .footnotes,
+[data-theme="dark"] .footnotes li,
+[data-theme="dark"] .footnotes p {
+  color: var(--text-tertiary) !important;
+}
+[data-theme="dark"] .footnotes a {
+  color: var(--accent-primary) !important;
+}
+
+/* ── Markdown preview (read-only renderer) ───────────────────────── */
+[data-theme="dark"] .markdown-body {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .markdown-body pre,
+[data-theme="dark"] .markdown-body code {
+  background: var(--bg-tertiary);
+}
+
+/* ── Onboarding / splash (keep readable if shown in dark mode) ─────── */
+[data-theme="dark"] .onboarding-root,
+[data-theme="dark"] .splash-screen {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ── Scrollbar (slightly brighter thumb on dark) ───────────────────── */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+}
+
+[data-theme="dark"] .props-toggle-slider::before {
+  background: var(--slider-thumb-bg);
+}

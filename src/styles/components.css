@@ -1,0 +1,25 @@
+/* ── ZettelAgent Component Styles ────────────────────────────────────── *
+ * Auto-split from components.css for maintainability.                    *
+ * Each file covers a logical domain — edit the specific file instead.   *
+ * ───────────────────────────────────────────────────────────────────── */
+
+@import './toolbar.css';
+@import './cards.css';
+@import './buttons.css';
+@import './inputs.css';
+@import './sidebar.css';
+@import './panel.css';
+@import './chat.css';
+@import './markdown.css';
+@import './dashboard.css';
+@import './settings.css';
+@import './modal.css';
+@import './quick-switcher.css';
+@import './backlinks.css';
+@import './daily-review.css';
+@import './bases.css';
+@import './properties-editor.css';
+@import './viewer.css';
+@import './diff.css';
+@import './knowledge-timeline.css';
+@import './accessibility.css';

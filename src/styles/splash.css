@@ -1,0 +1,391 @@
+/* ── ZettelAgent Splash Screen ────────────────────────────────────── */
+/* Visual: constellation wires → wordmark assembles → tagline light sweep */
+
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  overflow: hidden;
+  transition:
+    opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.06s,
+    transform 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.06s;
+}
+
+.splash-screen.splash-exit {
+  opacity: 0;
+  transform: scale(1.012);
+  pointer-events: none;
+}
+
+.splash-screen.splash-exit .splash-stack {
+  animation: splashBrandOut 0.36s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.splash-screen.splash-exit .splash-nodes-network,
+.splash-screen.splash-exit .splash-grid-mesh {
+  animation: splashAmbientOut 0.42s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes splashBrandOut {
+  to {
+    opacity: 0;
+    transform: translate3d(0, -12px, 0) scale(0.98);
+    filter: blur(2px);
+  }
+}
+
+@keyframes splashAmbientOut {
+  to {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+/* ── Ambient grid (no glow layers) ───────────────────────────────── */
+
+.splash-grid-mesh {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 46%, white 10%, transparent 72%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 46%, white 10%, transparent 72%);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  animation: gridFadeIn 1.6s ease-out 0.05s forwards;
+}
+
+@keyframes gridFadeIn {
+  to { opacity: 0.85; }
+}
+
+/* ── Constellation network ───────────────────────────────────────── */
+
+.splash-stack {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.splash-hero {
+  position: relative;
+  width: min(680px, 94vw);
+  aspect-ratio: 4 / 3;
+  max-height: 540px;
+}
+
+.splash-nodes-network {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+
+.splash-network-svg {
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transform: translate3d(0, 6px, 0) scale(0.97);
+  animation: fadeInNetwork 1.15s cubic-bezier(0.16, 1, 0.3, 1) 0.05s forwards;
+}
+
+@keyframes fadeInNetwork {
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.splash-network-path-track,
+.splash-network-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.splash-network-path-track {
+  opacity: 0.12;
+  animation: splashPathDraw 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.12s forwards;
+}
+
+.splash-network-path {
+  opacity: 0.62;
+  animation: splashPathDraw 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.12s forwards,
+             splashPathPulse 3s ease-in-out 1.65s infinite;
+}
+
+@keyframes splashPathDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes splashPathPulse {
+  0%, 100% { opacity: 0.62; }
+  50% { opacity: 0.5; }
+}
+
+.splash-dot-in {
+  opacity: 0;
+  transform: scale(0);
+  --dot-delay: 0.5s;
+  animation:
+    splashDotPop 0.45s cubic-bezier(0.34, 1.4, 0.64, 1) var(--dot-delay) forwards,
+    floatDot 6s ease-in-out calc(var(--dot-delay) + 0.5s) infinite alternate;
+}
+
+@keyframes splashDotPop {
+  0% { opacity: 0; transform: scale(0); }
+  70% { opacity: 0.62; transform: scale(1.1); }
+  100% { opacity: 0.52; transform: scale(1); }
+}
+
+.splash-pulse-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes floatDot {
+  0% { transform: scale(1) translate3d(0, 0, 0); }
+  50% { opacity: 0.48; }
+  100% { transform: scale(1) translate3d(3px, -7px, 0); }
+}
+
+/* ── Brand wordmark ────────────────────────────────────────────────── */
+
+.splash-hero .splash-title.logo-wordmark {
+  position: absolute;
+  top: 47%;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  font-size: clamp(44px, 8vw, 58px);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: nowrap;
+  letter-spacing: -0.035em;
+  line-height: 1.35;
+  overflow: visible;
+  padding: 0.2em 0.28em 0.15em;
+  background: transparent;
+  margin: 0;
+  isolation: isolate;
+}
+
+/* Opaque plate aligned with SVG wordmark-cut mask — blocks Z from showing through gradient glyphs */
+.splash-hero .splash-title.logo-wordmark::before {
+  content: '';
+  position: absolute;
+  inset: -0.06em -0.12em;
+  z-index: -1;
+  background: var(--bg-primary);
+  border-radius: 0.16em;
+}
+
+.splash-screen .logo-zettel {
+  display: inline-block;
+  opacity: 0;
+  transform: translate3d(-26px, 0, 0);
+  font-family: 'Outfit', var(--font-sans), sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+  line-height: 1.35;
+  padding-block: 0.08em;
+  animation: splashSlideLeft 0.68s cubic-bezier(0.16, 1, 0.3, 1) 0.18s forwards;
+}
+
+.splash-screen .logo-agent-lambda {
+  opacity: 0;
+  transform: scale(0.15) translate3d(0, 14px, 0);
+  z-index: 2;
+  animation: splashLambdaPop 0.58s cubic-bezier(0.34, 1.35, 0.64, 1) 0.72s forwards;
+}
+
+.splash-screen .logo-agent-rest {
+  opacity: 0;
+  transform: translate3d(18px, 0, 0);
+  animation: splashSlideRight 0.68s cubic-bezier(0.16, 1, 0.3, 1) 0.42s forwards;
+}
+
+@keyframes splashSlideLeft {
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes splashSlideRight {
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes splashLambdaPop {
+  to { opacity: 1; transform: scale(1) translate3d(0, 0, 0); }
+}
+
+/* ── Tagline ─────────────────────────────────────────────────────── */
+
+.splash-tagline-row {
+  position: absolute;
+  left: 50%;
+  top: 75.5%;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: max-content;
+  max-width: 96%;
+}
+
+.splash-tagline-rule {
+  display: block;
+  width: 0;
+  height: 1px;
+  opacity: 0;
+  animation: splashRuleGrow 0.65s cubic-bezier(0.16, 1, 0.3, 1) 1.35s forwards;
+}
+
+.splash-tagline-rule--left {
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.18), rgba(255, 255, 255, 0.42));
+}
+
+.splash-tagline-rule--right {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.42), rgba(148, 163, 184, 0.18), transparent);
+}
+
+@keyframes splashRuleGrow {
+  to { width: 48px; opacity: 1; }
+}
+
+.splash-tagline {
+  position: relative;
+  margin: 0;
+  padding: 0.12em 0;
+  font-family: 'Outfit', var(--font-sans), sans-serif;
+  font-size: clamp(13px, 2.1vw, 16px);
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  line-height: 1.4;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.splash-tagline-char {
+  display: inline-block;
+  color: var(--text-secondary);
+  opacity: 0;
+  transform: translate3d(0, 7px, 0);
+  animation: splashCharIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) calc(1.08s + var(--char-i, 0) * 0.05s) forwards;
+}
+
+@keyframes splashCharIn {
+  to {
+    opacity: 0.78;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────── */
+
+[data-theme="dark"] .splash-grid-mesh {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+}
+
+[data-theme="dark"] .splash-network-path-track {
+  opacity: 0.16;
+}
+
+[data-theme="dark"] .splash-network-path {
+  opacity: 0.55;
+}
+
+[data-theme="dark"] .splash-tagline-char {
+  color: var(--text-secondary);
+  animation-name: splashCharInDark;
+}
+
+@keyframes splashCharInDark {
+  to {
+    opacity: 0.82;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+[data-theme="dark"] .splash-tagline-rule--left {
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.14), rgba(255, 255, 255, 0.28));
+}
+
+[data-theme="dark"] .splash-tagline-rule--right {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.28), rgba(148, 163, 184, 0.14), transparent);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-network-path,
+  .splash-network-path-track {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+
+  .splash-network-svg,
+  .splash-grid-mesh {
+    animation: fadeIn 0.3s ease-out forwards;
+    transform: none;
+  }
+
+  .splash-screen .logo-zettel,
+  .splash-screen .logo-agent-rest,
+  .splash-screen .logo-agent-lambda,
+  .splash-dot-in {
+    animation: fadeIn 0.3s ease-out 0.1s forwards;
+    transform: none;
+  }
+
+  .splash-pulse-dot,
+  .splash-hero .splash-title.logo-wordmark {
+    animation: none !important;
+    filter: none;
+  }
+
+  .splash-tagline-char {
+    animation: none;
+    opacity: 0.78;
+    transform: none;
+  }
+
+  .splash-tagline-rule {
+    animation: none;
+    width: 24px;
+    opacity: 0.5;
+  }
+
+  .splash-screen {
+    transition-duration: 0.15s;
+  }
+
+  .splash-screen.splash-exit {
+    transform: none;
+  }
+
+  .splash-screen.splash-exit .splash-stack,
+  .splash-screen.splash-exit .splash-nodes-network,
+  .splash-screen.splash-exit .splash-grid-mesh {
+    animation: none;
+    filter: none;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

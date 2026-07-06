@@ -1,0 +1,16 @@
+# Normalize line endings to LF on commit (cross-platform safe)
+* text=auto eol=lf
+
+# Binary files — no line ending conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.wasm binary
+*.onnx binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

@@ -1,0 +1,763 @@
+/* ── Panel ───────────────────────────────────────────────────────── */
+
+.panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.panel-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  background: var(--bg-primary);
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  min-height: 0;
+  background: var(--bg-primary);
+}
+
+.panel-footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-primary);
+}
+
+
+/* ── Resize Handle ───────────────────────────────────────────────── */
+
+.resize-handle {
+  width: 3px;
+  cursor: col-resize;
+  background: var(--border-subtle);
+  transition: background var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: var(--accent-primary);
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+  cursor: col-resize;
+}
+
+
+/* ── Search Mode Switcher (Sliding Pill) ─────────────────────────── */
+
+.search-mode-group {
+  display: inline-flex;
+  position: relative;
+  background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  gap: 1px;
+  align-items: center;
+  flex-shrink: 0;
+  height: 34px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Sliding pill indicator */
+.search-mode-pill {
+  position: absolute;
+  top: 2px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
+  transition: left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 0;
+  pointer-events: none;
+  animation: searchPillSquish 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes searchPillSquish {
+  0% { transform: scaleX(0.85) scaleY(1.08); }
+  40% { transform: scaleX(1.08) scaleY(0.92); }
+  70% { transform: scaleX(0.97) scaleY(1.02); }
+  100% { transform: scaleX(1) scaleY(1); }
+}
+
+.search-mode-btn {
+  position: relative;
+  z-index: 1;
+  height: 26px;
+  width: 26px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.25s ease;
+}
+
+.search-mode-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: transparent !important;
+}
+
+.search-mode-btn:active {
+  transform: scale(0.95);
+}
+
+.search-mode-btn.active {
+  color: var(--success) !important;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.search-mode-btn:focus,
+.search-mode-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+
+/* ── Context Menu ────────────────────────────────────────────────── */
+
+.ctx-menu {
+  position: fixed;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.96));
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.1));
+  border-radius: 8px;
+  padding: 4px 0;
+  z-index: 1000;
+  min-width: 160px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+  animation: ctxMenuIn 120ms cubic-bezier(0.2, 0, 0.13, 1);
+  transform-origin: top left;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .ctx-menu {
+    backdrop-filter: blur(12px);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.88));
+  }
+}
+
+@keyframes ctxMenuIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.ctx-menu-item {
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-primary, #334155);
+  transition: background 120ms ease;
+  display: flex;
+  align-items: center;
+}
+
+.ctx-menu-item:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+
+.ctx-menu-item:active {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.08));
+}
+
+.ctx-menu-item.ctx-menu-danger {
+  color: var(--danger, #EF4444);
+}
+
+.ctx-menu-item.ctx-menu-danger:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.ctx-menu-separator {
+  height: 1px;
+  background: var(--border-subtle, rgba(0, 0, 0, 0.06));
+  margin: 4px 8px;
+}
+
+
+/* ── Split Editor Layout ──────────────────────────────────────────── */
+
+.split-editor-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.split-editor-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.split-editor-pane-primary {
+  border-right: none;
+}
+
+.split-editor-pane-secondary {
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* Visual distinction for secondary pane */
+.panel-split-secondary .panel-header {
+  background: var(--bg-secondary);
+}
+
+.panel-split-secondary .panel-content {
+  background: var(--bg-primary);
+}
+
+.split-pane-empty-header {
+  justify-content: space-between;
+  min-height: 40px;
+}
+
+.split-pane-empty-label {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.split-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.split-close-btn:hover {
+  color: var(--danger, #ef4444);
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--danger, #ef4444) 8%, transparent);
+}
+
+.split-close-text-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.split-close-text-btn:hover {
+  color: var(--danger, #ef4444);
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--bg-elevated));
+}
+
+.split-close-text-btn--center {
+  margin-top: var(--space-4);
+}
+
+/* Divider between panes */
+.split-editor-divider {
+  width: 4px;
+  flex-shrink: 0;
+  background: var(--border-subtle);
+  cursor: col-resize;
+  position: relative;
+  transition: background 150ms ease;
+  z-index: 5;
+}
+
+.split-editor-divider:hover,
+.split-editor-divider.dragging {
+  background: var(--accent-primary);
+}
+
+.split-editor-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 32px;
+  border-radius: 2px;
+  background: var(--text-quaternary);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.split-editor-divider:hover::after {
+  opacity: 0.5;
+}
+
+/* When split view is active, adjust the tab bar to not take full width */
+.split-editor-pane-primary .tab-bar {
+  border-right: none;
+}
+
+/* Secondary pane empty state — more compact */
+.panel-split-secondary .empty-state {
+  padding: var(--space-6);
+}
+
+/* Responsive: stack vertically on narrow screens */
+@media (max-width: 900px) {
+  .split-editor-container {
+    flex-direction: column;
+  }
+
+  .split-editor-pane-secondary {
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .split-editor-divider {
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
+  }
+
+  .split-editor-divider::after {
+    width: 32px;
+    height: 2px;
+  }
+}
+
+/* ── Timeline Panel (VS Code-style inline timeline) ──────────────── */
+
+.timeline-editor-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.timeline-panel {
+  width: 240px;
+  min-width: 200px;
+  max-width: 300px;
+  border-right: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  background: var(--bg-secondary, #f8f9fa);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.timeline-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary, #666);
+}
+
+.timeline-panel-title {
+  flex: 1;
+}
+
+.timeline-panel-count {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-tertiary, #999);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.timeline-panel-refresh {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  color: var(--text-tertiary, #999);
+  display: flex;
+  align-items: center;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.timeline-panel-refresh:hover {
+  opacity: 1;
+  color: var(--accent-primary, #6366f1);
+}
+
+.timeline-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.timeline-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 12px;
+  color: var(--text-tertiary, #999);
+  font-size: 12px;
+  text-align: center;
+}
+
+.timeline-group {
+  margin-bottom: 4px;
+}
+
+.timeline-group-header {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary, #999);
+}
+
+.timeline-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px 6px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  position: relative;
+}
+
+.timeline-entry:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.04));
+}
+
+.timeline-entry.selected {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.timeline-entry.selected .timeline-entry-dot {
+  background: var(--accent-primary, #6366f1);
+  border-color: var(--accent-primary, #6366f1);
+}
+
+.timeline-entry-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--border-medium, #ccc);
+  background: var(--bg-primary, #fff);
+  margin-top: 4px;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+
+.timeline-entry-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-entry-time {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+}
+
+.timeline-entry-relative {
+  font-size: 10px;
+  color: var(--text-tertiary, #999);
+}
+
+.timeline-entry-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-primary, #6366f1);
+  color: #fff;
+  margin-top: 2px;
+  width: fit-content;
+}
+
+.timeline-editor-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* ── Diff Editor View (VS Code-style inline diff) ────────────────── */
+
+.diff-editor-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary, #fff);
+}
+
+.diff-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+  background: var(--bg-secondary, #f8f9fa);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.diff-editor-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.diff-editor-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.diff-editor-title {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-editor-stats {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.diff-stat {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.diff-stat-additions {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.diff-stat-deletions {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.diff-stat-unchanged {
+  background: rgba(148, 163, 184, 0.12);
+  color: #64748b;
+}
+
+.diff-editor-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.diff-editor-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-editor-pane-old {
+  border-right: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
+}
+
+.diff-editor-divider {
+  width: 1px;
+  background: var(--border-subtle, rgba(0,0,0,0.08));
+  flex-shrink: 0;
+}
+
+.diff-editor-pane-header {
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary, #999);
+  border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.04));
+  background: var(--bg-secondary, #f8f9fa);
+  flex-shrink: 0;
+}
+
+.diff-editor-pane-body {
+  flex: 1;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.diff-editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  color: var(--text-tertiary, #999);
+  font-size: 12px;
+}
+
+.diff-editor-no-changes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px;
+  color: var(--text-tertiary, #999);
+}
+
+/* Diff line styles (shared with modal) */
+.diff-line {
+  display: flex;
+  align-items: flex-start;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 4px;
+}
+
+.diff-line-gutter {
+  display: inline-block;
+  width: 36px;
+  min-width: 36px;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--text-tertiary, #aaa);
+  font-size: 10px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-line-prefix {
+  display: inline-block;
+  width: 16px;
+  min-width: 16px;
+  text-align: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.diff-line-content {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.diff-line-added {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.diff-line-added .diff-line-prefix {
+  color: #16a34a;
+}
+
+.diff-line-removed {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.diff-line-removed .diff-line-prefix {
+  color: #dc2626;
+}
+
+.diff-line-unchanged {
+  background: transparent;
+}
+
+.diff-line-unchanged .diff-line-prefix {
+  color: transparent;
+}
+
+.btn-success {
+  background: #16a34a !important;
+  color: #fff !important;
+  border-color: #16a34a !important;
+}
+
+.btn-success:hover {
+  background: #15803d !important;
+}
+
+/* Dark mode adjustments for diff */
+@media (prefers-color-scheme: dark) {
+  .diff-stat-additions {
+    background: rgba(34, 197, 94, 0.18);
+    color: #4ade80;
+  }
+  
+  .diff-stat-deletions {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+  }
+  
+  .diff-line-added {
+    background: rgba(34, 197, 94, 0.12);
+  }
+  
+  .diff-line-added .diff-line-prefix {
+    color: #4ade80;
+  }
+  
+  .diff-line-removed {
+    background: rgba(239, 68, 68, 0.12);
+  }
+  
+  .diff-line-removed .diff-line-prefix {
+    color: #f87171;
+  }
+}

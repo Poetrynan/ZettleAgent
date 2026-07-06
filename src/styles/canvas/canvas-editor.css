@@ -1,0 +1,1094 @@
+/* ── Dual-Card Layout (editor + preview side by side) ── */
+.text-node-wrapper {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.text-node-dual {
+  gap: 8px;
+}
+
+.text-node-dual .text-node-sticky {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Preview card — slides in from right */
+.text-node-preview-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(226, 232, 240, 0.5);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  animation: previewCardSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.text-node-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.4);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.text-node-preview-card .text-node-markdown {
+  flex: 1;
+  padding: 8px 10px;
+  overflow-y: auto;
+}
+
+@keyframes previewCardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+
+/* ── Markdown Rendered View ── */
+.text-node-markdown {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1e293b;
+  cursor: text;
+  word-wrap: break-word;
+  transition: background 0.15s ease;
+}
+
+.text-node-markdown:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Markdown element styles inside sticky */
+.text-node-markdown h1,
+.text-node-markdown h2,
+.text-node-markdown h3,
+.text-node-markdown h4,
+.text-node-markdown h5,
+.text-node-markdown h6 {
+  margin: 0 0 4px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.text-node-markdown h1 { font-size: 18px; font-weight: 700; }
+.text-node-markdown h2 { font-size: 15px; font-weight: 700; }
+.text-node-markdown h3 { font-size: 14px; font-weight: 600; }
+.text-node-markdown h4,
+.text-node-markdown h5,
+.text-node-markdown h6 { font-size: 13px; font-weight: 600; }
+
+.text-node-markdown p {
+  margin: 0 0 6px;
+}
+
+.text-node-markdown ul,
+.text-node-markdown ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.text-node-markdown li {
+  margin-bottom: 2px;
+}
+
+.text-node-markdown code {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11.5px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.text-node-markdown pre {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.text-node-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.text-node-markdown blockquote {
+  margin: 4px 0 8px;
+  padding: 4px 10px;
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+  color: #475569;
+  font-style: italic;
+}
+
+.text-node-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+
+.text-node-markdown th,
+.text-node-markdown td {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.text-node-markdown th {
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.text-node-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  margin: 8px 0;
+}
+
+.text-node-markdown a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.text-node-markdown a:hover {
+  text-decoration: underline;
+}
+
+.text-node-markdown strong {
+  font-weight: 700;
+}
+
+.text-node-markdown del {
+  opacity: 0.6;
+}
+
+/* Group Node Frame — Clean */
+.group-node-frame {
+  border: 1.5px dashed rgba(148, 163, 184, 0.3);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(241, 245, 249, 0.15) 0%, rgba(226, 232, 240, 0.08) 100%);
+  padding: 12px;
+  box-sizing: border-box;
+  position: relative;
+  transition: border-color 0.2s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.group-node-frame:hover {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: linear-gradient(135deg, rgba(241, 245, 249, 0.25) 0%, rgba(226, 232, 240, 0.12) 100%);
+}
+
+[data-theme="dark"] .group-node-frame,
+.dark-theme .group-node-frame {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.12) 0%, rgba(51, 65, 85, 0.06) 100%);
+  border-color: rgba(100, 116, 139, 0.25);
+}
+
+.group-node-frame.selected {
+  border-style: dashed;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(59, 130, 246, 0.02) 100%);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.06);
+}
+
+.group-node-label-input {
+  position: absolute;
+  top: -11px;
+  left: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  border: 1px solid rgba(226, 232, 240, 0.5);
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  outline: none;
+  max-width: 200px;
+  pointer-events: auto;
+  box-shadow: 0 1px 6px -1px rgba(0, 0, 0, 0.06);
+  letter-spacing: 0.02em;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Milkdown Overrides inside Canvas Note Cards */
+.note-node-body .milkdown-editor-container {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.note-node-body .crepe {
+  padding: 0 !important;
+  max-width: 100% !important;
+}
+
+.note-node-body .crepe .ProseMirror {
+  padding: 0 !important;
+}
+
+/* ===== UI/UX Optimizations (ui-ux-pro-max audit) ===== */
+
+/* 1. Toolbar :active tactile feedback */
+.canvas-toolbar-btn:active {
+  transform: scale(0.93);
+  transition: transform 0.08s ease;
+}
+
+.canvas-toolbar-btn.primary:active {
+  transform: scale(0.93);
+  filter: brightness(0.85);
+}
+
+/* 2. MiniMap & Controls — dark mode adaptation */
+[data-theme="dark"] .react-flow__controls button,
+.dark-theme .react-flow__controls button {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  fill: var(--text-secondary);
+}
+
+[data-theme="dark"] .react-flow__controls button:hover,
+.dark-theme .react-flow__controls button:hover {
+  background: var(--bg-tertiary);
+  fill: var(--text-primary);
+}
+
+.react-flow__minimap {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(0, 0, 0, 0.04) !important;
+  stroke: var(--accent-primary, #16A34A) !important;
+  stroke-width: 1.5 !important;
+}
+
+[data-theme="dark"] .react-flow__minimap,
+.dark-theme .react-flow__minimap {
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
+}
+
+[data-theme="dark"] .react-flow__minimap-mask,
+.dark-theme .react-flow__minimap-mask {
+  fill: rgba(0, 0, 0, 0.35) !important;
+  stroke: var(--accent-primary, #22C55E) !important;
+  stroke-width: 1.5 !important;
+}
+
+[data-theme="dark"] .react-flow__minimap-node,
+.dark-theme .react-flow__minimap-node {
+  fill: rgba(148, 163, 184, 0.5) !important;
+  stroke: none !important;
+}
+
+/* 3. Note selector modal — premium redesign */
+.canvas-note-selector {
+  width: 480px;
+  max-height: 540px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(226, 232, 240, 0.5) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.03) !important;
+}
+
+.canvas-note-selector .modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.4);
+}
+
+.canvas-note-selector .modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: -0.01em;
+}
+
+.canvas-note-selector .modal-close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(241, 245, 249, 0.6);
+  border: 1px solid rgba(226, 232, 240, 0.4);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-note-selector .modal-close-btn:hover {
+  background: rgba(241, 245, 249, 1);
+  color: var(--text-primary);
+}
+
+.canvas-note-selector-body {
+  padding: 16px 20px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Search input override for this modal */
+.canvas-note-selector-body .input {
+  background: rgba(241, 245, 249, 0.6);
+  border: 1px solid rgba(226, 232, 240, 0.4);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.canvas-note-selector-body .input:focus {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(148, 163, 184, 0.4);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.06);
+}
+
+.canvas-note-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+/* Custom scrollbar */
+.canvas-note-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.canvas-note-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.canvas-note-list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+}
+
+.canvas-note-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.canvas-note-item {
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.canvas-note-item:hover {
+  background: rgba(241, 245, 249, 0.8);
+  transform: translateX(2px);
+}
+
+.canvas-note-item:active {
+  transform: translateX(2px) scale(0.995);
+}
+
+.canvas-note-item-name {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.canvas-note-item-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  margin-top: 1px;
+  opacity: 0.7;
+}
+
+.canvas-note-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+/* 4. Edge styling — smooth bezier curves */
+.react-flow__edge-path {
+  stroke: #94A3B8 !important;
+  stroke-width: 1.5 !important;
+  stroke-opacity: 0.5;
+  fill: none;
+  transition: stroke-opacity 0.2s ease, stroke-width 0.2s ease, stroke 0.2s ease;
+}
+
+.react-flow__edge:hover .react-flow__edge-path,
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgba(96, 165, 250, 0.85) !important;
+  stroke-opacity: 1;
+  stroke-width: 2 !important;
+}
+
+[data-theme="dark"] .react-flow__edge-path,
+.dark-theme .react-flow__edge-path {
+  stroke: #64748b !important;
+  stroke-opacity: 0.5;
+}
+
+/* 5. Empty canvas guidance hint */
+.canvas-empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  opacity: 0.5;
+  z-index: 1;
+  text-align: center;
+}
+
+.canvas-empty-hint svg {
+  opacity: 0.4;
+}
+
+.canvas-empty-hint-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.canvas-empty-hint-sub {
+  font-size: var(--text-sm);
+  max-width: 320px;
+  line-height: 1.6;
+}
+
+/* 6. Handle — subtle dots at rest, prominent on hover/select */
+.react-flow__handle {
+  opacity: 0.35 !important;
+  width: 10px !important;
+  height: 10px !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1.5px solid rgba(148, 163, 184, 0.5) !important;
+  border-radius: 50% !important;
+  transition: opacity 0.2s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.react-flow__node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle {
+  opacity: 0.8 !important;
+  border-color: rgba(99, 102, 241, 0.45) !important;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.35);
+  background-color: rgba(255, 255, 255, 1) !important;
+  border-color: rgba(99, 102, 241, 0.7) !important;
+  opacity: 1 !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* 7a. NodeResizer — visible resize dots at corners */
+.react-flow__resize-control.handle {
+  opacity: 0;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+  border: 1.5px solid rgba(100, 116, 139, 0.4) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  transition: opacity 0.2s ease, transform 0.15s ease, background 0.15s ease;
+  z-index: 15;
+}
+
+.react-flow__node:hover .react-flow__resize-control.handle {
+  opacity: 0.5;
+}
+
+.react-flow__node.selected .react-flow__resize-control.handle {
+  opacity: 0.8;
+}
+
+.react-flow__resize-control.handle:hover {
+  opacity: 1 !important;
+  transform: scale(1.5);
+  background: rgba(255, 255, 255, 1) !important;
+  border-color: rgba(99, 102, 241, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* 7b. Show ALL handles on ALL nodes while user is dragging a connection */
+.react-flow__node.connectable .react-flow__handle {
+  /* Already styled above; this ensures they exist */
+}
+
+/* When a connection is being dragged, light up every target handle */
+.react-flow:has(.react-flow__connection) .react-flow__handle,
+.react-flow__node .react-flow__handle.connectingto {
+  opacity: 1 !important;
+  border-color: rgba(99, 102, 241, 0.6) !important;
+  background: rgba(255, 255, 255, 1) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  animation: handlePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes handlePulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1); }
+  50%      { box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.2); }
+}
+.react-flow__resize-control.line {
+  border-color: rgba(148, 163, 184, 0.25) !important;
+  border-style: dashed !important;
+  border-width: 1px !important;
+}
+
+/* 7b. Selection box (selectionOnDrag) */
+.react-flow__selection {
+  background: rgba(59, 130, 246, 0.05) !important;
+  border: 1.5px solid rgba(147, 197, 253, 0.35) !important;
+  border-radius: 4px;
+}
+
+/* 7c. Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .canvas-toolbar-btn,
+  .canvas-toolbar-btn.primary,
+  .note-node-card,
+  .text-node-sticky,
+  .react-flow__handle,
+  .react-flow__edge-path,
+  .canvas-note-item {
+    transition: none !important;
+  }
+
+  .text-node-sticky.selected {
+    transform: none !important;
+  }
+}
+
+/* 8. NoteNode skeleton loading shimmer */
+@keyframes canvasShimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.note-node-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--space-3);
+}
+
+.note-node-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%);
+  background-size: 400px 100%;
+  animation: canvasShimmer 1.5s ease-in-out infinite;
+}
+
+.note-node-skeleton-line:nth-child(1) { width: 80%; }
+.note-node-skeleton-line:nth-child(2) { width: 95%; }
+.note-node-skeleton-line:nth-child(3) { width: 60%; }
+.note-node-skeleton-line:nth-child(4) { width: 75%; }
+
+/* 9. Sticky note color palette */
+.sticky-color-palette {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-subtle);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.text-node-sticky:hover .sticky-color-palette,
+.text-node-sticky.selected .sticky-color-palette {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.sticky-color-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.sticky-color-dot:hover {
+  transform: scale(1.2);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 0 2px rgba(0, 0, 0, 0.06);
+}
+
+.sticky-color-dot.active {
+  border-color: transparent;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+/* 12. GroupNode label focus polish */
+.group-node-label-input:focus {
+  border-color: rgba(148, 163, 184, 0.4);
+  box-shadow: none;
+}
+
+/* 13. Node right-click context menu V2 */
+.canvas-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.96));
+  border: 1px solid var(--canvas-glass-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  animation: canvas-ctx-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes canvas-ctx-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.canvas-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.1s;
+  user-select: none;
+  border-radius: var(--radius-sm);
+}
+
+.canvas-context-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.canvas-context-menu-item.danger {
+  color: var(--danger);
+}
+
+.canvas-context-menu-item.danger:hover {
+  background: var(--danger-bg);
+}
+
+.canvas-context-menu-item.ai-action {
+  color: var(--canvas-accent);
+}
+
+.canvas-context-menu-item.ai-action:hover {
+  background: var(--canvas-accent-bg);
+}
+
+.canvas-context-menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 8px;
+}
+
+.canvas-context-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.canvas-context-color-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 12px 8px;
+  flex-wrap: wrap;
+}
+
+.canvas-context-color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.1s, border-color 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-context-color-dot:hover {
+  transform: scale(1.15);
+}
+
+.canvas-context-color-dot.active {
+  border-color: var(--text-primary);
+}
+
+.canvas-context-color-dot.reset {
+  background: transparent !important;
+  border: 1px dashed var(--text-tertiary);
+}
+
+
+/* ── Interaction Overlay (shared by PDF + Web nodes) ───────────── */
+/* Sits on top of iframe/embed to catch mouse events.
+   Enables: drag, resize, right-click context menu.
+   Double-click removes it temporarily for content interaction. */
+
+.embed-interaction-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background 0.2s ease;
+}
+
+.embed-interaction-overlay:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.embed-interaction-overlay:active {
+  cursor: grabbing;
+}
+
+.embed-overlay-hint {
+  opacity: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  padding: 4px 12px;
+  border-radius: 6px;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.embed-interaction-overlay:hover .embed-overlay-hint {
+  opacity: 1;
+}
+
+/* Ensure NodeResizer handles are above the overlay */
+.pdf-node-card .react-flow__resize-control,
+.web-node-card .react-flow__resize-control {
+  z-index: 15 !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Feature 1.1: Quick-Create from Connection End — Floating Menu
+   ══════════════════════════════════════════════════════════════════════ */
+
+.canvas-quick-connect-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.97));
+  border: 1px solid var(--canvas-glass-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(99, 102, 241, 0.08);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  animation: quickConnectIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: top left;
+  overflow: hidden;
+}
+
+[data-theme="dark"] .canvas-quick-connect-menu,
+.dark-theme .canvas-quick-connect-menu {
+  background: rgba(15, 23, 42, 0.96);
+  border-color: rgba(99, 102, 241, 0.2);
+  box-shadow:
+    0 0 0 1px rgba(99, 102, 241, 0.15),
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes quickConnectIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.canvas-quick-connect-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 2px;
+}
+
+[data-theme="dark"] .canvas-quick-connect-title,
+.dark-theme .canvas-quick-connect-title {
+  color: rgba(129, 140, 248, 0.9);
+  border-bottom-color: rgba(99, 102, 241, 0.12);
+}
+
+.canvas-quick-connect-menu .canvas-context-menu-item {
+  padding: 9px 14px;
+}
+
+.canvas-quick-connect-menu .canvas-context-menu-item:last-child {
+  border-radius: 0 0 12px 12px;
+}
+
+.canvas-quick-connect-menu .canvas-context-menu-item:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+[data-theme="dark"] .canvas-quick-connect-menu .canvas-context-menu-item:hover,
+.dark-theme .canvas-quick-connect-menu .canvas-context-menu-item:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Feature 1.2: Smart Group Containment — Visual Highlight
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* When a group has child nodes, give it a subtle fill */
+.group-node-frame {
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Visual highlight when a node is being dragged over a group */
+.react-flow__node-group.selected .group-node-frame {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08) inset;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Feature 1.3: LOD — Low Zoom NoteNode Placeholder
+   ══════════════════════════════════════════════════════════════════════ */
+
+.note-node-lod-low {
+  padding: 10px 14px;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.note-node-lod-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.note-node-lod-summary {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+  opacity: 0.7;
+}
+
+/* Smooth transition when LOD level changes */
+.note-node-card {
+  transition: transform 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Phase 3: Ghost Edge — AI Suggestion Phantom Connections
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Flowing dash animation for ghost edge paths */
+@keyframes ghostEdgeFlow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Ghost edge label container — centers at edge midpoint */
+.ghost-edge-label-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 10;
+}
+
+/* Label pill with glassmorphism */
+.ghost-edge-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  user-select: none;
+  cursor: default;
+}
+
+.ghost-edge-label:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.12);
+}
+
+.ghost-edge-label-text {
+  line-height: 1;
+}
+
+/* Accept / Reject button container — hidden by default, slides in on hover */
+.ghost-edge-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.85);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ghost-edge-actions.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: all;
+}
+
+/* Shared button style */
+.ghost-edge-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.ghost-edge-btn:active {
+  transform: scale(0.88);
+}
+
+/* Accept button — green */
+.ghost-edge-btn-accept {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #16a34a;
+}
+
+.ghost-edge-btn-accept:hover {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: rgba(34, 197, 94, 0.6);
+  box-shadow: 0 0 12px -2px rgba(34, 197, 94, 0.3);
+  transform: scale(1.12);
+}
+
+/* Reject button — red */
+.ghost-edge-btn-reject {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #dc2626;
+}
+
+.ghost-edge-btn-reject:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 12px -2px rgba(239, 68, 68, 0.25);
+  transform: scale(1.12);
+}

@@ -1,0 +1,24 @@
+/**
+ * Viz surface tokens — defaults; JS applyVizCssVars() syncs on theme switch.
+ * Graph/canvas rendering colors live in vizPalette.ts (light/dark palettes).
+ */
+
+:root,
+:root[data-theme="light"] {
+  --viz-surface-bg: #FAFBFC;
+  --viz-surface-grid: #D0D5DD;
+  --viz-label-node-fill: #334155;
+  --viz-label-node-halo: #FFFFFF;
+  --viz-label-edge-fill: #4B5563;
+  --viz-canvas-default-edge: #64748B;
+}
+
+:root[data-theme="dark"],
+:root.dark-theme {
+  --viz-surface-bg: #0F172A;
+  --viz-surface-grid: #334155;
+  --viz-label-node-fill: #E2E8F0;
+  --viz-label-node-halo: #0F172A;
+  --viz-label-edge-fill: #CBD5E1;
+  --viz-canvas-default-edge: #94A3B8;
+}

@@ -1,0 +1,81 @@
+# ── Node (dev dependencies only — never shipped to end users) ──
+node_modules
+dist
+dist-ssr
+*.local
+
+# Logs (runtime — project root logs/)
+/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Project-local docs & logs (not for git) ───────────────────
+/docs/
+
+# ── Rust / Tauri ──────────────────────────────────────────────
+src-tauri/target/
+src-tauri/target2/
+src-tauri/gen/
+
+# ── App Data (runtime files, not source) ─────────────────────
+*.db
+*.db-wal
+*.db-shm
+
+# ── Env / Secrets ───────────────────────────────────────────
+.env
+.env.*
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Tauri WiX / bundle temp files ────────────────────────────
+*.msi
+*.AppImage
+*.deb
+*.rpm
+
+# ── AI / IDE helpers ──────────────────────────────────────────
+.comate/
+.mimocode/
+.claude
+.claude/
+
+# ── Large RELEASE assets (build-time only, NOT for git) ───────
+# OCR (~20 MB) lives in src-tauri/resources/ocr_models/ and IS committed.
+# CI/local `download-model` still fetches embedding + WASM; OCR step skips when valid.
+src-tauri/resources/embed_models/
+src-tauri/resources/webview/
+public/models/
+public/ort-wasm-simd-threaded*.wasm
+public/ort-wasm-simd-threaded*.mjs
+public/fonts/
+public/css/
+public/pdf.min.mjs
+public/pdf.worker.min.mjs
+# Large ONNX only — do not blanket-ignore ocr_models/
+src-tauri/resources/embed_models/**/*.onnx
+public/models/**/*.onnx
+
+# build:prod generates this locally (~1.4 MB); committed stub is katex-inlined.stub.ts
+src/lib/katex-inlined.css.ts
+
+# ── Documents (project-local, not for git) ──
+documents/
+
+# ── NSIS installer output ──
+src-tauri/target/release/bundle/nsis/*.exe

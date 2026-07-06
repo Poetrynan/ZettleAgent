@@ -1,0 +1,11 @@
+/* ── ZettelAgent Canvas Styles ───────────────────────────────────────── *
+ * Auto-split from InteractiveCanvas.css for maintainability.            *
+ * Each file covers a logical domain — edit the specific file instead.  *
+ * ──────────────────────────────────────────────────────────────────── */
+
+@import './canvas/canvas-core.css';
+@import './canvas/canvas-nodes.css';
+@import './canvas/canvas-edges.css';
+@import './canvas/canvas-ai.css';
+@import './canvas/canvas-editor.css';
+@import './canvas/canvas-modal.css';
