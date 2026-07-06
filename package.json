@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:prod": "node scripts/download-model.cjs && tsc && vite build",
+    "build:prod": "node scripts/download-model.cjs && vite build",
     "verify-offline": "node scripts/verify-offline-assets.cjs",
     "verify-offline:dist": "node scripts/verify-offline-assets.cjs dist",
     "preview": "vite preview",
