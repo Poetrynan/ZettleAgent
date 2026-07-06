@@ -87,9 +87,11 @@ jobs:
           releaseBody: |
             ## ZettelAgent ${{ github.ref_name }}
 
-            AI-Powered Zettelkasten Desktop Agent.
+            **AI-Powered Zettelkasten Desktop Agent / AI 驱动的 Zettelkasten 桌面智能体**
 
-            ### For end users
+            ---
+
+            ### 🇬🇧 English
 
             Download → install → use.
             **No extra downloads. No Node.js. No Docker.**
@@ -102,16 +104,34 @@ jobs:
 
             MCP uses Remote SSE (paste URL + API Key) — no local Node.js required.
 
-            ### Downloads
+            ---
 
-            | Platform | File |
+            ### 🇨🇳 中文
+
+            下载 → 安装 → 直接使用。
+            **无需额外下载，无需 Node.js，无需 Docker。**
+
+            安装包已内置（完全离线）：
+            - 嵌入模型 (nomic-embed-text-v1.5) + ONNX Runtime WASM
+            - PP-OCR 文字识别模型
+            - UI 字体、KaTeX、PDF.js
+            - 示例笔记库
+
+            MCP 使用远程 SSE（粘贴 URL + API Key）— 无需本地 Node.js。
+
+            ---
+
+            ### 📥 Downloads / 下载
+
+            | Platform / 平台 | File / 文件 |
             |----------|------|
-            | **Windows** | `.msi` (recommended) or `.exe` |
+            | **Windows** | `.msi` (recommended / 推荐) or `.exe` |
             | **macOS (Apple Silicon)** | `.dmg` |
             | **macOS (Intel)** | `.dmg` |
             | **Linux** | `.AppImage` or `.deb` |
 
-            Developers: clone the repo for source code. This Release is the end-user installer.
+            > Developers: clone the repo for source code. This Release is the end-user installer.
+            > 开发者：克隆仓库获取源码。此 Release 为终端用户安装包。
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}

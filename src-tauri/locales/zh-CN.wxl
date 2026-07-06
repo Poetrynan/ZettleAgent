@@ -1,5 +1,89 @@
 <?xml version="1.0" encoding="utf-8"?>
-<WixLocalization Culture="zh-CN" xmlns="http://schemas.microsoft.com/wix/2006/localization">
-  <String Id="LANG">2052</String>
+<!--
+  Chinese (Simplified) localization for WiX MSI installer.
+  Covers all standard WixUI_InstallDir dialog strings used by Tauri's WiX template.
+-->
+<WixLocalization Culture="zh-CN" Language="2052" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+
+  <!-- Product -->
   <String Id="ProductName">ZettelAgent</String>
+
+  <!-- Welcome / Maintenance -->
+  <String Id="WelcomeDlgTitle">{\WixUI_Font_Bigger}欢迎使用 [ProductName] 安装向导</String>
+  <String Id="WelcomeDlgDescription">安装程序将引导您完成在计算机上安装 [ProductName] 的步骤。单击"下一步"继续，或单击"取消"退出安装向导。</String>
+  <String Id="MaintenanceWelcomeDlgTitle">{\WixUI_Font_Bigger}欢迎使用 [ProductName] 维护向导</String>
+  <String Id="MaintenanceWelcomeDlgDescription">选择要执行的操作，然后单击"下一步"继续，或单击"取消"退出安装向导。</String>
+
+  <!-- License -->
+  <String Id="LicenseAgreementDlgTitle">{\WixUI_Font_Title}最终用户许可协议</String>
+  <String Id="LicenseAgreementDlgDescription">请仔细阅读以下许可协议</String>
+
+  <!-- Install Folder -->
+  <String Id="InstallDirDlgTitle">{\WixUI_Font_Title}目标文件夹</String>
+  <String Id="InstallDirDlgDescription">单击"下一步"安装到默认文件夹，或单击"浏览"选择其他位置。</String>
+
+  <!-- Browse -->
+  <String Id="BrowseDlgTitle">{\WixUI_Font_Title}更改目标文件夹</String>
+  <String Id="BrowseDlgDescription">浏览到目标文件夹</String>
+  <String Id="NewFolder">新建文件夹(&amp;N)...</String>
+
+  <!-- Verify Ready -->
+  <String Id="VerifyReadyDlgTitle">{\WixUI_Font_Title}已准备好安装</String>
+  <String Id="VerifyReadyDlgInstall">安装(&amp;I)</String>
+  <String Id="VerifyReadyDlgInstallText">单击"安装"开始安装。单击"上一步"查看或更改安装设置。单击"取消"退出向导。</String>
+  <String Id="VerifyReadyDlgRepair">修复(&amp;R)</String>
+  <String Id="VerifyReadyDlgRepairText">单击"修复"修复 [ProductName] 的安装。单击"取消"退出向导。</String>
+  <String Id="VerifyReadyDlgRemove">移除(&amp;R)</String>
+  <String Id="VerifyReadyDlgRemoveText">单击"移除"从计算机中移除 [ProductName]。单击"取消"退出向导。</String>
+
+  <!-- Progress -->
+  <String Id="ProgressDlgTitleInstalling">{\WixUI_Font_Title}正在安装 [ProductName]</String>
+  <String Id="ProgressDlgTitleRepairing">{\WixUI_Font_Title}正在修复 [ProductName]</String>
+  <String Id="ProgressDlgTitleRemoving">{\WixUI_Font_Title}正在移除 [ProductName]</String>
+  <String Id="ProgressDlgTextInstalling">请稍候，安装向导正在安装 [ProductName]。</String>
+  <String Id="ProgressDlgTextRepairing">请稍候，安装向导正在修复 [ProductName]。</String>
+  <String Id="ProgressDlgTextRemoving">请稍候，安装向导正在移除 [ProductName]。</String>
+  <String Id="ProgressDlgStatusLabel">状态:</String>
+
+  <!-- Resume -->
+  <String Id="ResumeDlgTitle">{\WixUI_Font_Bigger}正在继续 [ProductName] 安装向导</String>
+  <String Id="ResumeDlgDescription">安装向导将完成在您的计算机上安装 [ProductName]。单击"继续"继续，或单击"取消"退出安装向导。</String>
+
+  <!-- Prepare -->
+  <String Id="PrepareDlgTitle">{\WixUI_Font_Bigger}正在准备安装 [ProductName]</String>
+  <String Id="PrepareDlgDescription">正在准备安装时请稍候</String>
+
+  <!-- Exit / Error -->
+  <String Id="ExitDialogTitle">{\WixUI_Font_Bigger}[ProductName] 安装向导已完成</String>
+  <String Id="ExitDialogDescription">单击"完成"退出安装向导。</String>
+  <String Id="FatalErrorTitle">{\WixUI_Font_Bigger}[ProductName] 安装向导因错误而提前结束</String>
+  <String Id="FatalErrorDescription">由于发生错误，安装向导提前结束。您的系统未被修改。如需稍后安装此程序，请再次运行安装向导。</String>
+  <String Id="UserExitTitle">{\WixUI_Font_Bigger}[ProductName] 安装向导已中断</String>
+  <String Id="UserExitDescription">[ProductName] 安装已中断。您的系统未被修改。如需稍后安装此程序，请再次运行安装向导。</String>
+
+  <!-- Disk Cost -->
+  <String Id="DiskCostDlgTitle">{\WixUI_Font_Title}磁盘空间需求</String>
+  <String Id="DiskCostDlgDescription">所选卷没有足够的磁盘空间用于当前功能。</String>
+
+  <!-- Customize -->
+  <String Id="CustomizeDlgTitle">{\WixUI_Font_Title}自定义安装</String>
+  <String Id="CustomizeDlgDescription">选择您希望的安装方式</String>
+
+  <!-- Maintenance Type -->
+  <String Id="MaintenanceTypeDlgTitle">{\WixUI_Font_Title}更改、修复或移除安装</String>
+  <String Id="MaintenanceTypeDlgDescription">选择您希望执行的操作</String>
+  <String Id="MaintenanceTypeDlgChange">更改(&amp;C)</String>
+  <String Id="MaintenanceTypeDlgChangeText">更改已安装功能的安装方式。</String>
+  <String Id="MaintenanceTypeDlgRepair">修复(&amp;P)</String>
+  <String Id="MaintenanceTypeDlgRepairText">修复上一次安装中的错误 — 修复丢失或损坏的文件、快捷方式和注册表项。</String>
+  <String Id="MaintenanceTypeDlgRemove">移除(&amp;R)</String>
+  <String Id="MaintenanceTypeDlgRemoveText">从您的计算机中移除 [ProductName]。</String>
+
+  <!-- Common buttons -->
+  <String Id="WizardNext">下一步(&amp;N) &gt;</String>
+  <String Id="WizardBack">&lt; 上一步(&amp;B)</String>
+  <String Id="WizardCancel">取消</String>
+  <String Id="WizardFinish">完成(&amp;F)</String>
+  <String Id="WizardBrowse">浏览(&amp;B)...</String>
+
 </WixLocalization>
