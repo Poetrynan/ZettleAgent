@@ -1,10 +1,13 @@
 //! GPU hardware detection using wgpu.
 //! Provides adapter info including real VRAM via platform-specific OS APIs.
-//! 
+//!
 //! VRAM detection:
 //! - Windows: DXGI (via win32 API through `windows` crate fallback to registry)
 //! - macOS: IOKit via sysctl
 //! - Linux: nvidia-smi or /sys/class/drm
+
+// Windows-specific VRAM detection helpers (used conditionally by GPU detection paths)
+#![allow(dead_code)]
 
 use serde::Serialize;
 
