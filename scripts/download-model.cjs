@@ -114,8 +114,14 @@ function assertValidOnnx(filePath, label, minBytes) {
   }
 }
 
-function download(url, dest, { force = false } = {}) {
+function resolveRedirect(baseUrl, location) {
+  if (!location) throw new Error(`Redirect location missing from ${baseUrl}`);
+  return new URL(location, baseUrl).toString();
+}
+
+function download(url, dest, { force = false, redirectCount = 0 } = {}) {
   return new Promise((resolve, reject) => {
+    if (redirectCount > 5) return reject(new Error(`Too many redirects for ${url}`));
     if (!force && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
       console.log(`  ✓ exists: ${path.basename(dest)}`);
       return resolve();
@@ -128,7 +134,8 @@ function download(url, dest, { force = false } = {}) {
       if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
         file.close();
         fs.unlink(dest, () => {});
-        return download(res.headers.location, dest).then(resolve, reject);
+        const nextUrl = resolveRedirect(url, res.headers.location);
+        return download(nextUrl, dest, { force: true, redirectCount: redirectCount + 1 }).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         file.close();
@@ -144,11 +151,13 @@ function download(url, dest, { force = false } = {}) {
   });
 }
 
-function fetchText(url, headers = {}) {
+function fetchText(url, headers = {}, redirectCount = 0) {
   return new Promise((resolve, reject) => {
+    if (redirectCount > 5) return reject(new Error(`Too many redirects for ${url}`));
     https.get(url, { headers }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
-        return fetchText(res.headers.location, headers).then(resolve, reject);
+        const nextUrl = resolveRedirect(url, res.headers.location);
+        return fetchText(nextUrl, headers, redirectCount + 1).then(resolve, reject);
       }
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
       let data = '';
