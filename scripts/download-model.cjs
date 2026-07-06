@@ -125,7 +125,7 @@ function download(url, dest, { force = false } = {}) {
     const file = fs.createWriteStream(dest);
     const get = url.startsWith('https') ? https.get : http.get;
     get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
         file.close();
         fs.unlink(dest, () => {});
         return download(res.headers.location, dest).then(resolve, reject);
@@ -147,7 +147,7 @@ function download(url, dest, { force = false } = {}) {
 function fetchText(url, headers = {}) {
   return new Promise((resolve, reject) => {
     https.get(url, { headers }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
         return fetchText(res.headers.location, headers).then(resolve, reject);
       }
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
