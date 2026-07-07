@@ -1,11 +1,11 @@
-# Deploy static docs/ folder to GitHub Pages
+# Deploy landing-page/ folder to GitHub Pages
 name: Deploy Landing Page to GitHub Pages
 
 on:
   push:
     branches: [master]
     paths:
-      - 'docs/**'
+      - 'landing-page/**'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
       - name: Upload landing-page/ artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/landing-page/
+          path: landing-page/
 
   deploy:
     needs: build
