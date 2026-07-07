@@ -1,95 +1,105 @@
-<p align="center">
-  <img src="logo/ZettelAgent.png" alt="ZettelAgent Logo">
-</p>
+<div align="center">
 
-<h1 align="center">ZettelAgent</h1>
+  <a href="https://github.com/Poetrynan/ZettleAgent">
+    <img src="logo/ZettelAgent.png" alt="ZettelAgent Logo" width="120">
+  </a>
 
-<p align="center">
-  <strong>AI-Powered Zettelkasten Desktop Agent</strong><br>
-  Your second brain that thinks, reconciles contradictions, and evolves your notes.<br>
-  All from a local Markdown folder. No Docker, no cloud, no accounts.
-</p>
+  # ZettelAgent
 
-<p align="center">
-  <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=flat-square&color=10B981" alt="Stars"></a>
-  <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=flat-square&color=0EA5E9" alt="Release"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20primary-8B5CF6?style=flat-square" alt="Platform">
-  <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=flat-square&color=F59E0B" alt="License"></a>
-</p>
+  ### AI-Powered Zettelkasten Desktop Agent
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Tauri-2.0-blue?style=flat-square" alt="Tauri 2.0">
-  <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square" alt="React 19">
-  <img src="https://img.shields.io/badge/Rust-1.96-dea584?style=flat-square" alt="Rust 1.96">
-  <img src="https://img.shields.io/badge/SQLite-FTS5%20+%20Vec-0EA5E9?style=flat-square" alt="SQLite">
-  <img src="https://img.shields.io/badge/Embedding-nomic--v1.5%20WebGPU%2FWASM-10B981?style=flat-square" alt="Embedding">
-</p>
+  *Your second brain that thinks, reconciles contradictions, and evolves your notes.*  
+  All from a local Markdown folder — **No Docker, no cloud, no accounts.**
 
-<p align="center">
-  <strong>English</strong> | <a href="README_CN.md">中文</a> | <a href="README_JP.md">日本語</a> | <a href="README_KR.md">한국어</a>
-</p>
+  <!-- Badges -->
+  <p>
+    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Stars"></a>
+    <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9" alt="Release"></a>
+    <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
+    <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
+  </p>
 
----
+  <!-- Tech stack -->
+  <p>
+    <img src="https://img.shields.io/badge/Tauri-2.0-FFC107?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2.0">
+    <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19">
+    <img src="https://img.shields.io/badge/Rust-1.96-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.96">
+    <img src="https://img.shields.io/badge/SQLite-FTS5%20+%20Vec-0EA5E9?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
+    <img src="https://img.shields.io/badge/Embedding-nomic--v1.5%20WebGPU%2FWASM-10B981?style=flat-square" alt="Embedding">
+  </p>
 
-## Table of Contents
+  <!-- Language switcher -->
+  <p>
+    <strong>English</strong> · <a href="README_CN.md">中文</a> · <a href="README_JP.md">日本語</a> · <a href="README_KR.md">한국어</a>
+  </p>
 
-- [Core Capabilities](#core-capabilities)
-- [Interface Showcase](#interface-showcase)
-- [Quick Start (end users)](#quick-start-end-users)
-- [Build from Source (developers)](#build-from-source-developers)
-- [System Requirements](#system-requirements)
-- [Comparison](#comparison)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+</div>
 
 ---
 
-> **Download from [Releases](https://github.com/Poetrynan/ZettleAgent/releases) → install → use.** No Node.js, no Docker, no extra model downloads. The ~300MB installer already includes the nomic embedding model, ONNX Runtime WASM, and PP-OCR — fully offline on your local Markdown folder.
+> ### 🚀 [Download from Releases](https://github.com/Poetrynan/ZettleAgent/releases) → Install → Use
+> 
+> No Node.js, no Docker, no extra model downloads. The ~300MB installer already includes the nomic embedding model, ONNX Runtime WASM, and PP-OCR — fully offline on your local Markdown folder.
 
-## Core Capabilities
+---
+
+## 📑 Table of Contents
+
+- [✨ Core Capabilities](#-core-capabilities)
+- [📸 Interface Showcase](#-interface-showcase)
+- [🏁 Quick Start (end users)](#-quick-start-end-users)
+- [🛠 Build from Source (developers)](#-build-from-source-developers)
+- [💻 System Requirements](#-system-requirements)
+- [⚔️ Comparison](#️-comparison)
+- [🤝 Contributing](#-contributing)
+- [🙏 Acknowledgments](#-acknowledgments)
+- [📜 License](#-license)
+
+---
+
+## ✨ Core Capabilities
 
 ### 🔍 Hybrid Search
-
 Full-text search + semantic vector search with three modes. Ask questions in natural language — AI answers based on your notes.
 
 ### 🤖 AI Agent
-
 60 built-in tools, 3 specialized agents working together. Auto-organize notes, detect contradictions, generate link suggestions, batch operations. Write actions require user approval.
 
 ### 📈 Knowledge Graph
-
 Discovers hidden semantic connections between notes. PageRank importance scoring, community clustering, local graph, shortest path discovery.
 
 ### 🎨 Intelligent Canvas
-
 Obsidian-compatible whiteboard with Bézier curves, PDF/web embeds, smart groups. AI auto-layout, direct Agent control.
 
 ### 🧠 Built-in Embedding Engine
-
 nomic-embed-text-v1.5 is **bundled in the installer** (WASM, optional WebGPU). Zero configuration, no API keys, no download after install.
 
 ### 🔒 Local-First
-
 All data stays on your machine. AI writes into `<!-- @generated -->` blocks, never touching your original content. Supports Zettelkasten, PARA, CODE, GTD and 8 methodologies total.
 
 ---
 
-## Interface Showcase
+## 📸 Interface Showcase
 
-![ZettelAgent Graph View](scrennshot1.png)
+<div align="center">
 
-![ZettelAgent Dashboard](scrennshot2.png)
+| Knowledge Graph | Dashboard |
+|:---:|:---:|
+| ![Graph View](scrennshot1.png) | ![Dashboard](scrennshot2.png) |
+
+</div>
 
 ---
 
-## Quick Start (end users)
+## 🏁 Quick Start (end users)
 
 1. Download the installer from [Releases](https://github.com/Poetrynan/ZettleAgent/releases)
 2. Install and open the app — **no extra downloads**
 3. Configure your LLM API in Settings (OpenAI / Claude / Gemini / Ollama and more)
 
-### Build from Source (developers)
+---
+
+## 🛠 Build from Source (developers)
 
 ```bash
 git clone https://github.com/Poetrynan/ZettleAgent.git
@@ -98,9 +108,8 @@ npm install
 npm run tauri dev    # Development mode (auto-generates src-tauri/gen/schemas/)
 ```
 
-> **Note:** `src-tauri/gen/` is auto-generated by Tauri and excluded from git.
-> The first `npm run tauri dev` run creates the schema files referenced by `capabilities/default.json`.
-> This is normal — no manual action is needed.
+> **Note:** `src-tauri/gen/` is auto-generated by Tauri and excluded from git.  
+> The first `npm run tauri dev` run creates the schema files referenced by `capabilities/default.json`. No manual action is needed.
 
 To produce a Release installer:
 
@@ -108,18 +117,19 @@ To produce a Release installer:
 npm run tauri build  # Runs build:prod (fetches models, bundles everything)
 ```
 
-Large assets (embedding model, ORT WASM, fonts) are **not** in the git repo.
-`tauri build` downloads and bundles them automatically; end users never run this step.
-
-### System Requirements
-
-| Platforms | Installer size | Recommended RAM |
-|-----------|----------------|-----------------|
-| **Windows** (fully supported); macOS / Linux (CI builds, experimental) | ~300MB (models included) | 8GB+ (local embedding) |
+Large assets (embedding model, ORT WASM, fonts) are **not** in the git repo. `tauri build` downloads and bundles them automatically; end users never run this step.
 
 ---
 
-## Comparison
+## 💻 System Requirements
+
+| Platforms | Installer size | Recommended RAM |
+|-----------|----------------|-----------------|
+| **Windows** (fully supported) · macOS / Linux (CI builds, experimental) | ~300MB (models included) | 8GB+ (local embedding) |
+
+---
+
+## ⚔️ Comparison
 
 | | ZettelAgent | Obsidian + Plugins | Notion AI | Logseq |
 |---|:---:|:---:|:---:|:---:|
@@ -144,24 +154,31 @@ Large assets (embedding model, ORT WASM, fonts) are **not** in the git repo.
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 We welcome contributions from the community! Whether you're fixing bugs, improving documentation, or adding new features, your help is appreciated.
 
 Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting a pull request.
 
-## Acknowledgments
+---
+
+## 🙏 Acknowledgments
 
 Built on the shoulders of: [Zettelkasten](https://luhmann.surge.sh/communicating-with-slip-boxes) · [Obsidian](https://obsidian.md/) · [sqlite-vec](https://github.com/asg017/sqlite-vec) · [Tauri](https://tauri.app/) · [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) · [DeepSeek](https://www.deepseek.com/)
 
 ---
 
-## License
+## 📜 License
 
 Apache License 2.0 — Free to use and modify. **Credit the original author in commercial products.** See [LICENSE](LICENSE).
 
 ---
 
-## Star History
+<!-- Star History -->
+<div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Poetrynan/ZettleAgent&type=Date)](https://star-history.com/#Poetrynan/ZettleAgent&Date)
+  ## ⭐ Star History
+
+  [![Star History Chart](https://api.star-history.com/svg?repos=Poetrynan/ZettleAgent&type=Date)](https://star-history.com/#Poetrynan/ZettleAgent&Date)
+
+</div>
