@@ -494,9 +494,19 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     linkLayer.clear();
     linkHighlightRef.current?.clear();
 
-    // 清理旧边标签
+    // 清理旧边标签(包括可能因重复 key 碰撞而孤立的标签)
     for (const t of linkLabelRef.current.values()) t.destroy();
     linkLabelRef.current.clear();
+    // 额外清理:移除因同一节点对多条边导致 key 碰撞而孤立的标签 Text。
+    // 后端按 (source, target, edge_type, label) 去重,同一节点对可能有多条边,
+    // 旧代码用 `${sid}|${tid}` 作 key 会导致前几条边的 Text 被覆盖后成为孤立对象,
+    // 永远停留在 world 原点(0,0),表现为「标签脱落后固定在画布上」。
+    for (let i = world.children.length - 1; i >= 0; i--) {
+      const child = world.children[i];
+      if (child instanceof Text) {
+        child.destroy();
+      }
+    }
 
     const nodes = graphData.nodes;
     const links = graphData.links;
@@ -508,6 +518,10 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       const tid = typeof l.target === 'string' ? l.target : l.target.id;
       const displayLabel = l.label || (l.edge_type === 'semantic' ? `${Math.round(l.weight * 100)}%` : null);
       if (!displayLabel) continue;
+      const labelKey = `${sid}|${tid}`;
+      // 同一节点对可能有多条边(link + semantic + relation),
+      // 只创建一个标签 Text,避免 key 碰撞导致前一个 Text 成为孤立对象。
+      if (linkLabelRef.current.has(labelKey)) continue;
       const t = new Text({
         text: displayLabel,
         style: {
@@ -521,7 +535,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       t.anchor.set(0.5);
       t.eventMode = 'none';
       world.addChild(t);
-      linkLabelRef.current.set(`${sid}|${tid}`, t);
+      linkLabelRef.current.set(labelKey, t);
     }
 
     // 预建邻接表(rebuildGraph 时一次性构建,hover O(1) 查询邻居)
@@ -784,6 +798,35 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       // 仅 hover 变化:只重绘高亮层(~5~20 条边),基础层不动
       drawHighlightEdges();
       linksHighlightDirtyRef.current = false;
+    }
+
+    // 修复"标签脱落"问题:每帧更新边标签位置,跟随节点的漂浮动画。
+    // 边标签位置需要基于 container.x/y(含漂浮偏移)而非 node.x/y(基础位置),
+    // 否则仿真收敛后标签会固定在基础位置,与漂浮的节点视觉上脱节。
+    if (showLabels) {
+      updateEdgeLabelsFollowFloating();
+    }
+  }
+
+  // ── 每帧更新边标签位置,跟随节点漂浮动画 ──
+  function updateEdgeLabelsFollowFloating() {
+    const meta = linkMetaRef.current;
+    const len = meta.length;
+    const views = viewsRef.current; // Map<string, NodeView>,O(1) 查找
+    for (let i = 0; i < len; i++) {
+      const m = meta[i];
+      if (!m.displayLabel) continue;
+      const labelObj = linkLabelRef.current.get(m.labelKey);
+      if (!labelObj || !labelObj.visible) continue;
+      const sView = views.get(m.s.id);
+      const tView = views.get(m.t.id);
+      if (sView && tView) {
+        // 使用 container 位置(包含漂浮偏移)计算中点
+        labelObj.position.set(
+          (sView.container.x + tView.container.x) / 2,
+          (sView.container.y + tView.container.y) / 2
+        );
+      }
     }
   }
 
@@ -1185,12 +1228,17 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       const gp = world.toLocal(g);
       let nx = gp.x + ds.offsetGraph!.x;
       let ny = gp.y + ds.offsetGraph!.y;
-      // 软视口钳制:按当前实时视口(world 变换 + width/height)限制节点位置,
-      // 侧边栏收起导致 width 变化时自动适应。留少量边距让节点可贴边。
-      const b = liveBoundsRef.current;
-      if (isFinite(b.minX) && isFinite(b.maxX)) {
-        nx = Math.max(b.minX, Math.min(b.maxX, nx));
-        ny = Math.max(b.minY, Math.min(b.maxY, ny));
+      // 软视口钳制:先在屏幕空间钳制到窗口边界,再转回图坐标。
+      // 这样无论是否有 NVIDIA ShadowPlay 等覆盖层偏移鼠标坐标,节点都能贴到真实窗口边缘。
+      const { width: w, height: h } = sizeRef.current;
+      const screenPos = world.toGlobal({ x: nx, y: ny });
+      const margin = 10;
+      if (screenPos.x < margin || screenPos.x > w - margin || screenPos.y < margin || screenPos.y > h - margin) {
+        const clampedX = Math.max(margin, Math.min(w - margin, screenPos.x));
+        const clampedY = Math.max(margin, Math.min(h - margin, screenPos.y));
+        const clamped = world.toLocal({ x: clampedX, y: clampedY });
+        nx = clamped.x;
+        ny = clamped.y;
       }
       // 主线程立即更新(视觉零延迟)
       ds.node.fx = nx;

@@ -199,7 +199,7 @@ export const zh = {
     'chat.toolResultLabel': '结果',
     'chat.sessionHistory': '会话记录',
     'chat.sessionCount': '会话记录 ({n})',
-    'chat.newChat': '＋ 新对话',
+    'chat.newChat': '新对话',
     'chat.noSessions': '暂无历史会话',
     'chat.noTitle': '无标题',
     'chat.renameSession': '重命名',

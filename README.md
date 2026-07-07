@@ -83,9 +83,15 @@ All data stays on your machine. AI writes into `<!-- @generated -->` blocks, nev
 
 <div align="center">
 
-| Knowledge Graph | Dashboard |
+| Knowledge Graph View | AI Agent in Action |
 |:---:|:---:|
-| ![Graph View](scrennshot1.png) | ![Dashboard](scrennshot2.png) |
+| ![Knowledge Graph](screenshots/showcase-knowledge-graph.gif) | ![AI Agent](screenshots/showcase-graph-view.gif) |
+
+<br>
+
+### Knowledge Graph — Interactive Exploration
+
+![Knowledge Graph Interactive](screenshots/knowledge-graph-interactive.gif)
 
 </div>
 

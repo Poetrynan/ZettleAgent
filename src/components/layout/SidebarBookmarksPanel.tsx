@@ -212,6 +212,17 @@ export function SidebarBookmarksPanel({
               onToggle={() => toggleFolder(dailyKey)}
               count={dailyFileCount}
               icon={<CalendarIcon />}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onContextMenu(e, {
+                  name: state.lang === 'zh' ? '日记 / 每日笔记' : 'Daily Notes',
+                  path: dailyKey,
+                  is_dir: true,
+                  children: dailyChildren,
+                  file_count: dailyFileCount,
+                });
+              }}
             />
             {isDailyExpanded && dailyChildren.length > 0 && (
               <div className="tree-children-enter">

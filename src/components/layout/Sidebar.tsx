@@ -334,6 +334,33 @@ export function Sidebar() {
     }
   };
 
+  // ── Clear Daily Notes Directory ──
+  const handleClearDirectory = async (node: DirTreeNode) => {
+    const files = (node.children ?? []).filter(c => !c.is_dir);
+    if (files.length === 0) {
+      showToast(state.lang === 'zh' ? '目录已经是空的' : 'Directory is already empty', 'info');
+      return;
+    }
+    const ok = window.confirm(
+      state.lang === 'zh'
+        ? `确定要清空「${node.name}」下的 ${files.length} 篇笔记吗？\n\n这将从文件系统和数据库中删除这些笔记，且不可恢复。`
+        : `Clear ${files.length} notes under "${node.name}"?\n\nThis will delete them from filesystem and database, and cannot be undone.`
+    );
+    if (!ok) return;
+    try {
+      for (const f of files) {
+        await deleteFile(f.path);
+      }
+      showToast(state.lang === 'zh' ? `已清空 ${files.length} 篇笔记` : `Cleared ${files.length} notes`, 'success');
+      await refresh();
+      loadDailyTree();
+      setContextMenu(null);
+    } catch (err) {
+      console.error('Failed to clear directory:', err);
+      showToast(String(err), 'error');
+    }
+  };
+
   // ── Import via Dialog ──
   const handleImportFiles = async () => {
     if (!state.vaultPath) {
@@ -518,6 +545,7 @@ export function Sidebar() {
     if (!contextMenu) return [];
     const node = contextMenu.node;
     const isWorkspaceRoot = state.vaultPaths.includes(node.path);
+    const isDailyNotes = node.path === '__daily_notes__';
 
     if (node.is_dir) {
       const items: any[] = [
@@ -570,7 +598,15 @@ export function Sidebar() {
         },
       ];
 
-      if (isWorkspaceRoot) {
+      if (isDailyNotes) {
+        items.push({
+          label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>{state.lang === 'zh' ? '清空目录' : 'Clear Directory'}</span></div>),
+          danger: true,
+          onClick: () => handleClearDirectory(node)
+        });
+      } else if (isWorkspaceRoot) {
         const isPrimary = state.vaultPaths[0] === node.path;
         if (!isPrimary) {
           items.push({

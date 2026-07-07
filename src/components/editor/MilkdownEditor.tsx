@@ -50,10 +50,10 @@ mermaid.initialize({
 });
 
 
-// Crepe theme styles — load appropriate theme based on dark mode
+// Crepe theme styles — light base theme only; dark mode overrides live in
+// src/styles/theme-dark.css so the editor follows the app theme reliably.
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
-import '@milkdown/crepe/theme/frame-dark.css';
 
 interface MilkdownEditorProps {
   value: string;

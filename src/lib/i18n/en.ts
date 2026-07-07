@@ -199,7 +199,7 @@ export const en = {
     'chat.toolResultLabel': 'Result',
     'chat.sessionHistory': 'Sessions',
     'chat.sessionCount': 'Sessions ({n})',
-    'chat.newChat': '+ New Chat',
+    'chat.newChat': 'New Chat',
     'chat.noSessions': 'No sessions yet',
     'chat.noTitle': 'Untitled',
     'chat.renameSession': 'Rename',

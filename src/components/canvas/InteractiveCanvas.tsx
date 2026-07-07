@@ -1182,17 +1182,32 @@ Return ONLY a JSON array, no markdown, no explanation:
       return;
     }
 
-    // 通过 Context 传递 prompt 和笔记到 Chat（比事件更可靠）
+    // 构建包含节点名称的 prompt，让 AI 知道具体在分析哪些节点
+    const noteNames = noteInfos.map(n => n.name).concat(textInfos.map(t => t.name));
     const prompt = state.lang === 'zh'
-      ? `请分析以下画布上的 ${selectedNodes.length} 个节点之间的关系`
-      : `Analyze the relationships between these ${selectedNodes.length} nodes on the canvas`;
+      ? `请分析以下画布上选中的 ${selectedNodes.length} 个节点（${noteNames.join('、')}）之间的关系，包括它们的语义连接、共同主题、互补或矛盾之处，以及潜在的知识网络结构。`
+      : `Analyze the relationships between these ${selectedNodes.length} selected nodes on the canvas (${noteNames.join(', ')}), including their semantic connections, common themes, complementary or contradictory aspects, and potential knowledge network structure.`;
 
-    setPendingChatPrompt(prompt);
+    // 1. 打开 Chat 面板（传空字符串仅用于触发 isChatOpen，不会覆盖事件设置的输入）
+    setPendingChatPrompt('');
+
+    // 2. 通过事件传递完整的节点数据，SmartChat 监听器会自动：
+    //    - 将笔记附加到 attachedNotes（发送时读取笔记全文）
+    //    - 将文本节点内容嵌入 prompt 上下文
+    window.dispatchEvent(new CustomEvent('zettel:canvas-selection', {
+      detail: {
+        source: 'canvas' as const,
+        notes: noteInfos,
+        textNodes: textInfos,
+        prompt,
+        timestamp: Date.now(),
+      },
+    }));
 
     // 显示提示
     const msg = state.lang === 'zh'
-      ? `已将 ${noteInfos.length} 个笔记发送到 Chat`
-      : `Sent ${noteInfos.length} notes to Chat`;
+      ? `已将 ${noteInfos.length} 个笔记和 ${textInfos.length} 个文本节点发送到 Chat`
+      : `Sent ${noteInfos.length} notes and ${textInfos.length} text nodes to Chat`;
     showToast(msg, 'success');
 
     // 短暂高亮选中的节点作为反馈
