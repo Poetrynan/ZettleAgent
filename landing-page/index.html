@@ -343,6 +343,19 @@
       border-color: rgba(99, 102, 241, 0.35);
     }
     .showcase-hero-gif.paused { animation-play-state: paused; }
+    /* Lazy loading: prevent layout shift + fade-in */
+    img[loading="lazy"] {
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    }
+    /* Card video/img: prevent CLS with aspect-ratio */
+    .showcase-card img,
+    .showcase-card video {
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      background: #0f172a;
+    }
 
     /* ── Showcase Section (Features GIFs) ───────────────────── */
     .showcase-section { padding: 100px 0; }
@@ -717,6 +730,9 @@
       .why-metric { min-width: auto; }
     }
   </style>
+  <!-- Preload critical media for instant first paint -->
+  <link rel="preload" href="knowledge-graph-demo.mp4" as="fetch" type="video/mp4" fetchpriority="high" crossorigin="anonymous">
+  <link rel="preload" href="new_logo.png" as="image" type="image/png">
 </head>
 <body>
 
@@ -790,18 +806,16 @@
   <!-- Showcase Hero: Knowledge Graph -->
   <section class="showcase-hero">
     <div class="container" style="text-align:center;">
-      <video class="showcase-hero-gif" autoplay loop muted playsinline preload="metadata"
-        poster="knowledge-graph-interactive.gif">
+      <video class="showcase-hero-gif" autoplay loop muted playsinline preload="auto"
+        poster="knowledge-graph-interactive.gif"
+        style="background-image:url('knowledge-graph-interactive.gif');background-size:cover;background-position:center;">
+        <source src="knowledge-graph-interactive.webm" type="video/webm">
         <source src="knowledge-graph-demo.mp4" type="video/mp4">
         Your browser does not support the video tag.
       </video>
-      <img src="knowledge-graph-interactive.gif" alt="Knowledge Graph Interactive" class="showcase-hero-gif" style="display:none;">
       <p style="margin-top:12px;font-size:0.78rem;color:var(--text-muted);">
         <span data-en="Knowledge Graph — Interactive graph exploration" data-zh="知识图谱 — 交互式图探索">Knowledge Graph — Interactive graph exploration</span>
       </p>
-      <!-- <p style="margin-top:6px;font-size:0.7rem;color:var(--text-muted);opacity:0.6;">
-        <span data-en="↑ Drag nodes · Click to navigate · Search semantic connections" data-zh="↑ 拖拽节点 · 点击导航 · 搜索语义连接">↑ Drag nodes · Click to navigate · Search semantic connections</span>
-      </p> -->
     </div>
   </section>
 
@@ -931,11 +945,10 @@
         <!-- Knowledge Graph -->
         <div class="showcase-card reveal">
           <div style="position:relative;">
-            <video autoplay loop muted playsinline preload="metadata" style="width:100%;display:block;"
-              poster="showcase-knowledge-graph.gif">
-              <source src="showcase-knowledge-graph.mp4" type="video/mp4">
-            </video>
-            <img src="showcase-knowledge-graph.gif" alt="Knowledge Graph" style="width:100%;display:none;">
+            <img src="showcase-knowledge-graph.gif" alt="Knowledge Graph"
+              loading="lazy" decoding="async" width="600" height="340"
+              style="width:100%;display:block;aspect-ratio:16/9;object-fit:cover;"
+              onload="this.style.opacity=1" data-loaded="false">
           </div>
           <div class="showcase-card-label">
             <span data-en="Semantic Graph View" data-zh="语义图谱视图">Semantic Graph View</span>
@@ -945,11 +958,10 @@
         <!-- AI Agent -->
         <div class="showcase-card reveal reveal-d1">
           <div style="position:relative;">
-            <video autoplay loop muted playsinline preload="metadata" style="width:100%;display:block;"
-              poster="showcase-graph-view.gif">
-              <source src="showcase-graph-view.mp4" type="video/mp4">
-            </video>
-            <img src="showcase-graph-view.gif" alt="AI Agent" style="width:100%;display:none;">
+            <img src="showcase-graph-view.gif" alt="AI Agent"
+              loading="lazy" decoding="async" width="600" height="340"
+              style="width:100%;display:block;aspect-ratio:16/9;object-fit:cover;"
+              onload="this.style.opacity=1" data-loaded="false">
           </div>
           <div class="showcase-card-label">
             <span data-en="AI Agent" data-zh="AI Agent">AI Agent</span>
@@ -1439,6 +1451,15 @@
     }
     function toggleLang() { setLang(currentLang === 'en' ? 'zh' : 'en'); }
     setLang(currentLang);
+  </script>
+  <!-- Lazy load non-critical media -->
+  <script>
+  (function() {
+    document.querySelectorAll('img[loading="lazy"]').forEach(function(img) {
+      img.addEventListener('load', function() { this.style.opacity = '1'; });
+      if (img.complete) img.style.opacity = '1';
+    });
+  })();
   </script>
 </body>
 </html>

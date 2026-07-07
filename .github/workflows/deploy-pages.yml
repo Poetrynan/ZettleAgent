@@ -1,4 +1,5 @@
 # Deploy landing-page/ folder to GitHub Pages
+# Auto-compresses media files on GitHub's CI (ffmpeg pre-installed on ubuntu-latest)
 name: Deploy Landing Page to GitHub Pages
 
 on:
@@ -24,7 +25,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload landing-page/ artifact
+      - name: Check ffmpeg
+        run: ffmpeg -version 2>&1 | head -1
+
+      # ── Compress MP4 (12MB → ~2-3MB) ──
+      - name: Compress Hero MP4
+        working-directory: landing-page
+        run: |
+          ffmpeg -y -i knowledge-graph-demo.mp4 \
+            -vcodec libx264 -crf 28 -preset slow \
+            -profile:v high -level 4.1 \
+            -movflags +faststart -an \
+            knowledge-graph-demo-compressed.mp4
+          ls -lh knowledge-graph-demo*.mp4
+
+      # ── GIF → WebM (reduce ~90%) ──
+      - name: Convert GIFs to WebM
+        working-directory: landing-page
+        run: |
+          for gif in knowledge-graph-interactive.gif showcase-knowledge-graph.gif showcase-graph-view.gif; do
+            if [ -f "$gif" ]; then
+              webm="${gif%.gif}.webm"
+              ffmpeg -y -i "$gif" -c vp9 -b:v 0 -crf 41 -row-mt=1 "$webm"
+              echo "✓ $gif → $webm"
+            fi
+          done
+
+      # ── PNG → WebP Logo ──
+      - name: Convert logo to WebP
+        working-directory: landing-page
+        run: |
+          if [ -f new_logo.png ]; then
+            ffmpeg -y -i new_logo.png -q:v 80 new_logo.webp
+            echo "✓ new_logo.png → new_logo.webp"
+            ls -lh new_logo.*
+          fi
+
+      # ── Upload compressed artifact ──
+      - name: Upload landing-page artifact (compressed)
         uses: actions/upload-pages-artifact@v3
         with:
           path: landing-page/
