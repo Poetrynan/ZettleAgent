@@ -16,7 +16,7 @@ export type PenMode = 'off' | 'pen' | 'eraser';
 
 export interface StrokeData {
   id: string;
-  points: [number, number, number][];  // [x, y, pressure] 屏幕坐标
+  points: [number, number, number][];  // [x, y, pressure] 世界坐标（Flow 坐标系）
   color: string;
   size: number;
 }
@@ -33,8 +33,6 @@ interface FreehandOverlayProps {
   penColor?: string;
   penSize?: number;
   eraserSize?: number;
-  containerWidth: number;
-  containerHeight: number;
   /** Canvas file path for localStorage persistence */
   canvasPath?: string | null;
 }
@@ -126,8 +124,6 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
       penColor = '#3b82f6',
       penSize = 4,
       eraserSize = 24,
-      containerWidth,
-      containerHeight,
       canvasPath,
     } = props;
 
@@ -143,6 +139,7 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
   });
   const [hoveredStrokeId, setHoveredStrokeId] = useState<string | null>(null);
   const [eraserPos, setEraserPos] = useState<{ x: number; y: number } | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 1200, height: 800 });
   const currentStrokeRef = useRef<StrokeData | null>(null);
   const isDrawingRef = useRef(false);
   const isErasingRef = useRef(false);
@@ -154,11 +151,14 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const needsRedrawRef = useRef(false);
+  const redrawCanvasRef = useRef<() => void>(() => {});
 
   const penSizeRef = useRef(penSize);
   penSizeRef.current = penSize;
   const penColorRef = useRef(penColor);
   penColorRef.current = penColor;
+  const containerSizeRef = useRef(containerSize);
+  containerSizeRef.current = containerSize;
 
   // 性能优化: 创建离屏 Canvas 用于缓存已完成的笔触
   useEffect(() => {
@@ -166,9 +166,9 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
       offscreenCanvasRef.current = document.createElement('canvas');
     }
     const offscreen = offscreenCanvasRef.current;
-    offscreen.width = containerWidth;
-    offscreen.height = containerHeight;
-  }, [containerWidth, containerHeight]);
+    offscreen.width = containerSize.width;
+    offscreen.height = containerSize.height;
+  }, [containerSize]);
 
   // Persist strokes to localStorage
   useEffect(() => {
@@ -211,15 +211,44 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
     }
   }, [mode]);
 
+  // 测量容器的大小
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerSize({ width: rect.width, height: rect.height });
+      }
+    };
+
+    updateSize();
+    window.addEventListener('resize', updateSize);
+
+    // 使用 ResizeObserver 监听容器的大小变化
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(updateSize);
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      if (observer) {
+        observer.disconnect();
+      }
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
   // 性能优化: 使用 Canvas 2D 绘制笔触
+  // 笔触数据存储的是世界坐标，需要转换为屏幕坐标（Canvas 坐标）进行绘制
   const drawStrokeToCanvas = useCallback((ctx: CanvasRenderingContext2D, stroke: StrokeData, isHovered: boolean, vp: { x: number; y: number; zoom: number }) => {
     if (stroke.points.length < 2) return;
-    const flowPoints: [number, number, number][] = stroke.points.map(
-      ([sx, sy, p]) => [(sx - vp.x) / vp.zoom, (sy - vp.y) / vp.zoom, p]
+    // 将世界坐标转换为屏幕坐标（Canvas 坐标）
+    const screenPoints: [number, number, number][] = stroke.points.map(
+      ([wx, wy, p]) => [wx * vp.zoom + vp.x, wy * vp.zoom + vp.y, p]
     );
-    const outline = getStroke(flowPoints, {
+    const outline = getStroke(screenPoints, {
       ...STROKE_OPTIONS,
-      size: stroke.size / vp.zoom,
+      size: stroke.size * vp.zoom,  // 笔触大小也需要根据缩放调整
     });
     if (!outline || outline.length < 4) return;
 
@@ -252,6 +281,9 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
     }
   }, [mode, hoveredStrokeId, drawStrokeToCanvas]);
 
+  // 同步更新 redrawCanvasRef，避免循环依赖
+  redrawCanvasRef.current = redrawCanvas;
+
   // 性能优化: 使用 requestAnimationFrame 批量重绘
   const scheduleRedraw = useCallback(() => {
     if (rafIdRef.current === null) {
@@ -271,32 +303,41 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) {
-      canvas.width = containerWidth;
-      canvas.height = containerHeight;
+      canvas.width = containerSize.width;
+      canvas.height = containerSize.height;
     }
     scheduleRedraw();
-  }, [containerWidth, containerHeight, viewport, scheduleRedraw]);
+  }, [containerSize, viewport, scheduleRedraw]);
 
   // 执行一次擦除操作（复用指针按下 / 拖动）- 使用包围盒加速
-  const applyErase = useCallback((sx: number, sy: number) => {
-    const radius = eraserRadiusRef.current;
-    setStrokes(prev => {
-      const erase = eraseStrokePartial(sx, sy, radius);
-      let changed = false;
-      const next: StrokeData[] = [];
-      for (const s of prev) {
-        const frags = erase(s);
-        if (frags.length === 0) {
-          changed = true;
-        } else if (frags.length === 1 && frags[0].points.length === s.points.length) {
-          next.push(s);
-        } else {
-          changed = true;
-          next.push(...frags);
-        }
+  // 参数为世界坐标 (worldX, worldY) 和世界坐标系的半径
+  const applyErase = useCallback((worldX: number, worldY: number, worldRadius?: number) => {
+    const radius = worldRadius ?? (eraserRadiusRef.current / viewportRef.current.zoom);
+    
+    // 先计算新的笔触数据
+    const erase = eraseStrokePartial(worldX, worldY, radius);
+    let changed = false;
+    const next: StrokeData[] = [];
+    for (const s of strokesRef.current) {
+      const frags = erase(s);
+      if (frags.length === 0) {
+        changed = true;
+      } else if (frags.length === 1 && frags[0].points.length === s.points.length) {
+        next.push(s);
+      } else {
+        changed = true;
+        next.push(...frags);
       }
-      return changed ? next : prev;
-    });
+    }
+    
+    if (changed) {
+      // 立即同步更新 ref（用于渲染）
+      strokesRef.current = next;
+      // 立即重绘，实现平滑擦除效果
+      redrawCanvasRef.current();
+      // 异步更新 React state（用于持久化）
+      setStrokes(next);
+    }
   }, []);
 
   const handlePointerDown = useCallback((e: PointerEvent) => {
@@ -308,21 +349,27 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
     e.preventDefault();
     e.stopPropagation();
 
+    // 使用相对于容器的坐标，并转换为世界坐标存储
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
 
+    // 转换为世界坐标（Flow 坐标系）
+    const vp = viewportRef.current;
+    const worldX = (sx - vp.x) / vp.zoom;
+    const worldY = (sy - vp.y) / vp.zoom;
+
     if (mode === 'eraser') {
       isErasingRef.current = true;
-      applyErase(sx, sy);
+      applyErase(worldX, worldY);
       return;
     }
 
-    // pen mode
+    // pen mode - 存储世界坐标
     const stroke: StrokeData = {
       id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      points: [[sx, sy, e.pressure || 0.5]],
+      points: [[worldX, worldY, e.pressure || 0.5]],
       color: penColorRef.current,
       size: penSizeRef.current,
     };
@@ -333,6 +380,7 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
   const handlePointerMoveInner = useCallback((e: PointerEvent) => {
     if (mode === 'off') return;
 
+    // 使用相对于容器的坐标
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
@@ -340,6 +388,11 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
     const insideCanvas =
       e.clientX >= rect.left && e.clientX <= rect.right &&
       e.clientY >= rect.top && e.clientY <= rect.bottom;
+
+    // 转换为世界坐标
+    const vp = viewportRef.current;
+    const worldX = (sx - vp.x) / vp.zoom;
+    const worldY = (sy - vp.y) / vp.zoom;
 
     // Eraser mode: track position + erase while dragging
     if (mode === 'eraser') {
@@ -349,13 +402,14 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
         return;
       }
 
-      const vp = viewportRef.current;
-      const flowX = (sx - vp.x) / vp.zoom;
-      const flowY = (sy - vp.y) / vp.zoom;
-      setEraserPos({ x: flowX, y: flowY });
+      // 橡皮擦位置使用屏幕坐标（用于光标显示）
+      setEraserPos({ x: sx, y: sy });
+
+      // 擦除半径需要转换为世界坐标
+      const worldRadius = eraserRadiusRef.current / vp.zoom;
 
       if (isErasingRef.current) {
-        applyErase(sx, sy);
+        applyErase(worldX, worldY, worldRadius);
         setHoveredStrokeId(null);
       } else {
         // 未按下:只做悬停高亮（使用包围盒加速）
@@ -364,11 +418,11 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
         for (let i = currentStrokes.length - 1; i >= 0; i--) {
           const s = currentStrokes[i];
           const bounds = getStrokeBounds(s);
-          if (sx >= bounds.minX - eraserRadiusRef.current &&
-              sx <= bounds.maxX + eraserRadiusRef.current &&
-              sy >= bounds.minY - eraserRadiusRef.current &&
-              sy <= bounds.maxY + eraserRadiusRef.current) {
-            if (strokeContainsPoint(s, sx, sy, eraserRadiusRef.current)) {
+          if (worldX >= bounds.minX - worldRadius &&
+              worldX <= bounds.maxX + worldRadius &&
+              worldY >= bounds.minY - worldRadius &&
+              worldY <= bounds.maxY + worldRadius) {
+            if (strokeContainsPoint(s, worldX, worldY, worldRadius)) {
               found = s.id;
               break;
             }
@@ -382,7 +436,8 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
     // Pen mode
     if (!isDrawingRef.current) return;
 
-    currentStrokeRef.current!.points.push([sx, sy, e.pressure || 0.5]);
+    // 存储世界坐标
+    currentStrokeRef.current!.points.push([worldX, worldY, e.pressure || 0.5]);
 
     // 性能优化: 使用 RAF 批量重绘，避免每帧 setState
     scheduleRedraw();
@@ -411,6 +466,7 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
 
   // ── ESC 退出：在 window 上 capture-phase 监听，避免焦点丢失导致失效 ──
   const containerRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<Element | null>(null);
 
   // 在 pane 上监听指针事件，overlay 本身 pointer-events:none，不阻挡节点选中
   useEffect(() => {
@@ -420,10 +476,11 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
       ?.closest('.interactive-canvas-container')
       ?.querySelector('.react-flow__pane');
     if (!pane) return;
+    paneRef.current = pane;
 
-    const onPointerDown = (e: PointerEvent) => handlePointerDown(e);
-    const onPointerMove = (e: PointerEvent) => handlePointerMove(e);
-    const onPointerUp = (e: PointerEvent) => handlePointerUp(e);
+    const onPointerDown = (e: Event) => handlePointerDown(e as PointerEvent);
+    const onPointerMove = (e: Event) => handlePointerMove(e as PointerEvent);
+    const onPointerUp = (e: Event) => handlePointerUp(e as PointerEvent);
 
     pane.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
@@ -461,8 +518,8 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
         position: 'absolute',
         top: 0,
         left: 0,
-        width: containerWidth,
-        height: containerHeight,
+        width: '100%',
+        height: '100%',
         pointerEvents: 'none',
         outline: 'none',
         zIndex: mode !== 'off' ? 1000 : 'auto',
@@ -471,82 +528,42 @@ export const FreehandOverlay = forwardRef<FreehandOverlayHandle, FreehandOverlay
       {/* 性能优化: 使用 Canvas 替代 SVG 进行实时绘制 */}
       <canvas
         ref={canvasRef}
-        width={containerWidth}
-        height={containerHeight}
+        width={containerSize.width}
+        height={containerSize.height}
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
-          width: containerWidth,
-          height: containerHeight,
+          width: containerSize.width,
+          height: containerSize.height,
           pointerEvents: 'none',
           zIndex: 999,
           touchAction: 'none',
         }}
       />
 
-      {/* Eraser cursor: 磨砂圆圈 - 使用独立的 DOM 元素避免 Canvas 重绘 */}
+      {/* Eraser cursor: 磨砂圆圈 - 使用相对于容器的屏幕坐标 */}
       {mode === 'eraser' && eraserPos && (() => {
-        const vp = viewportRef.current;
-        const r = eraserSize / vp.zoom;
+        // eraserPos 已经是屏幕坐标（相对于容器），直接使用
+        const r = eraserSize;
         const isActive = !!hoveredStrokeId;
         const strokeColor = isActive ? '#ef4444' : '#94a3b8';
         return (
           <div
             style={{
               position: 'absolute',
-              left: 0,
-              top: 0,
-              width: '100%',
-              height: '100%',
+              left: eraserPos.x - r,
+              top: eraserPos.y - r,
+              width: r * 2,
+              height: r * 2,
               pointerEvents: 'none',
               zIndex: 1000,
+              borderRadius: '50%',
+              background: isActive ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.10)',
+              border: `1.5px ${isActive ? 'solid' : 'dashed'} ${strokeColor}`,
+              boxShadow: '0 0 0 1px rgba(255,255,255,0.3) inset',
             }}
-          >
-            <svg
-              viewBox={`${vp.x} ${vp.y} ${containerWidth / vp.zoom} ${containerHeight / vp.zoom}`}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: containerWidth,
-                height: containerHeight,
-                overflow: 'visible',
-              }}
-            >
-              <defs>
-                <filter id="eraser-blur" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur in="SourceGraphic" stdDeviation="2" />
-                </filter>
-              </defs>
-              <g pointerEvents="none">
-                <circle
-                  cx={eraserPos.x}
-                  cy={eraserPos.y}
-                  r={r}
-                  fill={isActive ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.10)'}
-                  filter="url(#eraser-blur)"
-                />
-                <circle
-                  cx={eraserPos.x}
-                  cy={eraserPos.y}
-                  r={r}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth={1.5 / vp.zoom}
-                  opacity={isActive ? 0.9 : 0.6}
-                  strokeDasharray={isActive ? 'none' : `${4 / vp.zoom} ${3 / vp.zoom}`}
-                />
-                <circle
-                  cx={eraserPos.x}
-                  cy={eraserPos.y}
-                  r={2 / vp.zoom}
-                  fill={strokeColor}
-                  opacity={0.8}
-                />
-              </g>
-            </svg>
-          </div>
+          />
         );
       })()}
     </div>

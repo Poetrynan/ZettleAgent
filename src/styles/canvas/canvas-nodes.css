@@ -553,3 +553,286 @@
   border-top: 1px solid rgba(226, 232, 240, 0.5);
   z-index: 6;
 }
+
+/* Loading + Spinner (shared) */
+.web-node-loading,
+.pdf-node-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.web-node-spinner,
+.pdf-node-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #64748b;
+  border-radius: 50%;
+  animation: webNodeSpin 0.8s linear infinite;
+}
+
+@keyframes webNodeSpin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* ════════════════════════════════════════════════════════════════════
+   DARK MODE — Canvas Node Cards (Obsidian-inspired)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Note Node Card ── */
+[data-theme="dark"] .note-node-card,
+.dark-theme .note-node-card {
+  background: rgba(30, 41, 59, 0.90);
+  border-color: rgba(71, 85, 105, 0.5);
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .note-node-card:hover,
+.dark-theme .note-node-card:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .note-node-card.selected,
+.dark-theme .note-node-card.selected {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 0 0 1.5px rgba(96, 165, 250, 0.4), 0 4px 20px -4px rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="dark"] .note-node-header,
+.dark-theme .note-node-header {
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .note-node-btn:hover,
+.dark-theme .note-node-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .note-node-skeleton-line,
+.dark-theme .note-node-skeleton-line {
+  background: linear-gradient(90deg, rgba(51, 65, 85, 0.5) 25%, rgba(71, 85, 105, 0.7) 50%, rgba(51, 65, 85, 0.5) 75%);
+  background-size: 200% 100%;
+}
+
+/* ── Web Node Card ── */
+[data-theme="dark"] .web-node-card,
+.dark-theme .web-node-card {
+  background: rgba(30, 41, 59, 0.90);
+  border-color: rgba(71, 85, 105, 0.5);
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .web-node-card:hover,
+.dark-theme .web-node-card:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .web-node-card.selected,
+.dark-theme .web-node-card.selected {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 0 0 1.5px rgba(96, 165, 250, 0.4), 0 4px 20px -4px rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="dark"] .web-node-header,
+.dark-theme .web-node-header {
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .web-node-body,
+.dark-theme .web-node-body {
+  background: rgba(15, 23, 42, 0.4);
+}
+
+/* URL input form */
+[data-theme="dark"] .web-node-url-form,
+.dark-theme .web-node-url-form {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%);
+}
+
+[data-theme="dark"] .web-node-url-row,
+.dark-theme .web-node-url-row {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(71, 85, 105, 0.5);
+}
+
+[data-theme="dark"] .web-node-url-row:focus-within,
+.dark-theme .web-node-url-row:focus-within {
+  border-color: rgba(129, 140, 248, 0.5);
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+}
+
+[data-theme="dark"] .web-node-url-input,
+.dark-theme .web-node-url-input {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .web-node-url-input::placeholder,
+.dark-theme .web-node-url-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .web-node-url-btn,
+.dark-theme .web-node-url-btn {
+  background: #475569 !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+[data-theme="dark"] .web-node-url-btn:hover,
+.dark-theme .web-node-url-btn:hover {
+  background: #64748b !important;
+}
+
+/* Title input */
+[data-theme="dark"] .web-node-title-input,
+.dark-theme .web-node-title-input {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .web-node-title-editable:hover,
+.dark-theme .web-node-title-editable:hover {
+  background: rgba(51, 65, 85, 0.5);
+  border-color: rgba(100, 116, 139, 0.3);
+}
+
+/* Fallback card */
+[data-theme="dark"] .web-node-fallback,
+.dark-theme .web-node-fallback {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.6) 100%);
+}
+
+[data-theme="dark"] .web-node-fallback-btn,
+.dark-theme .web-node-fallback-btn {
+  background: #475569;
+}
+
+[data-theme="dark"] .web-node-fallback-btn:hover,
+.dark-theme .web-node-fallback-btn:hover {
+  filter: brightness(1.2);
+}
+
+[data-theme="dark"] .web-node-fallback-edit,
+.dark-theme .web-node-fallback-edit {
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .web-node-fallback-edit:hover,
+.dark-theme .web-node-fallback-edit:hover {
+  background: rgba(96, 165, 250, 0.1);
+}
+
+/* Fallback strip */
+[data-theme="dark"] .web-node-fallback-strip,
+.dark-theme .web-node-fallback-strip {
+  background: rgba(30, 41, 59, 0.92);
+  border-top-color: rgba(71, 85, 105, 0.4);
+}
+
+/* Loading */
+[data-theme="dark"] .web-node-loading,
+.dark-theme .web-node-loading {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+[data-theme="dark"] .web-node-spinner,
+.dark-theme .web-node-spinner {
+  border-color: rgba(71, 85, 105, 0.3);
+  border-top-color: #94a3b8;
+}
+
+/* ── PDF Node Card ── */
+[data-theme="dark"] .pdf-node-card,
+.dark-theme .pdf-node-card {
+  background: rgba(30, 41, 59, 0.90);
+  border-color: rgba(71, 85, 105, 0.5);
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .pdf-node-card:hover,
+.dark-theme .pdf-node-card:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .pdf-node-card.selected,
+.dark-theme .pdf-node-card.selected {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 0 0 1.5px rgba(96, 165, 250, 0.4), 0 4px 20px -4px rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="dark"] .pdf-node-header,
+.dark-theme .pdf-node-header {
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .pdf-node-body,
+.dark-theme .pdf-node-body {
+  background: rgba(15, 23, 42, 0.4);
+}
+
+[data-theme="dark"] .pdf-node-loading,
+.dark-theme .pdf-node-loading {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+[data-theme="dark"] .pdf-node-spinner,
+.dark-theme .pdf-node-spinner {
+  border-color: rgba(71, 85, 105, 0.3);
+  border-top-color: #94a3b8;
+}
+
+/* ── Image Node Card (already has dark bg, refine) ── */
+[data-theme="dark"] .image-node-body,
+.dark-theme .image-node-body {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+[data-theme="dark"] .image-node-header,
+.dark-theme .image-node-header {
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+
+/* ── Embed overlay hint ── */
+[data-theme="dark"] .embed-interaction-overlay:hover,
+.dark-theme .embed-interaction-overlay:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .embed-overlay-hint,
+.dark-theme .embed-overlay-hint {
+  background: rgba(30, 41, 59, 0.9);
+  color: var(--text-secondary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* ── NodeResizer handles in dark mode ── */
+[data-theme="dark"] .react-flow__resize-control.handle,
+.dark-theme .react-flow__resize-control.handle {
+  background: rgba(30, 41, 59, 0.95) !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-theme="dark"] .react-flow__resize-control.handle:hover,
+.dark-theme .react-flow__resize-control.handle:hover {
+  background: rgba(51, 65, 85, 1) !important;
+  border-color: rgba(129, 140, 248, 0.7) !important;
+}
+
+/* ── Handles (connection dots) in dark mode ── */
+[data-theme="dark"] .react-flow__handle,
+.dark-theme .react-flow__handle {
+  background: rgba(30, 41, 59, 0.9) !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+}
+
+[data-theme="dark"] .react-flow__handle:hover,
+.dark-theme .react-flow__handle:hover {
+  background-color: rgba(51, 65, 85, 1) !important;
+  border-color: rgba(129, 140, 248, 0.7) !important;
+}

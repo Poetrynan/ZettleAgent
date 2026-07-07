@@ -191,7 +191,7 @@
 }
 
 /* Nuclear option: override ANY div with light inline bg in dark mode */
-[data-theme="dark"] div[style*="background"]:not([style*="background: transparent"]):not([style*="background: inherit"]) {
+[data-theme="dark"] div[style*="background"]:not([style*="background: transparent"]):not([style*="background: inherit"]):not(.text-node-sticky):not(.note-node-card):not(.web-node-card):not(.pdf-node-card):not(.image-node-card):not(.group-node-frame):not(.sticky-color-dot) {
   background: var(--bg-elevated) !important;
 }
 

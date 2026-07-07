@@ -228,8 +228,36 @@ export function SidebarFileTree(props: FileTreeProps) {
       ) : trees.length === 0 ? (
         <div className="empty-state" style={{ padding: 'var(--space-8)' }}>
           <IconFolder size={48} />
-          <div className="empty-state-title">{t('sidebar.noVault')}</div>
-          <div className="empty-state-description">{t('sidebar.noVaultDesc')}</div>
+          <div className="empty-state-title">
+            {state.lang === 'zh' ? '当前区域为空' : 'Workspace is Empty'}
+          </div>
+          <div className="empty-state-description">
+            {state.lang === 'zh'
+              ? '请创建笔记或日记，或添加文件夹到工作区'
+              : 'Create a note or daily journal, or add a folder to workspace'}
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                try {
+                  const { openOrCreateDailyNote, notifyDailyNotesChanged } = await import('../../lib/dailyNote');
+                  const path = await openOrCreateDailyNote();
+                  setCurrentFile(path);
+                  setView('note');
+                  notifyDailyNotesChanged();
+                } catch (err) {
+                  console.error('Failed to create daily note:', err);
+                  showToast(String(err), 'error');
+                }
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+              {state.lang === 'zh' ? '创建今日日记' : 'Create Today Note'}
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>

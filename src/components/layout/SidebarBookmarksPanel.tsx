@@ -198,7 +198,7 @@ export function SidebarBookmarksPanel({
         </div>
       )}
 
-      {state.vaultPaths.length > 0 && (() => {
+      {(() => {
         const dailyKey = '__daily_notes__';
         const isDailyExpanded = expandedFolders.has(dailyKey) || searchExpandedFolders.has(dailyKey);
         const dailyChildren = dailyTree?.children ?? [];

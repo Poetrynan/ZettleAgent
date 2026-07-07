@@ -538,6 +538,86 @@
   }
 }
 
+/* ── Create File/Folder Modal Input Enhancement ───────────────────── */
+
+.modal-input-wrapper {
+  position: relative;
+  margin-top: var(--space-2);
+}
+
+.modal-input-wrapper::before {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3C/svg%3E") no-repeat center;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3C/svg%3E") no-repeat center;
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Folder icon variant */
+.modal-input-wrapper--folder::before {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") no-repeat center;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") no-repeat center;
+}
+
+.modal-input-wrapper input.input {
+  padding-left: var(--space-8);
+  font-size: var(--text-base);
+  min-height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border-subtle);
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-input-wrapper input.input:hover {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.modal-input-wrapper input.input:focus,
+.modal-input-wrapper input.input:focus-visible {
+  border-color: var(--accent-primary);
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  outline: none;
+}
+
+.modal-input-wrapper input.input::placeholder {
+  color: var(--text-quaternary);
+  font-weight: 400;
+}
+
+/* File extension hint */
+.modal-input-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.modal-input-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
 /* Dark theme adjustments */
 [data-theme="dark"] .file-recovery-modal,
 .dark-theme .file-recovery-modal {

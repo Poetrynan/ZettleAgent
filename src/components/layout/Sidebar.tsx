@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { openOrCreateDailyNote, getDailyFolderPath } from '../../lib/dailyNote';
+import { openOrCreateDailyNote, getDailyFolderPath, notifyDailyNotesChanged } from '../../lib/dailyNote';
 
 import {
   deleteFile,
@@ -134,6 +134,9 @@ export function Sidebar() {
   const [createFolderDialog, setCreateFolderDialog] = useState<DirTreeNode | null>(null);
   const [renameDialog, setRenameDialog] = useState<DirTreeNode | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DirTreeNode | null>(null);
+  const [deleteDailyConfirm, setDeleteDailyConfirm] = useState(false);
+  const [removeVaultConfirm, setRemoveVaultConfirm] = useState<{ path: string; name: string } | null>(null);
+  const [clearDirectoryConfirm, setClearDirectoryConfirm] = useState<{ node: DirTreeNode; fileCount: number } | null>(null);
 
   const [inputName, setInputName] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -269,11 +272,31 @@ export function Sidebar() {
     if (!createFileDialog || !inputName.trim()) return;
     try {
       const name = inputName.trim();
-      const newPath = await createFile(createFileDialog.path, name);
-      showToast(t('sidebar.createSuccess'), 'success');
+      let newPath: string;
+      try {
+        newPath = await createFile(createFileDialog.path, name);
+        showToast(t('sidebar.createSuccess'), 'success');
+      } catch (err: any) {
+        // 如果文件已存在，直接打开它
+        if (err?.message?.includes('already exists') || err?.includes?.('already exists')) {
+          const { join } = await import('@tauri-apps/api/path');
+          const fileName = name.endsWith('.md') ? name : `${name}.md`;
+          newPath = await join(createFileDialog.path, fileName);
+          showToast(state.lang === 'zh' ? '文件已存在，正在打开...' : 'File already exists, opening...', 'info');
+        } else {
+          throw err;
+        }
+      }
       setCreateFileDialog(null);
       setInputName('');
       await refresh();
+      // 展开父文件夹以显示新建的文件
+      expandFolder(createFileDialog.path);
+      // 如果在 Daily Note 文件夹中创建文件，触发刷新事件
+      const dailyPath = await getDailyFolderPath();
+      if (createFileDialog.path === dailyPath || createFileDialog.path.startsWith(dailyPath + '\\') || createFileDialog.path.startsWith(dailyPath + '/')) {
+        notifyDailyNotesChanged();
+      }
       setCurrentFile(newPath);
       setView('note');
     } catch (err) {
@@ -335,28 +358,75 @@ export function Sidebar() {
   };
 
   // ── Clear Daily Notes Directory ──
-  const handleClearDirectory = async (node: DirTreeNode) => {
+  const handleClearDirectory = (node: DirTreeNode) => {
     const files = (node.children ?? []).filter(c => !c.is_dir);
     if (files.length === 0) {
       showToast(state.lang === 'zh' ? '目录已经是空的' : 'Directory is already empty', 'info');
       return;
     }
-    const ok = window.confirm(
-      state.lang === 'zh'
-        ? `确定要清空「${node.name}」下的 ${files.length} 篇笔记吗？\n\n这将从文件系统和数据库中删除这些笔记，且不可恢复。`
-        : `Clear ${files.length} notes under "${node.name}"?\n\nThis will delete them from filesystem and database, and cannot be undone.`
-    );
-    if (!ok) return;
+    setClearDirectoryConfirm({ node, fileCount: files.length });
+  };
+
+  // ── Execute Clear Directory ──
+  const handleExecuteClearDirectory = async () => {
+    if (!clearDirectoryConfirm) return;
+    const { node, fileCount } = clearDirectoryConfirm;
     try {
+      const files = (node.children ?? []).filter(c => !c.is_dir);
       for (const f of files) {
         await deleteFile(f.path);
       }
-      showToast(state.lang === 'zh' ? `已清空 ${files.length} 篇笔记` : `Cleared ${files.length} notes`, 'success');
+      showToast(state.lang === 'zh' ? `已清空 ${fileCount} 篇笔记` : `Cleared ${fileCount} notes`, 'success');
+      setClearDirectoryConfirm(null);
       await refresh();
       loadDailyTree();
       setContextMenu(null);
     } catch (err) {
       console.error('Failed to clear directory:', err);
+      showToast(String(err), 'error');
+    }
+  };
+
+  // ── Delete Daily Notes Folder ──
+  const handleDeleteDailyFolder = async () => {
+    try {
+      const dailyPath = await getDailyFolderPath();
+      // 删除文件夹中的所有文件
+      const entries = await (await import('@tauri-apps/plugin-fs')).readDir(dailyPath);
+      for (const entry of entries) {
+        const entryPath = await (await import('@tauri-apps/api/path')).join(dailyPath, entry.name);
+        if (entry.isDirectory) {
+          await deleteFolder(entryPath);
+        } else {
+          await deleteFile(entryPath);
+        }
+      }
+      // 删除文件夹本身
+      await deleteFolder(dailyPath);
+      showToast(state.lang === 'zh' ? '日记文件夹已删除' : 'Daily notes folder deleted', 'success');
+      setDeleteDailyConfirm(false);
+      loadDailyTree();
+      notifyDailyNotesChanged();
+    } catch (err) {
+      console.error('Failed to delete daily notes folder:', err);
+      showToast(String(err), 'error');
+    }
+  };
+
+  // ── Remove Vault from Workspace ──
+  const handleRemoveVault = async () => {
+    if (!removeVaultConfirm) return;
+    try {
+      await removeVaultPath(removeVaultConfirm.path);
+      showToast(
+        state.lang === 'zh'
+          ? `「${removeVaultConfirm.name}」已从工作区移除`
+          : `"${removeVaultConfirm.name}" removed from workspace`,
+        'success'
+      );
+      setRemoveVaultConfirm(null);
+    } catch (err) {
+      console.error('Failed to remove vault:', err);
       showToast(String(err), 'error');
     }
   };
@@ -599,12 +669,43 @@ export function Sidebar() {
       ];
 
       if (isDailyNotes) {
+        // Daily Notes 目录：特殊处理
+        // 1. 修改"新建文件"为"新建今日日志"，直接使用当天日期
+        items[0] = {
+          label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span>{state.lang === 'zh' ? '新建今日日志' : 'New Today Note'}</span></div>),
+          onClick: async () => {
+            try {
+              const { openOrCreateDailyNote } = await import('../../lib/dailyNote');
+              const path = await openOrCreateDailyNote();
+              showToast(state.lang === 'zh' ? '今日日志已创建/打开' : 'Today note created/opened', 'success');
+              setCurrentFile(path);
+              setView('note');
+              await loadDailyTree();
+            } catch (err) {
+              showToast(String(err), 'error');
+            }
+          }
+        };
+        // 2. 移除"新建文件夹"选项（第2个元素）
+        items.splice(1, 1);
+        // 3. 添加清空目录选项
         items.push({
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             <span>{state.lang === 'zh' ? '清空目录' : 'Clear Directory'}</span></div>),
           danger: true,
           onClick: () => handleClearDirectory(node)
+        });
+        // 4. 添加删除日记文件夹选项（带特殊提醒）
+        items.push({
+          label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <IconTrash size={14} /><span>{state.lang === 'zh' ? '删除日记文件夹' : 'Delete Daily Notes Folder'}</span></div>),
+          danger: true,
+          onClick: () => setDeleteDailyConfirm(true)
         });
       } else if (isWorkspaceRoot) {
         const isPrimary = state.vaultPaths[0] === node.path;
@@ -617,7 +718,7 @@ export function Sidebar() {
         items.push({
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg><span>{state.lang === 'zh' ? '从工作区移除' : 'Remove from Workspace'}</span></div>),
           danger: true,
-          onClick: () => { removeVaultPath(node.path); }
+          onClick: () => { setRemoveVaultConfirm({ path: node.path, name: node.name }); }
         });
       } else {
         items.push(
@@ -878,12 +979,22 @@ export function Sidebar() {
         setRenameDialog={setRenameDialog}
         deleteConfirm={deleteConfirm}
         setDeleteConfirm={setDeleteConfirm}
+        deleteDailyConfirm={deleteDailyConfirm}
+        setDeleteDailyConfirm={setDeleteDailyConfirm}
+        removeVaultConfirm={removeVaultConfirm}
+        setRemoveVaultConfirm={setRemoveVaultConfirm}
+        clearDirectoryConfirm={clearDirectoryConfirm}
+        setClearDirectoryConfirm={setClearDirectoryConfirm}
         inputName={inputName}
         setInputName={setInputName}
         onHandleCreateFile={handleCreateFile}
         onHandleCreateFolder={handleCreateFolder}
         onHandleRename={handleRename}
         onHandleDelete={handleDelete}
+        onHandleDeleteDaily={handleDeleteDailyFolder}
+        onHandleRemoveVault={handleRemoveVault}
+        onHandleClearDirectory={handleExecuteClearDirectory}
+        lang={state.lang}
       />
     </aside>
   );

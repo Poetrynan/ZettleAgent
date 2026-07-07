@@ -581,6 +581,8 @@ export const zh = {
     'canvas.layoutCategories': '{0} 分类',
     'canvas.layoutClusters': '语义簇',
     'canvas.aiAnalyzeSelected': 'AI 分析并连接选中笔记',
+    'canvas.bringToFront': '置于顶层',
+    'canvas.sendToBack': '置于底层',
 
     // MemorySettings (P2-11)
     'memory.title': 'AI 记忆与聊天',

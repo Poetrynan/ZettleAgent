@@ -565,10 +565,8 @@
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
-/* 7b. Show ALL handles on ALL nodes while user is dragging a connection */
-.react-flow__node.connectable .react-flow__handle {
-  /* Already styled above; this ensures they exist */
-}
+/* 7b. Show ALL handles on ALL nodes while user is dragging a connection.
+   .react-flow__node.connectable .react-flow__handle is already styled above. */
 
 /* When a connection is being dragged, light up every target handle */
 .react-flow:has(.react-flow__connection) .react-flow__handle,
@@ -1091,4 +1089,269 @@
   border-color: rgba(239, 68, 68, 0.5);
   box-shadow: 0 0 12px -2px rgba(239, 68, 68, 0.25);
   transform: scale(1.12);
+}
+
+
+/* ════════════════════════════════════════════════════════════════════
+   DARK MODE — TextNode, Markdown, Preview Card, GroupNode
+   (Obsidian-inspired: dark surfaces, light text, muted accents)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Text Node Sticky: NO dark mode overrides.
+   The inline backgroundColor is set by the component (e.g. #fef9c3).
+   We do NOT override anything in dark mode; the bright colour stays bright. ── */
+
+/* Textarea text stays dark on colourful sticky backgrounds — no change needed.
+   But placeholder needs to be visible */
+[data-theme="dark"] .text-node-textarea::placeholder,
+.dark-theme .text-node-textarea::placeholder {
+  color: rgba(30, 41, 59, 0.4);
+}
+
+/* ── Sticky color palette: ALWAYS bright on both themes.
+   The palette shows the actual sticky colours; it must not be darkened. ── */
+[data-theme="dark"] .sticky-color-palette,
+.dark-theme .sticky-color-palette {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .sticky-color-dot,
+.dark-theme .sticky-color-dot {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .sticky-color-dot.active,
+.dark-theme .sticky-color-dot.active {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+/* ── Preview Card — dark background ── */
+[data-theme="dark"] .text-node-preview-card,
+.dark-theme .text-node-preview-card {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(71, 85, 105, 0.4);
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="dark"] .text-node-preview-label,
+.dark-theme .text-node-preview-label {
+  color: var(--text-tertiary);
+  border-bottom-color: rgba(71, 85, 105, 0.4);
+}
+
+/* ── Markdown rendered content — dark mode text colours ── */
+/* Applied to .text-node-markdown inside preview-card and note-node-card.
+   Inside the sticky note textarea, text is always dark (#1e293b) since
+   the sticky background is colourful. */
+[data-theme="dark"] .text-node-preview-card .text-node-markdown,
+.dark-theme .text-node-preview-card .text-node-markdown,
+[data-theme="dark"] .note-node-body .text-node-markdown,
+.dark-theme .note-node-body .text-node-markdown {
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown:hover,
+.dark-theme .text-node-preview-card .text-node-markdown:hover,
+[data-theme="dark"] .note-node-body .text-node-markdown:hover,
+.dark-theme .note-node-body .text-node-markdown:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h1,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h2,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h3,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h4,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h5,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown h6,
+[data-theme="dark"] .note-node-body .text-node-markdown h1,
+[data-theme="dark"] .note-node-body .text-node-markdown h2,
+[data-theme="dark"] .note-node-body .text-node-markdown h3,
+[data-theme="dark"] .note-node-body .text-node-markdown h4,
+[data-theme="dark"] .note-node-body .text-node-markdown h5,
+[data-theme="dark"] .note-node-body .text-node-markdown h6,
+.dark-theme .text-node-preview-card .text-node-markdown h1,
+.dark-theme .text-node-preview-card .text-node-markdown h2,
+.dark-theme .text-node-preview-card .text-node-markdown h3,
+.dark-theme .text-node-preview-card .text-node-markdown h4,
+.dark-theme .text-node-preview-card .text-node-markdown h5,
+.dark-theme .text-node-preview-card .text-node-markdown h6,
+.dark-theme .note-node-body .text-node-markdown h1,
+.dark-theme .note-node-body .text-node-markdown h2,
+.dark-theme .note-node-body .text-node-markdown h3,
+.dark-theme .note-node-body .text-node-markdown h4,
+.dark-theme .note-node-body .text-node-markdown h5,
+.dark-theme .note-node-body .text-node-markdown h6 {
+  color: #f1f5f9;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown code,
+[data-theme="dark"] .note-node-body .text-node-markdown code,
+.dark-theme .text-node-preview-card .text-node-markdown code,
+.dark-theme .note-node-body .text-node-markdown code {
+  background: rgba(148, 163, 184, 0.15);
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown pre,
+[data-theme="dark"] .note-node-body .text-node-markdown pre,
+.dark-theme .text-node-preview-card .text-node-markdown pre,
+.dark-theme .note-node-body .text-node-markdown pre {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown pre code,
+[data-theme="dark"] .note-node-body .text-node-markdown pre code,
+.dark-theme .text-node-preview-card .text-node-markdown pre code,
+.dark-theme .note-node-body .text-node-markdown pre code {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown blockquote,
+[data-theme="dark"] .note-node-body .text-node-markdown blockquote,
+.dark-theme .text-node-preview-card .text-node-markdown blockquote,
+.dark-theme .note-node-body .text-node-markdown blockquote {
+  border-left-color: rgba(129, 140, 248, 0.4);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown th,
+[data-theme="dark"] .text-node-preview-card .text-node-markdown td,
+[data-theme="dark"] .note-node-body .text-node-markdown th,
+[data-theme="dark"] .note-node-body .text-node-markdown td,
+.dark-theme .text-node-preview-card .text-node-markdown th,
+.dark-theme .text-node-preview-card .text-node-markdown td,
+.dark-theme .note-node-body .text-node-markdown th,
+.dark-theme .note-node-body .text-node-markdown td {
+  border-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown th,
+[data-theme="dark"] .note-node-body .text-node-markdown th,
+.dark-theme .text-node-preview-card .text-node-markdown th,
+.dark-theme .note-node-body .text-node-markdown th {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown hr,
+[data-theme="dark"] .note-node-body .text-node-markdown hr,
+.dark-theme .text-node-preview-card .text-node-markdown hr,
+.dark-theme .note-node-body .text-node-markdown hr {
+  border-top-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown a,
+[data-theme="dark"] .note-node-body .text-node-markdown a,
+.dark-theme .text-node-preview-card .text-node-markdown a,
+.dark-theme .note-node-body .text-node-markdown a {
+  color: #60a5fa;
+}
+
+[data-theme="dark"] .text-node-preview-card .text-node-markdown del,
+[data-theme="dark"] .note-node-body .text-node-markdown del,
+.dark-theme .text-node-preview-card .text-node-markdown del,
+.dark-theme .note-node-body .text-node-markdown del {
+  opacity: 0.5;
+}
+
+/* ── Note Node body text in dark mode ── */
+[data-theme="dark"] .note-node-body,
+.dark-theme .note-node-body {
+  color: var(--text-secondary);
+}
+
+/* ── Group Node label input ── */
+[data-theme="dark"] .group-node-label-input,
+.dark-theme .group-node-label-input {
+  background: rgba(30, 41, 59, 0.96);
+  border-color: rgba(71, 85, 105, 0.5);
+  color: var(--text-secondary);
+  box-shadow: 0 1px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .group-node-label-input:focus,
+.dark-theme .group-node-label-input:focus {
+  border-color: rgba(129, 140, 248, 0.4);
+}
+
+/* ── Group Node delete button ── */
+[data-theme="dark"] .group-node-frame .note-node-btn,
+.dark-theme .group-node-frame .note-node-btn {
+  background: rgba(30, 41, 59, 0.95) !important;
+  border-color: rgba(71, 85, 105, 0.5) !important;
+  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-theme="dark"] .group-node-frame .note-node-btn:hover,
+.dark-theme .group-node-frame .note-node-btn:hover {
+  background: rgba(51, 65, 85, 1) !important;
+}
+
+/* ── Group Node delete button (replaces inline styles) ── */
+.group-node-delete-btn {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(226, 232, 240, 0.5);
+  border-radius: 8px;
+  padding: 3px 5px;
+  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.06);
+  transition: all 0.15s ease;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+[data-theme="dark"] .group-node-delete-btn,
+.dark-theme .group-node-delete-btn {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(71, 85, 105, 0.5);
+  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Note Selector Modal — dark mode ── */
+[data-theme="dark"] .canvas-note-selector,
+.dark-theme .canvas-note-selector {
+  background: rgba(15, 23, 42, 0.96) !important;
+  border-color: rgba(71, 85, 105, 0.5) !important;
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(71, 85, 105, 0.3) !important;
+}
+
+[data-theme="dark"] .canvas-note-selector .modal-title,
+.dark-theme .canvas-note-selector .modal-title {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .canvas-note-selector .modal-close-btn,
+.dark-theme .canvas-note-selector .modal-close-btn {
+  background: rgba(51, 65, 85, 0.6);
+  border-color: rgba(71, 85, 105, 0.4);
+}
+
+[data-theme="dark"] .canvas-note-selector .modal-close-btn:hover,
+.dark-theme .canvas-note-selector .modal-close-btn:hover {
+  background: rgba(51, 65, 85, 1);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .canvas-note-selector-body .input,
+.dark-theme .canvas-note-selector-body .input {
+  background: rgba(51, 65, 85, 0.5);
+  border-color: rgba(71, 85, 105, 0.4);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .canvas-note-selector-body .input:focus,
+.dark-theme .canvas-note-selector-body .input:focus {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(129, 140, 248, 0.4);
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.06);
+}
+
+[data-theme="dark"] .canvas-note-item:hover,
+.dark-theme .canvas-note-item:hover {
+  background: rgba(51, 65, 85, 0.6);
+}
+
+[data-theme="dark"] .canvas-note-item-path,
+.dark-theme .canvas-note-item-path {
+  color: var(--text-tertiary);
 }

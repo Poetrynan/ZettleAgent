@@ -404,6 +404,18 @@
   cursor: none;
 }
 
+/* 画笔/橡皮擦模式下，禁用所有节点的 pointer-events，让事件穿透到 pane */
+.interactive-canvas-container.canvas-pen-active--pen .react-flow__node,
+.interactive-canvas-container.canvas-pen-active--eraser .react-flow__node {
+  pointer-events: none !important;
+}
+
+/* 但保持节点的 resize handle 可以交互 */
+.interactive-canvas-container.canvas-pen-active--pen .react-flow__resize-control,
+.interactive-canvas-container.canvas-pen-active--eraser .react-flow__resize-control {
+  pointer-events: auto !important;
+}
+
 /* Undo / Clear buttons */
 .canvas-pen-undo-btn,
 .canvas-pen-clear-btn {

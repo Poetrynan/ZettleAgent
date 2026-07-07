@@ -5,6 +5,9 @@ import { marked } from 'marked';
 
 marked.setOptions({ breaks: true, gfm: true, async: false });
 
+// 亮柔色牌 — 两种模式下统一使用。
+// Obsidian 风格：便利签始终为亮色背景 + 深色文字，
+// 在暗色画布上作为亮色斑点存在，辨识度高且不脏。
 const STICKY_COLORS = [
   { name: 'Cream', value: '#fef9c3' },
   { name: 'Mint', value: '#d1fae5' },

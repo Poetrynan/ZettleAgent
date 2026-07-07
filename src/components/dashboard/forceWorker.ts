@@ -45,7 +45,7 @@ let params: WorkerParams = {
 };
 
 // 力初始化(每次 init 调用 forceSimulation)
-function initSim(nds: any[], lks: any[], fp: WorkerParams) {
+function initSim(nds: any[], lks: any[], fp: WorkerParams, warm: boolean = false) {
   params = fp;
   nodes = nds.map((n, i) => {
     const idx = i;
@@ -71,12 +71,12 @@ function initSim(nds: any[], lks: any[], fp: WorkerParams) {
     label: l.label,
   }));
   posBuf = new Float32Array(nodes.length * 2);
-  rebuildSim();
+  rebuildSim(warm);
   (ctx as any).postMessage({ type: 'ready' });
 }
 
 let sim: any = null;
-function rebuildSim() {
+function rebuildSim(warm: boolean = false) {
   if (sim) sim.stop();   // 停止旧仿真定时器,避免泄漏
   sim = forceSimulation(nodes)
     .force('charge', forceManyBody().strength(params.chargeStrength).distanceMax(CHARGE_DISTANCE_MAX).theta(1.2))
@@ -86,7 +86,7 @@ function rebuildSim() {
     .force('center', forceCenter(0, 0).strength(params.centerStrength))
     .alphaDecay(ALPHA_DECAY)
     .velocityDecay(VELOCITY_DECAY)
-    .alpha(1)
+    .alpha(warm ? 0.3 : 1)
     .alphaTarget(floatingAlpha);
 
   // 自定义 bbox 力
@@ -136,7 +136,7 @@ self.onmessage = (e: MessageEvent) => {
   const d = e.data;
   switch (d.type) {
     case 'init': {
-      initSim(d.nodes, d.links, d.params);
+      initSim(d.nodes, d.links, d.params, d.warm ?? false);
       break;
     }
     case 'params': {
@@ -190,8 +190,10 @@ self.onmessage = (e: MessageEvent) => {
     }
     case 'dragMove': {
       // 拖拽中持续更新 fx/fy
+      // 防御性检查:仅当节点已被 pin(fx !== undefined)时才更新,
+      // 防止因 RAF 竞态导致 unpin 后仍收到 dragMove,重新设置 fx/fy 永久钉住节点
       const i = nodeIdx.get(d.id);
-      if (i !== undefined) {
+      if (i !== undefined && nodes[i].fx !== undefined) {
         nodes[i].fx = d.x;
         nodes[i].fy = d.y;
         nodes[i].x = d.x;

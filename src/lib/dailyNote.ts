@@ -36,10 +36,20 @@ export async function getDailyFolderPath(): Promise<string> {
   const desktop = await desktopDir();
   const dailyPath = await join(desktop, DAILY_FOLDER_NAME);
 
+  // Ensure the daily notes folder exists
   try {
-    await createFolder(desktop, DAILY_FOLDER_NAME);
-  } catch {
-    // Folder already exists — that's fine
+    const dirExists = await exists(dailyPath);
+    if (!dirExists) {
+      await mkdir(dailyPath, { recursive: true });
+    }
+  } catch (err) {
+    console.warn('Failed to create daily notes folder:', err);
+    // Try alternative method
+    try {
+      await createFolder(desktop, DAILY_FOLDER_NAME);
+    } catch {
+      // Folder might already exist or creation failed — continue anyway
+    }
   }
 
   return dailyPath;

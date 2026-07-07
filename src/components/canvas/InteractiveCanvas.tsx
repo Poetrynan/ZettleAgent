@@ -2172,8 +2172,6 @@ Return ONLY a JSON array, no markdown, no explanation:
         penSize={penSize}
         eraserSize={eraserSize}
         canvasPath={canvasPath}
-        containerWidth={typeof window !== 'undefined' ? window.innerWidth : 1200}
-        containerHeight={typeof window !== 'undefined' ? window.innerHeight : 800}
       />
 
       {/* Edge Label Editor */}

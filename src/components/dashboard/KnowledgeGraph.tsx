@@ -538,33 +538,8 @@ export function KnowledgeGraph() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleFitToScreen]);
 
-  // Auto-fit only on first stabilization (mount), not after every drag
-  const hasFittedOnMount = useRef(false);
-
-  // Re-center graph only on first mount, not on every tab switch
-  const hasFittedOnce = useRef(false);
-  useEffect(() => {
-    if (state.view === 'graph' && graphData.nodes.length > 0 && !hasFittedOnce.current) {
-      hasFittedOnce.current = true;
-      const fit1 = setTimeout(() => handleFitToScreen(), 300);
-      const fit2 = setTimeout(() => handleFitToScreen(), 800);
-      return () => { clearTimeout(fit1); clearTimeout(fit2); };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.view]);
-
-  // Fallback: fit once on mount, not on every data change
-  useEffect(() => {
-    if (graphData.nodes.length === 0 || hasFittedOnMount.current) return;
-    const timer = setTimeout(() => {
-      if (!hasFittedOnMount.current) {
-        handleFitToScreen();
-        hasFittedOnMount.current = true;
-      }
-    }, 800);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Auto-fit 现在由 PixiGraph 内部处理，这里不再重复调用
+  // 只保留空格键手动触发 fitToScreen 的功能
 
 
 

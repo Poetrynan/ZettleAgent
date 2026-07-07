@@ -581,6 +581,8 @@ export const en = {
     'canvas.layoutCategories': '{0} categories',
     'canvas.layoutClusters': 'semantic clusters',
     'canvas.aiAnalyzeSelected': 'AI Analyze & Connect',
+    'canvas.bringToFront': 'Bring to Front',
+    'canvas.sendToBack': 'Send to Back',
 
     // MemorySettings (P2-11)
     'memory.title': 'AI Memory & Chat',

@@ -239,6 +239,10 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
   }>({ mode: 'none', moved: false, downTime: 0 });
   // 双击检测
   const lastClickRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
+  // 记录上一次 pointerup 是否来自拖拽(moved=true),用于在 onNodeTap 中跳过双击 pin。
+  // Pixi.js 的 pointertap 在 pointerup 后触发,且不区分「纯点击」和「拖拽后释放」,
+  // 若不跳过,快速连续拖拽同一节点会误触发双击 → 永久 pin 该节点。
+  const wasDragMovedRef = useRef(false);
   // 力参数 ref(rebuildGraph 闭包读取最新值)
   const forceParamsRef = useRef(forceParams);
   // dragMove RAF 节流(高刷新率显示器 120/240Hz 下将 postMessage 对齐到 60fps)
@@ -246,6 +250,9 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
   const dragMoveDataRef = useRef<{ id: string; x: number; y: number } | null>(null);
   // 边索引:rebuildGraph 时构建,drawHighlightEdges 用邻接表 O(degree) 查找替代 O(E) 全量遍历
   const edgeIndexByPairRef = useRef<Map<string, number>>(new Map());
+  // 上一次 rebuild 时的节点位置缓存,用于时间滑块等增量更新场景:
+  // 保留已有节点位置,避免全量重新随机分布导致的网络剧烈震荡。
+  const prevPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   // 空间网格:onContextMenu 时懒构建,O(1) 查找最近节点(替代 O(V) 全量遍历)
   const nodeGridRef = useRef<Map<string, string[]>>(new Map());
   const NODE_GRID_CELL = 200;
@@ -366,6 +373,9 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       const world = new Container({ isRenderGroup: true });
       app.stage.addChild(world);
       worldRef.current = world;
+      
+      // 初始隐藏 world，等布局稳定后再显示，避免闪烁
+      world.alpha = 0;
 
       const linkLayer = new Graphics();
       world.addChild(linkLayer);
@@ -409,8 +419,30 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
     // resize / scroll 时清除缓存的 canvas rect
 
-      // 暴露 fit
-      scheduleFit();
+      // 初始适应屏幕 - 使用智能预设 + 渐进式 reveal
+      // 1. 先根据节点数量设置一个合理的初始缩放（避免过大/过小）
+      const initialZoom = calculateInitialZoom(graphData.nodes.length);
+      world.scale.set(initialZoom);
+      world.position.x = width / 2;
+      world.position.y = height / 2;
+      
+      // 2. 等待布局稳定后再调整到最佳视角并淡入显示（只执行一次）
+      let stabilityFrames = 0;
+      let hasFitted = false;
+      const checkStability = () => {
+        if (hasFitted) return; // 防止重复执行
+        stabilityFrames++;
+        // 至少等待 30 帧（约 500ms）让布局初步稳定
+        if (stabilityFrames >= 30) {
+          hasFitted = true;
+          fitToScreen();
+          // 淡入显示
+          fadeInWorld();
+        } else {
+          requestAnimationFrame(checkStability);
+        }
+      };
+      requestAnimationFrame(checkStability);
     };
     mount();
 
@@ -484,6 +516,15 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     const nodeLayer = nodeLayerRef.current;
     const linkLayer = linkLayerRef.current;
     if (!world || !nodeLayer || !linkLayer) return;
+
+    // 保存当前节点位置(用于增量更新时保留已有节点位置)
+    const savedPositions = new Map<string, { x: number; y: number }>();
+    for (const [id, v] of viewsRef.current) {
+      if (v.node.x != null && v.node.y != null) {
+        savedPositions.set(id, { x: v.node.x, y: v.node.y });
+      }
+    }
+    prevPositionsRef.current = savedPositions;
 
     // 清理旧视图
     for (const v of viewsRef.current.values()) {
@@ -584,9 +625,44 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     }
 
     // 节点视图
+    // 计算已有节点的质心,用作无邻居新节点的回退放置位置
+    let centroidX = 0, centroidY = 0, centroidCount = 0;
+    for (const sp of savedPositions.values()) {
+      centroidX += sp.x; centroidY += sp.y; centroidCount++;
+    }
+    if (centroidCount > 0) {
+      centroidX /= centroidCount;
+      centroidY /= centroidCount;
+    } else {
+      centroidX = 0; centroidY = 0;
+    }
+
     for (const n of nodes) {
-      if (!n.x) n.x = (Math.random() - 0.5) * 400;
-      if (!n.y) n.y = (Math.random() - 0.5) * 400;
+      const saved = savedPositions.get(n.id);
+      if (saved) {
+        // 已有节点:保留之前的位置(零扰动)
+        n.x = saved.x;
+        n.y = saved.y;
+      } else {
+        // 新节点:放置在已定位邻居的质心附近,最大程度减少初始扰动
+        const neighbors = adj.get(n.id);
+        let nx = 0, ny = 0, nc = 0;
+        if (neighbors) {
+          for (const nid of neighbors) {
+            const sp = savedPositions.get(nid);
+            if (sp) { nx += sp.x; ny += sp.y; nc++; }
+          }
+        }
+        if (nc > 0) {
+          // 有已定位邻居:放在邻居质心附近,加小随机偏移避免重叠
+          n.x = nx / nc + (Math.random() - 0.5) * 30;
+          n.y = ny / nc + (Math.random() - 0.5) * 30;
+        } else {
+          // 无已定位邻居:放在全局质心附近
+          n.x = centroidX + (Math.random() - 0.5) * 100;
+          n.y = centroidY + (Math.random() - 0.5) * 100;
+        }
+      }
       const color = getNodeColor(n, selectedCluster !== null, methodology);
       const radius = getNodeRadius(n);
       const container = new Container();
@@ -686,6 +762,9 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         edge_type: l.edge_type, weight: l.weight, label: l.label,
       })),
       params: fp,
+      // 温启动:如果之前有节点位置,说明是增量更新(如时间滑块),
+      // 使用低 alpha 避免全量重新仿真导致的剧烈震荡。
+      warm: savedPositions.size > 0,
     });
     workerRef.current?.postMessage({
       type: 'floatingMode',
@@ -1260,7 +1339,19 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
   function onPointerUp() {
     const ds = dragStateRef.current;
+    // 保存 moved 状态供 onNodeTap 判断(pointertap 在 pointerup 之后触发,
+    // 此时 dragStateRef 已被重置,无法直接读取)
+    wasDragMovedRef.current = ds.moved;
     if (ds.mode === 'node' && ds.node) {
+      // ⚠️ 关键:取消 pending 的 dragMove RAF,防止它在 unpin 之后向 worker
+      // 发送 dragMove 消息。否则消息顺序为 unpin(清除fx/fy) → dragMove(重新设置fx/fy),
+      // 节点会被永久钉在最后拖拽位置,表现为「像钉子一样固定不动」。
+      if (dragMoveRafRef.current !== null) {
+        cancelAnimationFrame(dragMoveRafRef.current);
+        dragMoveRafRef.current = null;
+      }
+      dragMoveDataRef.current = null;
+
       // 释放 pin:节点不再钉在松手位置,可自由漂浮(符合"像水上漂浮"需求)
       ds.node.fx = undefined;
       ds.node.fy = undefined;
@@ -1282,6 +1373,14 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
   }
 
   function onNodeTap(e: FederatedPointerEvent, node: PGNode) {
+    // 拖拽后的 pointertap 不触发双击 pin(避免快速连续拖拽同一节点误触发固定)
+    if (wasDragMovedRef.current) {
+      wasDragMovedRef.current = false;
+      // 拖拽不算点击,重置双击检测窗口,避免后续点击误判为双击
+      lastClickRef.current = { id: '', time: 0 };
+      onNodeClick(node, e);
+      return;
+    }
     // Click / Double Click
     const now = Date.now();
     const last = lastClickRef.current;
@@ -1401,11 +1500,21 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     const cy = sumY / nodes.length;
     const bboxW = maxX - minX || 1;
     const bboxH = maxY - minY || 1;
-    const padding = Math.min(width, height) * 0.15;
+    const padding = Math.min(width, height) * 0.12; // 减小边距，让图谱更大
     const availW = Math.max(width - padding * 2, 100);
     const availH = Math.max(height - padding * 2, 100);
-    let z = Math.min(availW / bboxW, availH / bboxH) * 0.85;
-    z = Math.max(MIN_ZOOM, Math.min(z, 1.5));
+    let z = Math.min(availW / bboxW, availH / bboxH) * 0.9; // 增加填充比例
+    
+    // 对于小图谱（节点数少于10），允许更大的初始缩放
+    const isSmallGraph = nodes.length < 10;
+    const maxInitialZoom = isSmallGraph ? 2.5 : 1.2; // 小图谱允许更大缩放，大图谱更小
+    z = Math.max(MIN_ZOOM, Math.min(z, maxInitialZoom));
+    
+    // 确保至少能看到整个图谱的 80%
+    if (z > 1.5 && !isSmallGraph) {
+      z = Math.max(0.8, z * 0.7); // 对于大图谱，进一步缩小以适应屏幕
+    }
+    
     world.scale.set(z);
     world.position.x = width / 2 - cx * z;
     world.position.y = height / 2 - cy * z;
@@ -1415,6 +1524,42 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     requestAnimationFrame(() => {
       requestAnimationFrame(() => fitToScreen());
     });
+  }
+
+  // ── 智能初始缩放计算（基于节点数量）──
+  function calculateInitialZoom(nodeCount: number): number {
+    // 根据节点数量返回一个合理的初始缩放值
+    // 避免初始显示过大或过小
+    if (nodeCount <= 1) return 1.5;
+    if (nodeCount <= 3) return 1.2;
+    if (nodeCount <= 5) return 1.0;
+    if (nodeCount <= 10) return 0.8;
+    if (nodeCount <= 20) return 0.6;
+    if (nodeCount <= 50) return 0.4;
+    return 0.3; // 大量节点时进一步缩小
+  }
+
+  // ── 淡入显示 world ──
+  function fadeInWorld() {
+    const world = worldRef.current;
+    if (!world) return;
+    
+    const duration = 400; // 400ms 淡入
+    const startTime = performance.now();
+    const startAlpha = world.alpha;
+    
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // 使用 ease-out 缓动
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+      world.alpha = startAlpha + (1 - startAlpha) * easeProgress;
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    requestAnimationFrame(animate);
   }
 
   // 绑定 contextmenu
