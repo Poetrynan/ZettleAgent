@@ -77,7 +77,5 @@ src-tauri/target/release/bundle/nsis/*.exe
 # ── Documents (project-local, not for git) ──
 documents/
 
-# ── Internal docs (not for GitHub Pages / public) ──
-docs/AGENT_ORCHESTRATION.md
-docs/FIRST_RELEASE_GUIDE.md
-docs/PACKAGING_RELEASE_QA.md
+# ── Docs folder (local-only, not for git / GitHub Pages) ──
+docs/
