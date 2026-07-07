@@ -731,8 +731,8 @@
     }
   </style>
   <!-- Preload critical media for instant first paint -->
+  <link rel="preload" href="hero-final.mp4" as="fetch" type="video/mp4" fetchpriority="high" crossorigin="anonymous">
   <link rel="preload" href="new_logo.png" as="image" type="image/png">
-  <link rel="preload" href="knowledge-graph-interactive.gif" as="image" type="image/gif" fetchpriority="high">
 </head>
 <body>
 
@@ -803,16 +803,17 @@
     </div>
   </section>
 
-  <!-- Showcase Hero: Knowledge Graph (GIF for instant load) -->
+  <!-- Showcase Hero: App real recording - Knowledge Graph + AI Agent (Compressed Video) -->
   <section class="showcase-hero">
     <div class="container" style="text-align:center;">
-      <img src="knowledge-graph-interactive.gif" alt="Knowledge Graph Interactive Demo"
-        class="showcase-hero-gif"
-        loading="eager" decoding="async" width="960" height="540"
-        style="width:100%;display:block;aspect-ratio:16/9;object-fit:cover;"
-        onload="this.style.opacity=1">
+      <video class="showcase-hero-gif" autoplay loop muted playsinline preload="auto"
+        poster="knowledge-graph-interactive.gif"
+        style="background-image:url('knowledge-graph-interactive.gif');background-size:cover;background-position:center;">
+        <source src="hero-final.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
       <p style="margin-top:12px;font-size:0.78rem;color:var(--text-muted);">
-        <span data-en="Knowledge Graph — Interactive graph exploration" data-zh="知识图谱 — 交互式图探索">Knowledge Graph — Interactive graph exploration</span>
+        <span data-en="Knowledge Graph Interactive Demo" data-zh="知识图谱交互展示">Knowledge Graph Interactive Demo</span>
       </p>
     </div>
   </section>
