@@ -17,12 +17,16 @@ jobs:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            os: windows
           - platform: macos-latest
             target: aarch64-apple-darwin
+            os: macos-arm
           - platform: macos-latest
             target: x86_64-apple-darwin
+            os: macos-intel
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            os: linux
 
     runs-on: ${{ matrix.platform }}
 
@@ -39,11 +43,16 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install dependencies (ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install Linux dependencies
+        if: matrix.os == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,7 +63,7 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Verify release packaging config
+      - name: Verify packaging config
         shell: bash
         run: |
           test -f scripts/download-model.cjs
@@ -66,17 +75,30 @@ jobs:
           test -f src-tauri/resources/ocr_models/rec.onnx
           ls src-tauri/resources/demo-vault/*.md | head -1
 
-      # Build-time ONLY on CI. End users never run this.
-      # Populates public/models, ORT WASM, fonts, etc. for the installer.
-      - name: Prepare installer assets (build-time)
+      # Build-time only on CI — fetches embedding models, WASM, fonts, PDF.js.
+      # End users never run this step.
+      - name: Prepare installer assets
         run: npm run download-model
 
-      - name: Verify zero-download assets (pre-bundle)
+      - name: Verify offline assets (pre-bundle)
         run: npm run verify-offline
 
-      # beforeBuildCommand = build:prod = download-model + tsc + vite build
-      # Vite copies public/ → dist/ (embedding, WASM, fonts, pdf)
-      # Tauri packs dist/ + resources/ocr_models + demo-vault
+      # Read release notes for body content
+      - name: Load release notes
+        id: notes
+        shell: bash
+        run: |
+          # Replace version placeholder in notes and escape for YAML multiline
+          BODY=$(cat .github/release-notes/latest.md | sed "s/v0\.1\.0/${{ github.ref_name }}/g")
+          {
+            echo "body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # beforeBuildCommand = download-model + tsc + vite build
+      # Vite copies public/ → dist/ (embedding, WASM, fonts, pdf.js)
+      # Tauri bundles dist/ + resources/ocr_models + demo-vault into installer.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -84,86 +106,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'ZettelAgent ${{ github.ref_name }}'
-          releaseBody: |
-            ## ZettelAgent ${{ github.ref_name }}
-
-            **AI-Powered Zettelkasten Desktop Agent**
-
-            ---
-
-            ### 🇬🇧 English
-
-            Download → install → use.
-            **No extra downloads. No Node.js. No Docker.**
-
-            Bundled offline in this installer:
-            - Embedding model (nomic-embed-text-v1.5) + ONNX Runtime WASM
-            - PP-OCR models (Chinese / English / Japanese OCR)
-            - UI fonts, KaTeX, PDF.js
-            - Demo vault (14 sample notes)
-
-            MCP uses Remote SSE (paste URL + API Key) — no local Node.js required.
-
-            ---
-
-            ### 🇨🇳 中文
-
-            下载 → 安装 → 直接使用。
-            **无需额外下载，无需 Node.js，无需 Docker。**
-
-            安装包已内置（完全离线）：
-            - 嵌入模型 (nomic-embed-text-v1.5) + ONNX Runtime WASM
-            - PP-OCR 文字识别模型（中英日）
-            - UI 字体、KaTeX、PDF.js
-            - 示例笔记库（14 篇示例笔记）
-
-            MCP 使用远程 SSE（粘贴 URL + API Key）— 无需本地 Node.js。
-
-            ---
-
-            ### 🇯🇵 日本語
-
-            ダウンロード → インストール → すぐに使用可能。
-            **追加ダウンロード不要。Node.js 不要。Docker 不要。**
-
-            インストーラーに同梱（完全オフライン）：
-            - 埋め込みモデル (nomic-embed-text-v1.5) + ONNX Runtime WASM
-            - PP-OCR 文字認識モデル（中英日）
-            - UI フォント、KaTeX、PDF.js
-            - サンプルノート（14 件）
-
-            MCP はリモート SSE を使用（URL + API Key）— ローカル Node.js 不要。
-
-            ---
-
-            ### 🇰🇷 한국어
-
-            다운로드 → 설치 → 바로 사용.
-            **추가 다운로드 불필요. Node.js 불필요. Docker 불필요.**
-
-            설치 패키지에 포함（완전 오프라인）:
-            - 임베딩 모델 (nomic-embed-text-v1.5) + ONNX Runtime WASM
-            - PP-OCR 문자 인식 모델（중영일）
-            - UI 폰트, KaTeX, PDF.js
-            - 샘플 노트（14 개）
-
-            MCP는 원격 SSE 사용（URL + API Key）— 로컬 Node.js 불필요.
-
-            ---
-
-            ### 📥 Downloads / 下载 / ダウンロード / 다운로드
-
-            | Platform | File |
-            |----------|------|
-            | **Windows** | `.exe` (recommended / 推奨 / 추천) or `.msi` |
-            | **macOS (Apple Silicon)** | `.dmg` |
-            | **macOS (Intel)** | `.dmg` |
-            | **Linux** | `.AppImage` or `.deb` |
-
-            Developers: clone the repo for source code. This Release is the end-user installer.
-            开发者：克隆仓库获取源码。此 Release 为终端用户安装包。
-            開発者：リポジトリをクローンしてソースコードを入手してください。
-            개발자: 소스 코드를 위해 저장소를 복제하세요.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
