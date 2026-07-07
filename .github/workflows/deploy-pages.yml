@@ -24,10 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload docs/ artifact
+      - name: Upload landing-page/ artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/
+          path: docs/landing-page/
 
   deploy:
     needs: build
