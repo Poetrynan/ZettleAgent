@@ -47,8 +47,6 @@ Thumbs.db
 *.rpm
 
 # ── AI / IDE helpers ──────────────────────────────────────────
-.comate/
-.mimocode/
 .claude
 .claude/
 
@@ -79,3 +77,4 @@ documents/
 
 # ── Docs folder (local-only, not for git / GitHub Pages) ──
 docs/
+STRATEGIC_AUDIT_REPORT.md

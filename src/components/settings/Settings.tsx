@@ -10,7 +10,8 @@ import {
   IconTrash, IconSliders, IconKeyboard, IconBrain, IconDatabase,
   IconNote, IconSearch, IconFile, IconSync,
 } from '../icons';
-import { loadDailyNotePath } from '../../lib/storage';
+import { loadDailyNotePath, loadNewFolderDefaultPath } from '../../lib/storage';
+
 import { sectionTitle } from './settingsStyles';
 import { McpServersSection } from './McpSettings';
 import { SkillDirectoriesSection } from './SkillSettings';
@@ -34,6 +35,7 @@ export function Settings() {
   const [dataPath, setDataPath] = useState('');
   const [dbPath, setDbPath] = useState('');
   const [dailyNotePath, setDailyNotePath] = useState<string | null>(null);
+  const [newFolderDefaultPath, setNewFolderDefaultPath] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'ext' | 'memory' | 'organize' | 'shortcuts'>('general');
 
   const currentProvider = getProvider(llmConfig.providerId);
@@ -56,9 +58,16 @@ export function Settings() {
       } catch (err) {
         console.error('Failed to load daily note path:', err);
       }
+      try {
+        const nfp = await loadNewFolderDefaultPath();
+        setNewFolderDefaultPath(nfp);
+      } catch (err) {
+        console.error('Failed to load new folder default path:', err);
+      }
     };
     loadPaths();
   }, []);
+
 
   // Sync local state when provider changes (from outside, e.g. loaded from store)
   useEffect(() => {
@@ -186,6 +195,8 @@ export function Settings() {
               dbPath={dbPath}
               dailyNotePath={dailyNotePath}
               setDailyNotePath={setDailyNotePath}
+              newFolderDefaultPath={newFolderDefaultPath}
+              setNewFolderDefaultPath={setNewFolderDefaultPath}
             />
           )}
 

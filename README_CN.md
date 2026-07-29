@@ -13,7 +13,7 @@
 
   <!-- Badges -->
   <p>
-    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Stars"></a>
+    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981&logo=github&cacheSeconds=60" alt="Stars"></a>
     <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9" alt="Release"></a>
     <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
     <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
@@ -178,13 +178,3 @@ ZettelAgent 站在这些开源项目的肩膀上：[Zettelkasten](https://luhman
 
 Apache License 2.0 — 免费使用和修改，**商业产品须注明原作者**。详见 [LICENSE](LICENSE)。
 
----
-
-<!-- Star History -->
-<div align="center">
-
-  ## ⭐ Star History
-
-  [![Star History Chart](https://api.star-history.com/svg?repos=Poetrynan/ZettleAgent&type=Date)](https://star-history.com/#Poetrynan/ZettleAgent&Date)
-
-</div>

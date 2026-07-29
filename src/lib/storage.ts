@@ -319,3 +319,27 @@ export async function loadDailyNotePath(): Promise<string | null> {
   const local = localStorage.getItem('zettelagent-daily-path');
   return (local && local.length > 0) ? local : null;
 }
+
+export async function saveNewFolderDefaultPath(path: string | null): Promise<void> {
+  localStorage.setItem('zettelagent-new-folder-default-path', path || '');
+  try {
+    const st = await getStore();
+    await st.set('newFolderDefaultPath', path || '');
+    await st.save();
+  } catch (error) {
+    console.error('Failed to save new folder default path:', error);
+  }
+}
+
+export async function loadNewFolderDefaultPath(): Promise<string | null> {
+  try {
+    const st = await getStore();
+    const path = await st.get<string>('newFolderDefaultPath');
+    if (path && path.length > 0) return path;
+  } catch (error) {
+    console.error('Failed to load new folder default path:', error);
+  }
+  const local = localStorage.getItem('zettelagent-new-folder-default-path');
+  return (local && local.length > 0) ? local : null;
+}
+

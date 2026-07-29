@@ -5,9 +5,11 @@ import { useState, useEffect } from 'react';
 import { t, tf } from '../../lib/i18n';
 import { sectionTitle } from './settingsStyles';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { saveDailyNotePath } from '../../lib/storage';
+import { saveDailyNotePath, saveNewFolderDefaultPath } from '../../lib/storage';
 import { clearDataSelective } from '../../lib/tauri';
 import { getThemeMode, setThemeMode, type ThemeMode } from '../../lib/theme';
+import { useApp } from '../../contexts/AppContext';
+
 import {
   IconGraph, IconDatabase, IconFolder, IconEdit, IconCheck, IconNote,
   IconClipboard, IconSearch, IconChevronRight, IconSun, IconMoon, IconSliders,
@@ -24,6 +26,9 @@ interface GeneralSettingsTabProps {
   dbPath: string;
   dailyNotePath: string | null;
   setDailyNotePath: (p: string | null) => void;
+  newFolderDefaultPath: string | null;
+  setNewFolderDefaultPath: (p: string | null) => void;
+
 }
 
 const METHODOLOGIES = [
@@ -39,10 +44,15 @@ const METHODOLOGIES = [
 
 export function GeneralSettingsTab({
   isZh, methodology, setMethodology, showToast, dataPath, dbPath, dailyNotePath, setDailyNotePath,
+  newFolderDefaultPath, setNewFolderDefaultPath,
 }: GeneralSettingsTabProps) {
+  const { state } = useApp();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [dailyPathSaved, setDailyPathSaved] = useState(false);
+  const [newFolderPathSaved, setNewFolderPathSaved] = useState(false);
+
+
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
 
   useEffect(() => {
@@ -162,6 +172,77 @@ export function GeneralSettingsTab({
         </div>
         {dailyPathSaved && <div className="storage-saved-badge"><IconCheck size={12} /> {t('settings.dailySaved')}</div>}
       </div>
+
+      {/* New Folder Default Location */}
+      <div className="settings-section-card storage-card">
+        <h2 style={sectionTitle}>
+          <IconFolder size={18} /> {t('settings.newFolderLoc')}
+        </h2>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-3)', lineHeight: 1.6 }}>
+          {t('settings.newFolderDesc')}
+        </div>
+        <div className="storage-path-display">
+          <div className="storage-path-icon"><IconFolder size={16} /></div>
+          <code className="storage-path-text" title={newFolderDefaultPath || undefined}>
+            {newFolderDefaultPath || t('settings.newFolderDefault')}
+          </code>
+          {newFolderDefaultPath && (
+            <button className="storage-copy-btn" onClick={() => { navigator.clipboard.writeText(newFolderDefaultPath); showToast(isZh ? '已复制路径' : 'Path copied', 'success'); }} title={isZh ? '复制路径' : 'Copy path'}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+            </button>
+          )}
+        </div>
+        <div className="storage-actions">
+          <button className="btn btn-sm btn-secondary" onClick={async () => {
+            if (!state.vaultPath) {
+              showToast(isZh ? '请先选择知识库' : 'Please select a vault first', 'error');
+              return;
+            }
+            try {
+              const selected = await openDialog({ directory: true, multiple: false, title: t('settings.newFolderSelectDir') });
+              if (selected && typeof selected === 'string') {
+                const normalizedSelected = selected.replace(/\\/g, '/');
+                const normalizedVault = state.vaultPath.replace(/\\/g, '/');
+                if (!normalizedSelected.startsWith(normalizedVault)) {
+                  showToast(
+                    isZh ? '新建文件夹默认父文件夹必须在当前知识库内！' : 'The default location must be inside the current vault!',
+                    'error'
+                  );
+                  return;
+                }
+                
+                let relativePath = normalizedSelected.substring(normalizedVault.length);
+                if (relativePath.startsWith('/')) {
+                  relativePath = relativePath.substring(1);
+                }
+                
+                setNewFolderDefaultPath(relativePath);
+                await saveNewFolderDefaultPath(relativePath);
+                setNewFolderPathSaved(true);
+                showToast(t('settings.newFolderPathSaved'), 'success');
+                setTimeout(() => setNewFolderPathSaved(false), 2000);
+              }
+            } catch (err) { showToast(t('settings.newFolderSelectFail'), 'error'); }
+          }}>
+            <IconFolder size={14} /> {t('settings.dailyBrowse')}
+          </button>
+          {newFolderDefaultPath && (
+            <button className="btn btn-sm btn-ghost" onClick={async () => {
+              try {
+                setNewFolderDefaultPath(null);
+                await saveNewFolderDefaultPath(null);
+                setNewFolderPathSaved(true);
+                showToast(t('settings.newFolderReset'), 'success');
+                setTimeout(() => setNewFolderPathSaved(false), 2000);
+              } catch { showToast(t('settings.newFolderResetFail'), 'error'); }
+            }}>
+              {t('settings.dailyResetBtn')}
+            </button>
+          )}
+        </div>
+        {newFolderPathSaved && <div className="storage-saved-badge"><IconCheck size={12} /> {t('settings.dailySaved')}</div>}
+      </div>
+
 
       {/* Data Storage */}
       <div className="settings-section-card storage-card">

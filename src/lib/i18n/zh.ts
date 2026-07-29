@@ -15,6 +15,9 @@ export const zh = {
     'sidebar.noVaultSelected': '未选择知识库',
     'sidebar.selectVault': '选择知识库',
     'sidebar.selectVaultDialog': '选择知识库文件夹',
+    'sidebar.createVault': '新建知识库',
+    'sidebar.newVaultDialog': '选择新建知识库所在的父文件夹',
+
 
     // Toolbar
     'toolbar.dashboard': '仪表盘',
@@ -674,7 +677,18 @@ export const zh = {
     'settings.dailyResetFail': '❌ 重置失败',
     'settings.dailyResetBtn': '重置',
     'settings.dailySaved': '已保存',
+
+    'settings.newFolderLoc': '默认新建文件夹位置',
+    'settings.newFolderDesc': '点击侧边栏新建文件夹按钮且侧边栏无展开文件夹时，新建文件夹的默认父目录。留空则默认在桌面创建新知识库。',
+    'settings.newFolderDefault': '桌面 (默认)',
+
+    'settings.newFolderSelectDir': '选择新建文件夹默认父文件夹',
+    'settings.newFolderPathSaved': '✅ 默认路径已保存',
+    'settings.newFolderSelectFail': '❌ 选择路径失败',
+    'settings.newFolderReset': '✅ 默认路径已重置',
+    'settings.newFolderResetFail': '❌ 重置失败',
     'settings.dataStorage': '数据存储',
+
     'settings.dataStorageDesc': '应用数据存储在以下位置：',
     'settings.dbLabel': '数据库文件：',
     'settings.dataDir': '数据目录：',

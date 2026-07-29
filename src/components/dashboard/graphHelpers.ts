@@ -71,7 +71,7 @@ export function getNodeVal(node: GraphNode & { degree?: number }): number {
 
 export function getNodeRadius(node: GraphNode & { degree?: number }): number {
   const degree = (node as any).degree ?? 1;
-  const base = Math.min(6 + Math.sqrt(degree) * 5, 26);
+  const base = Math.min(4 + Math.sqrt(degree) * 3, 16);
   return node.is_hub ? base * 1.15 : node.is_orphan ? base * 0.8 : base;
 }
 

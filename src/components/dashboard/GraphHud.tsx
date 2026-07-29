@@ -500,7 +500,7 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
                   className={`kg-cluster-chip ${selectedCluster === null ? 'active-all' : ''}`}
                   onClick={() => handleFilterSwitch(() => setSelectedCluster(null))}
                 >
-                  <div className="kg-legend-dot" style={{ background: 'linear-gradient(135deg, #10B981, #3B82F6)', width: 6, height: 6 }} />
+                  <span className="kg-legend-dot" style={{ background: 'linear-gradient(135deg, #10B981, #3B82F6)', width: 6, height: 6 }} />
                   <span>{isZh ? '全部' : 'All'}</span>
                 </div>
                 {(rawGraphData.clusters || []).map((cluster, index) => {
@@ -521,7 +521,7 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
                         setAiSummary(null); // Clear previous summary when switching
                       })}
                     >
-                      <div className="kg-legend-dot" style={{ background: cluster.color, width: 6, height: 6 }} />
+                      <span className="kg-legend-dot" style={{ background: cluster.color, width: 6, height: 6 }} />
                       <span>
                         {isTruncated ? cluster.label.slice(0, 15) + '...' : cluster.label}
                         <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '3px' }}>({cluster.node_count})</span>
@@ -579,10 +579,10 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
                    <div className="kg-settings-section-label">{isZh ? '分类图例' : 'Legend'}</div>
                    <div className="kg-panel-items" style={{ gap: 8 }}>
                      {METHODOLOGY_TYPES[state.methodology || 'generic'].map((type) => (
-                       <div key={type} className="kg-legend-item">
-                         <div className="kg-legend-dot" style={{ background: noteColors[type] }} />
+                       <span key={type} className="kg-legend-item">
+                          <span className="kg-legend-dot" style={{ background: noteColors[type] }} />
                          <span className="kg-legend-text">{t(`type.${type}` as any)}</span>
-                       </div>
+                       </span>
                      ))}
                    </div>
                  </div>
@@ -593,15 +593,15 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
                  <div className="kg-settings-section-label">{isZh ? '关系筛选' : 'Relations'}</div>
                  <div className="kg-panel-items" style={{ gap: 5 }}>
                    {relationFilterConfig.map((rf) => (
-                     <div
+                     <span
                        key={rf.key}
                        className={`kg-chip kg-settings-chip ${relationFilter === rf.key ? 'active' : ''}`}
                        style={relationFilter === rf.key ? { background: `${rf.color}15`, border: `1px solid ${rf.color}35`, color: rf.color } : {}}
                        onClick={() => handleFilterSwitch(() => setRelationFilter(rf.key))}
                      >
-                       {rf.key !== 'all' && <div className="kg-legend-dot" style={{ width: 5, height: 5, background: rf.color }} />}
+                       {rf.key !== 'all' && <span className="kg-legend-dot" style={{ width: 5, height: 5, background: rf.color }} />}
                        {isZh ? rf.labelZh : rf.labelEn}
-                     </div>
+                     </span>
                    ))}
                  </div>
                </div>
@@ -631,14 +631,14 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
                      <span className="kg-depth-label-sm">{isZh ? '深度' : 'Depth'}</span>
                      {[1, 2, 3].map(d => (
-                       <div
+                       <span
                          key={d}
                          className={`kg-chip kg-depth-chip-sm ${localDepth === d ? 'active kg-chip-active-canvas' : ''}`}
                          style={localDepth !== d ? { minWidth: 22 } : undefined}
                          onClick={() => { setLocalDepth(d); handleFilterSwitch(() => {}); }}
                        >
                          {d}
-                       </div>
+                       </span>
                      ))}
                      {focusNodeId && (
                        <span className="kg-focus-label-sm" title={focusNodeId} style={{ marginLeft: 4 }}>

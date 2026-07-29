@@ -65,7 +65,7 @@ export function GraphTimeSlider({
         value={isActive ? timeSliderValue : totalNodes}
         onChange={(e) => {
           const v = Number(e.target.value);
-          setTimeSliderValue(v >= totalNodes ? -1 : v);
+          setTimeSliderValue(v);
         }}
         style={{ ['--kg-slider-pct' as string]: `${sliderPct}%` }}
       />
@@ -76,18 +76,23 @@ export function GraphTimeSlider({
         {isActive ? `${visibleCount}/${totalNodes}` : dateStr}
       </span>
 
-      {isActive && (
-        <button
-          className="kg-time-reset"
-          onClick={() => setTimeSliderValue(-1)}
-          title={isZh ? '重置' : 'Reset'}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="1 4 1 10 7 10" />
-            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-          </svg>
-        </button>
-      )}
+      <button
+        className={`kg-time-reset ${isActive ? 'visible' : ''}`}
+        onClick={() => setTimeSliderValue(-1)}
+        title={isZh ? '重置' : 'Reset'}
+        style={{
+          opacity: isActive ? 1 : 0,
+          visibility: isActive ? 'visible' : 'hidden',
+          pointerEvents: isActive ? 'auto' : 'none',
+          transition: 'opacity 0.15s ease, transform 0.15s ease',
+          transform: isActive ? 'scale(1)' : 'scale(0.8)',
+        }}
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="1 4 1 10 7 10" />
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+        </svg>
+      </button>
     </div>
   );
 }

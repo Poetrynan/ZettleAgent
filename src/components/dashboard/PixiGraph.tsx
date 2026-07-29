@@ -54,6 +54,9 @@ function colorNum(s: string): number {
 
 export interface PGNode extends GraphNode, SimulationNodeDatum {
   degree?: number;
+  z?: number;
+  vz?: number;
+  fz?: number;
 }
 export interface PGLink {
   source: string | PGNode;
@@ -101,19 +104,22 @@ export interface ForceParams {
   linkDistance: number;     // 连线长度(对应 vis-network springLength)
 }
 
-// vis-network → d3-force 参数映射(参考 knowledge_graph.html):
-//   gravitationalConstant: -22000  → chargeStrength: -1200  (缩放系数 ≈ /18)
-//   centralGravity: 0.25           → centerStrength: 0.04   (缩放系数 ≈ /6)
-//   springLength: 120              → linkDistance: 160      (坐标空间差异)
-//   springConstant: 0.04           → linkStrength: 0.3      (d3 的 strength 范围 0-1)
-//   damping: 0.2                   → velocityDecay: 0.2     (直接对应,已在 forceWorker 中设置)
-//   avoidOverlap: 0.2              → 由 chargeStrength + bbox 力近似
+// vis-network → d3-force 参数映射(参考 vis-network barnesHut 官方文档):
+//   gravitationalConstant: -2000   → chargeStrength: -500   (÷坐标比例²≈4；原注释误写为-22000)
+//   centralGravity: 0.3            → centerStrength: 0.05   (×alphaTarget÷damping_vis≈0.05)
+//   springLength: 95               → linkDistance: 200      (×坐标比例≈2；原注释误写为120)
+//   springConstant: 0.04           → linkStrength: 0.20     (d3 strength 等效换算)
+//   damping: 0.09                  → velocityDecay: 0.2     (故意调高阻尼→漂浮感，已在 forceWorker 中设置)
+//   avoidOverlap: 0                → 由 chargeStrength + bbox 力近似
 export const DEFAULT_FORCE_PARAMS: ForceParams = {
-  centerStrength: 0.000,   // 无中心引力(节点自由分布)
-  chargeStrength: -1300,   // 较强排斥(vis-network gravitationalConstant=-22000 的等效值)
-  linkStrength: 0.50,      // 中等弹簧拉力(vis-network springConstant=0.04 的等效值)
-  linkDistance: 420,       // 宽松连线(vis-network springLength=120 的等效值)
+  centerStrength: 0.05,    // vis-network centralGravity=0.3 → ×(alphaTarget/damping_vis)≈0.05；开启后节点自发涌现二维库仑晶体圆形分布
+  chargeStrength: -500,    // vis-network gravitationalConstant=-2000(官方值，非注释误写的-22000) ÷ 坐标比例²≈-500
+  linkStrength: 0.20,      // vis-network springConstant=0.04 → d3等效≈0.20（原0.50偏高）
+  linkDistance: 200,       // vis-network springLength=95 × 坐标比例≈200（原420偏大2倍）
 };
+
+
+
 
 // 物理漂浮阈值:≤此值时 worker 用 alphaTarget>0 让仿真永不停(vis-network 风格)
 const FLOATING_PHYSICS_THRESHOLD = 500;
@@ -122,11 +128,12 @@ const FLOATING_PHYSICS_THRESHOLD = 500;
 // 力学常量(ALPHA_DECAY / VELOCITY_DECAY / FLOATING_ALPHA / CHARGE_DISTANCE_MAX /
 // BBOX_STRENGTH / BBOX_MARGIN / DRAG_ALPHA)已移入 forceWorker.ts
 
-const MIN_ZOOM = 0.3;
-const MAX_ZOOM = 8;
+const MIN_ZOOM = 0.02;
+const MAX_ZOOM = 15;
 const LABEL_SHOW_ZOOM = 0.3;   // 缩放高于此值显示标签
 const LABEL_HOVER_FORCE = true;
 const SEMANTIC_DASH_ZOOM = 0.6;  // zoom > 0.6 才画语义边虚线,否则实线(38x 段数减少)
+const HIDE_LINKS_ZOOM = 0.08;  // zoom < 此值时完全隐藏普通连接线(点云/星系宏观模式)
 
 // ── 节点显示对象池 ──────────────────────────────────────────────────
 
@@ -829,8 +836,9 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
       // Worker 位置写入
       if (pos) {
-        v.node.x = pos[i * 2];
-        v.node.y = pos[i * 2 + 1];
+        const stride = pos.length === views.length * 3 ? 3 : 2;
+        v.node.x = pos[i * stride];
+        v.node.y = pos[i * stride + 1];
       }
 
       const base_x = v.node.x!;
@@ -993,6 +1001,14 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     const zoom = world?.scale.x ?? 1;
     const showLabels = zoom >= LABEL_SHOW_ZOOM;
     const showArrows = zoom > 0.35;
+
+    // LOD 极小缩放优化:点云/星系宏观模式下完全跳过连接线绘制,大幅提升帧率
+    if (zoom < HIDE_LINKS_ZOOM) {
+      const linkLayer = linkLayerRef.current;
+      if (linkLayer) linkLayer.clear();
+      return;
+    }
+
     const b = liveBoundsRef.current;
     const minX = b.minX - 200, maxX = b.maxX + 200;
     const minY = b.minY - 200, maxY = b.maxY + 200;

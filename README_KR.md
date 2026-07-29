@@ -13,7 +13,7 @@
 
   <!-- Badges -->
   <p>
-    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Stars"></a>
+    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981&logo=github&cacheSeconds=60" alt="Stars"></a>
     <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9" alt="Release"></a>
     <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
     <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
@@ -178,13 +178,3 @@ Pull Request를 제출하기 전에 [기여 가이드라인](CONTRIBUTING.md)을
 
 Apache License 2.0 — 자유롭게 사용 및 수정 가능. **상업적 사용 시 원저작자에게 저작권 표시 필수.** [LICENSE](LICENSE) 참조.
 
----
-
-<!-- Star History -->
-<div align="center">
-
-  ## ⭐ Star History
-
-  [![Star History Chart](https://api.star-history.com/svg?repos=Poetrynan/ZettleAgent&type=Date)](https://star-history.com/#Poetrynan/ZettleAgent&Date)
-
-</div>

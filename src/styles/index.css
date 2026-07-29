@@ -121,12 +121,15 @@ body {
   overflow: hidden;
   min-height: 0;
   background: var(--bg-primary);
+  position: relative;
 }
 
 .view-scroll {
   height: 100%;
   overflow: auto;
   background: var(--bg-primary);
+  position: absolute;
+  inset: 0;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────── */

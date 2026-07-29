@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { openOrCreateDailyNote, getDailyFolderPath, notifyDailyNotesChanged } from '../../lib/dailyNote';
+import { join, desktopDir } from '@tauri-apps/api/path';
+
 
 import {
   deleteFile,
@@ -41,7 +43,6 @@ export function Sidebar() {
     state,
     addVaultPath,
     removeVaultPath,
-    setPrimaryVaultPath,
     setCurrentFile,
     setSearchQuery,
     setView,
@@ -52,6 +53,7 @@ export function Sidebar() {
     closeTabsUnderPath,
     openInSplit,
   } = useApp();
+
 
   const {
     trees,
@@ -141,6 +143,19 @@ export function Sidebar() {
   const [inputName, setInputName] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+
+  // ── Inline Folder Creation states ──
+  const [inlineCreateFolderParentPath, setInlineCreateFolderParentPath] = useState<string | null>(null);
+  const [inlineFolderName, setInlineFolderName] = useState<string>('');
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state.currentFile) {
+      setSelectedPath(state.currentFile);
+    }
+  }, [state.currentFile]);
+
+
 
   // ── Daily notes tree ──
   const [dailyTree, setDailyTree] = useState<DirTreeNode | null>(null);
@@ -267,6 +282,211 @@ export function Sidebar() {
     }
   };
 
+  // ── Determine the active vault based on currentFile or selectedPath ──
+  const getActiveVaultPath = useCallback((): string | null => {
+    // Try to find which vault the current file belongs to
+    if (state.currentFile) {
+      const normalizedCurrent = state.currentFile.replace(/\\/g, '/');
+      for (const vp of state.vaultPaths) {
+        const normalizedVp = vp.replace(/\\/g, '/');
+        if (normalizedCurrent.startsWith(normalizedVp + '/') || normalizedCurrent === normalizedVp) {
+          return vp;
+        }
+      }
+    }
+    // Try selectedPath
+    if (selectedPath) {
+      const normalizedSelected = selectedPath.replace(/\\/g, '/');
+      for (const vp of state.vaultPaths) {
+        const normalizedVp = vp.replace(/\\/g, '/');
+        if (normalizedSelected.startsWith(normalizedVp + '/') || normalizedSelected === normalizedVp) {
+          return vp;
+        }
+      }
+    }
+    // Fall back to primary vault
+    return state.vaultPath;
+  }, [state.currentFile, state.vaultPaths, state.vaultPath, selectedPath]);
+
+  // ── Note creation (Obsidian-style: no modal, auto-name, auto-open) ──
+  const handleCreateNoteInline = useCallback(async () => {
+    const activeVault = getActiveVaultPath();
+    if (!activeVault) {
+      showToast(t('sidebar.tipNoVault'), 'error');
+      return;
+    }
+    try {
+      // Determine target folder:
+      // 1. If a folder is selected → create inside it
+      // 2. If a file is selected → create in its parent folder
+      // 3. If currentFile exists → create in its parent folder
+      // 4. Otherwise → active vault root
+      let targetFolder = activeVault;
+
+      if (selectedPath) {
+        const normalizedSelected = selectedPath.replace(/\\/g, '/');
+        const lastSegment = normalizedSelected.split('/').pop() || '';
+        const isFile = lastSegment.includes('.') && !lastSegment.startsWith('.');
+        const insideAnyVault = state.vaultPaths.some(vp =>
+          normalizedSelected.startsWith(vp.replace(/\\/g, '/'))
+        );
+        if (insideAnyVault) {
+          if (isFile) {
+            targetFolder = selectedPath.replace(/\\/g, '/').split('/').slice(0, -1).join('\\');
+          } else {
+            targetFolder = selectedPath;
+          }
+        }
+      } else if (state.currentFile) {
+        const parent = state.currentFile.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+        const normalizedActiveVault = activeVault.replace(/\\/g, '/');
+        if (parent.startsWith(normalizedActiveVault)) {
+          targetFolder = state.currentFile.replace(/\\/g, '/').split('/').slice(0, -1).join('\\');
+        }
+      }
+
+      // Generate unique "Untitled" name (Obsidian-style auto-increment)
+      // Backend create_file already checks existence and returns error;
+      // we catch it and retry with incremented name.
+      const baseName = state.lang === 'zh' ? '无标题' : 'Untitled';
+      let newPath: string = '';
+      for (let counter = 0; counter < 100; counter++) {
+        const noteName = counter === 0 ? `${baseName}.md` : `${baseName} ${counter}.md`;
+        try {
+          newPath = await createFile(targetFolder, noteName);
+          break;
+        } catch (e: any) {
+          if (String(e).includes('already exists')) continue;
+          throw e;
+        }
+      }
+      if (!newPath) throw new Error('Could not create note: too many untitled files');
+
+      // Expand parent folder and refresh tree
+      expandFolder(targetFolder);
+      await refresh();
+
+      // Open the note immediately (Obsidian behavior)
+      setCurrentFile(newPath);
+      setView('note');
+      setSelectedPath(newPath);
+
+      showToast(t('sidebar.createSuccess'), 'success');
+    } catch (err) {
+      console.error('Failed to create note:', err);
+      showToast((state.lang === 'zh' ? '创建笔记失败: ' : 'Failed to create note: ') + String(err), 'error');
+    }
+  }, [getActiveVaultPath, selectedPath, state.vaultPaths, state.currentFile, state.lang, setCurrentFile, setView, setSelectedPath, expandFolder, refresh, showToast]);
+
+  // ── Listen for Ctrl+N (zettel:new-note) event ──
+  useEffect(() => {
+    const handleNewNote = () => {
+      handleCreateNoteInline();
+    };
+    window.addEventListener('zettel:new-note', handleNewNote);
+    return () => window.removeEventListener('zettel:new-note', handleNewNote);
+  }, [handleCreateNoteInline]);
+
+  // ── Folder creation (Inline, Obsidian-style) ──
+  const handleCreateFolderInline = async () => {
+    // If nothing is selected → show inline input to create a new vault on Desktop
+    if (!selectedPath) {
+      try {
+        const desktop = await desktopDir();
+        setInlineCreateFolderParentPath(desktop);
+        setInlineFolderName('');
+      } catch (err) {
+        showToast(String(err), 'error');
+      }
+      return;
+    }
+
+    // Something is selected → create subfolder inside it (Obsidian behavior)
+    try {
+      const normalizedSelected = selectedPath.replace(/\\/g, '/');
+      const lastSegment = normalizedSelected.split('/').pop() || '';
+      const isFile = lastSegment.includes('.') && !lastSegment.startsWith('.');
+
+      let parentPath: string = selectedPath;
+
+      if (isFile) {
+        // File selected → use its parent folder
+        const insideAnyVault = state.vaultPaths.some(vp =>
+          normalizedSelected.startsWith(vp.replace(/\\/g, '/'))
+        );
+        if (insideAnyVault) {
+          parentPath = selectedPath.replace(/\\/g, '/').split('/').slice(0, -1).join('\\');
+        }
+      } else {
+        // Folder selected → create inside it
+        const insideAnyVault = state.vaultPaths.some(vp =>
+          normalizedSelected.startsWith(vp.replace(/\\/g, '/'))
+        );
+        if (!insideAnyVault) {
+          // Selected path is not inside any vault → show inline input on Desktop
+          const desktop = await desktopDir();
+          setInlineCreateFolderParentPath(desktop);
+          setInlineFolderName('');
+          return;
+        }
+        parentPath = selectedPath;
+      }
+
+      // Expand the parent folder to show the inline input
+      expandFolder(parentPath);
+
+      setInlineCreateFolderParentPath(parentPath);
+      setInlineFolderName('');
+    } catch (err) {
+      console.error('Failed to resolve folder creation path:', err);
+      showToast(String(err), 'error');
+    }
+  };
+
+  const handleExecuteCreateFolderInline = async () => {
+    if (!inlineCreateFolderParentPath) return;
+    const parent = inlineCreateFolderParentPath;
+    const name = inlineFolderName.trim();
+
+    setInlineCreateFolderParentPath(null);
+    setInlineFolderName('');
+
+    if (!name) return;
+
+    try {
+      const newPath = await createFolder(parent, name);
+      
+      // Check if newPath is inside the workspace vaults
+      const normalizedPath = newPath.replace(/\\/g, '/');
+      const insideAnyVault = state.vaultPaths.some(vp => normalizedPath.startsWith(vp.replace(/\\/g, '/')));
+      
+      if (!insideAnyVault) {
+        // Created outside the workspace (e.g. on Desktop) -> Add to workspace
+        await addVaultPath(newPath);
+        showToast(
+          state.lang === 'zh' ? `已创建新知识库「${name}」` : `New vault "${name}" created`,
+          'success'
+        );
+      } else {
+        // Created inside workspace -> Normal folder creation
+        showToast(t('sidebar.createSuccess'), 'success');
+        expandFolder(parent);
+      }
+      await refresh();
+    } catch (err) {
+      console.error('Failed to create folder:', err);
+      showToast((state.lang === 'zh' ? '创建文件夹失败: ' : 'Failed to create folder: ') + String(err), 'error');
+    }
+  };
+
+  const handleCancelCreateFolderInline = () => {
+    setInlineCreateFolderParentPath(null);
+    setInlineFolderName('');
+  };
+
+
+
+
   // ── File operations ──
   const handleCreateFile = async () => {
     if (!createFileDialog || !inputName.trim()) return;
@@ -309,12 +529,12 @@ export function Sidebar() {
     if (!createFolderDialog || !inputName.trim()) return;
     try {
       const name = inputName.trim();
-      await createFolder(createFolderDialog.path, name);
-      showToast(t('sidebar.createSuccess'), 'success');
+      const newPath = await createFolder(createFolderDialog.path, name);
       setCreateFolderDialog(null);
       setInputName('');
-      await refresh();
+      showToast(t('sidebar.createSuccess'), 'success');
       expandFolder(createFolderDialog.path);
+      await refresh();
     } catch (err) {
       console.error('Failed to create folder:', err);
       showToast(String(err), 'error');
@@ -622,13 +842,43 @@ export function Sidebar() {
         {
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <IconFilePlus size={14} /><span>{t('sidebar.newFile')}</span></div>),
-          onClick: () => { setInputName(''); setCreateFileDialog(node); }
+          onClick: async () => {
+            // Obsidian-style: create untitled note directly in this folder, auto-open
+            try {
+              const baseName = state.lang === 'zh' ? '无标题' : 'Untitled';
+              let newPath: string = '';
+              for (let counter = 0; counter < 100; counter++) {
+                const noteName = counter === 0 ? `${baseName}.md` : `${baseName} ${counter}.md`;
+                try {
+                  newPath = await createFile(node.path, noteName);
+                  break;
+                } catch (e: any) {
+                  if (String(e).includes('already exists')) continue;
+                  throw e;
+                }
+              }
+              if (!newPath) throw new Error('Could not create note: too many untitled files');
+              expandFolder(node.path);
+              await refresh();
+              setCurrentFile(newPath);
+              setView('note');
+              setSelectedPath(newPath);
+              showToast(t('sidebar.createSuccess'), 'success');
+            } catch (err) {
+              showToast((state.lang === 'zh' ? '创建笔记失败: ' : 'Failed to create note: ') + String(err), 'error');
+            }
+          }
         },
         {
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <IconFolderPlus size={14} /><span>{t('sidebar.newFolder')}</span></div>),
-          onClick: () => { setInputName(''); setCreateFolderDialog(node); }
+          onClick: () => {
+            expandFolder(node.path);
+            setInlineCreateFolderParentPath(node.path);
+            setInlineFolderName('');
+          }
         },
+
         {
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -708,13 +958,6 @@ export function Sidebar() {
           onClick: () => setDeleteDailyConfirm(true)
         });
       } else if (isWorkspaceRoot) {
-        const isPrimary = state.vaultPaths[0] === node.path;
-        if (!isPrimary) {
-          items.push({
-            label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>{state.lang === 'zh' ? '设为主文件夹' : 'Set as Primary'}</span></div>),
-            onClick: () => { setPrimaryVaultPath(node.path); }
-          });
-        }
         items.push({
           label: (<div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg><span>{state.lang === 'zh' ? '从工作区移除' : 'Remove from Workspace'}</span></div>),
           danger: true,
@@ -759,7 +1002,41 @@ export function Sidebar() {
         }
       ];
     }
-  }, [contextMenu, state.bookmarks, state.lang, state.llmConfig, state.methodology, state.vaultPaths, attachNoteToChat, toggleBookmark, setPrimaryVaultPath, removeVaultPath, showToast, openInSplit, setView]);
+  }, [contextMenu, state.bookmarks, state.lang, state.llmConfig, state.methodology, state.vaultPaths, attachNoteToChat, toggleBookmark, removeVaultPath, showToast, openInSplit, setView, expandFolder, refresh, setCurrentFile, setSelectedPath]);
+
+  // ── Hover action: create file in specific folder (VSCode/Cursor style) ──
+  const handleHoverCreateFile = useCallback(async (folderPath: string) => {
+    try {
+      const baseName = state.lang === 'zh' ? '无标题' : 'Untitled';
+      let newPath: string = '';
+      for (let counter = 0; counter < 100; counter++) {
+        const noteName = counter === 0 ? `${baseName}.md` : `${baseName} ${counter}.md`;
+        try {
+          newPath = await createFile(folderPath, noteName);
+          break;
+        } catch (e: any) {
+          if (String(e).includes('already exists')) continue;
+          throw e;
+        }
+      }
+      if (!newPath) throw new Error('Could not create note: too many untitled files');
+      expandFolder(folderPath);
+      await refresh();
+      setCurrentFile(newPath);
+      setView('note');
+      setSelectedPath(newPath);
+      showToast(t('sidebar.createSuccess'), 'success');
+    } catch (err) {
+      showToast((state.lang === 'zh' ? '创建笔记失败: ' : 'Failed to create note: ') + String(err), 'error');
+    }
+  }, [state.lang, expandFolder, refresh, setCurrentFile, setView, setSelectedPath, showToast]);
+
+  // ── Hover action: create subfolder in specific folder (VSCode/Cursor style) ──
+  const handleHoverCreateFolder = useCallback((folderPath: string) => {
+    expandFolder(folderPath);
+    setInlineCreateFolderParentPath(folderPath);
+    setInlineFolderName('');
+  }, [expandFolder]);
 
   // ── Render ──
   const sortLabel = state.lang === 'zh'
@@ -789,17 +1066,24 @@ export function Sidebar() {
       {/* Header */}
       <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginRight: 'var(--space-4)' }}>
             <span className="logo-wordmark" style={{ fontSize: 'var(--text-xl)' }}>
               <span className="logo-zettel">Zettel</span>
               <span className="logo-lambda-wrap"><span className="logo-agent-lambda">Λ</span></span>
               <span className="logo-agent-rest">agent</span>
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-1)', flexShrink: 0 }}>
             <button className="btn btn-ghost btn-icon-sm" onClick={handleSelectVault} title={t('sidebar.selectVault')}>
               <IconFolder size={16} />
             </button>
+            <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateNoteInline} title={t('sidebar.newFile')}>
+              <IconFilePlus size={16} />
+            </button>
+            <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateFolderInline} title={t('sidebar.newFolder')}>
+              <IconFolderPlus size={16} />
+            </button>
+
             <button className="btn btn-ghost btn-icon-sm" onClick={handleImportFiles} disabled={!state.vaultPath || isImporting}
               title={!state.vaultPath ? t('sidebar.tipNoVault') : (state.lang === 'zh' ? '导入文件 / 附件 (.md, .pdf, .docx 等)' : 'Import files / attachments (.md, .pdf, .docx etc.)')}>
               <IconUpload size={16} />
@@ -813,6 +1097,7 @@ export function Sidebar() {
               </svg>
             </button>
           </div>
+
         </div>
       </div>
 
@@ -870,21 +1155,20 @@ export function Sidebar() {
         </button>
         <button
           className="sidebar-tree-toolbar-btn"
-          onClick={handleExpandAll}
-          title={state.lang === 'zh' ? '展开全部' : 'Expand All'}
+          onClick={expandedFolders.size > 0 ? handleCollapseAll : handleExpandAll}
+          title={state.lang === 'zh'
+            ? (expandedFolders.size > 0 ? '折叠全部文件夹' : '展开全部文件夹')
+            : (expandedFolders.size > 0 ? 'Collapse All Folders' : 'Expand All Folders')}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="7 13 12 8 17 13"/><polyline points="7 18 12 13 17 18"/><line x1="12" y1="3" x2="12" y2="8"/>
-          </svg>
-        </button>
-        <button
-          className="sidebar-tree-toolbar-btn"
-          onClick={handleCollapseAll}
-          title={state.lang === 'zh' ? '折叠全部' : 'Collapse All'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="7 8 12 13 17 8"/><polyline points="7 3 12 8 17 3"/><line x1="12" y1="13" x2="12" y2="21"/>
-          </svg>
+          {expandedFolders.size > 0 ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="7 8 12 13 17 8"/><polyline points="7 3 12 8 17 3"/><line x1="12" y1="13" x2="12" y2="21"/>
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="7 13 12 8 17 13"/><polyline points="7 18 12 13 17 18"/><line x1="12" y1="3" x2="12" y2="8"/>
+            </svg>
+          )}
         </button>
         <div style={{ flex: 1 }} />
         <button
@@ -944,7 +1228,19 @@ export function Sidebar() {
           onNodeContextMenu={handleNodeContextMenu}
           bookmarks={state.bookmarks}
           searchQuery={state.searchQuery}
+          inlineCreateFolderParentPath={inlineCreateFolderParentPath}
+          inlineFolderName={inlineFolderName}
+          setInlineFolderName={setInlineFolderName}
+          onExecuteCreateFolder={handleExecuteCreateFolderInline}
+          onCancelCreateFolder={handleCancelCreateFolderInline}
+          selectedPath={selectedPath}
+          setSelectedPath={setSelectedPath}
+          onHoverCreateFile={handleHoverCreateFile}
+          onHoverCreateFolder={handleHoverCreateFolder}
         />
+
+
+
 
         {/* Bookmarked Notes & Daily Notes */}
         <SidebarBookmarksPanel

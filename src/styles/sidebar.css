@@ -284,6 +284,47 @@
   transform: translateX(0);
 }
 
+/* ── Hover Actions (VSCode/Cursor style) ── */
+
+.tree-hover-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tree-item:hover .tree-hover-actions,
+.tree-section-header:hover .tree-hover-actions {
+  opacity: 1;
+}
+
+.tree-hover-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  transition: all 0.1s ease;
+}
+
+.tree-hover-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tree-hover-btn:active {
+  transform: scale(0.9);
+}
+
 .tree-attach-btn {
   transition: color 150ms ease, background 150ms ease;
 }
@@ -293,16 +334,19 @@
   background: var(--bg-tertiary) !important;
 }
 
-.tree-item.active {
+.tree-item.active,
+.tree-section-header.active {
   background: var(--bg-hover, rgba(0, 0, 0, 0.04)) !important;
   color: var(--text-primary) !important;
   font-weight: 500;
   /* Removed active left border indicator as requested */
 }
 
-:root[data-theme="dark"] .tree-item.active {
+:root[data-theme="dark"] .tree-item.active,
+:root[data-theme="dark"] .tree-section-header.active {
   background: rgba(255, 255, 255, 0.06) !important;
 }
+
 
 .tree-item-label {
   flex: 1;

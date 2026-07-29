@@ -15,6 +15,9 @@ export const en = {
     'sidebar.noVaultSelected': 'No vault selected',
     'sidebar.selectVault': 'Select Vault',
     'sidebar.selectVaultDialog': 'Select Vault Folder',
+    'sidebar.createVault': 'Create Vault',
+    'sidebar.newVaultDialog': 'Select parent folder for the new vault',
+
 
     // Toolbar
     'toolbar.dashboard': 'Dashboard',
@@ -674,7 +677,17 @@ export const en = {
     'settings.dailyResetFail': '❌ Reset failed',
     'settings.dailyResetBtn': 'Reset',
     'settings.dailySaved': 'Saved',
+    'settings.newFolderLoc': 'Default Location for New Folders',
+    'settings.newFolderDesc': 'The default parent directory path where new folders will be created when clicking the new folder button and no folder in the tree is expanded. Leave empty to create on the Desktop.',
+    'settings.newFolderDefault': 'Desktop (Default)',
+
+    'settings.newFolderSelectDir': 'Select Default Folder Location',
+    'settings.newFolderPathSaved': '✅ Default path saved',
+    'settings.newFolderSelectFail': '❌ Failed to select path',
+    'settings.newFolderReset': '✅ Default path reset',
+    'settings.newFolderResetFail': '❌ Reset failed',
     'settings.dataStorage': 'Data Storage',
+
     'settings.dataStorageDesc': 'App data is stored at the following locations:',
     'settings.dbLabel': 'Database:',
     'settings.dataDir': 'Data Directory:',

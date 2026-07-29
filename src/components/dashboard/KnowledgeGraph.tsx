@@ -11,6 +11,7 @@ import {
 import '../../styles/KnowledgeGraph.css';
 
 import { PixiGraph, type PixiGraphHandle, type PGNode, type PGGraphData, type ForceParams, DEFAULT_FORCE_PARAMS } from './PixiGraph';
+import { ThreeGraph } from './ThreeGraph';
 
 import { GraphHud } from './GraphHud';
 import { GraphTimeSlider } from './GraphTimeSlider';
@@ -79,6 +80,7 @@ export function KnowledgeGraph() {
 
   // ── Force parameters (Obsidian-style live sliders) ──
   const [forceParams, setForceParams] = useState<ForceParams>(DEFAULT_FORCE_PARAMS);
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
 
   // Suppress unused compiler warnings
   if (false as boolean) {
@@ -128,14 +130,15 @@ export function KnowledgeGraph() {
     return () => window.removeEventListener('zettel:toggle-agent', handleToggleAgent);
   }, []);
 
-  // Re-measure when active tab or view mode changes
+  // Re-measure when active tab, view mode, or chat panel toggles
   useEffect(() => {
     if (state.view === 'graph') {
       measure();
       const timer = setTimeout(measure, 100);
-      return () => clearTimeout(timer);
+      const timer2 = setTimeout(measure, 300);
+      return () => { clearTimeout(timer); clearTimeout(timer2); };
     }
-  }, [state.view, measure]);
+  }, [state.view, state.isChatOpen, state.isSidebarOpen, measure]);
 
   // ── Drag background cursor state ──────────────────────────────────
   const handleMouseDown = useCallback(() => {
@@ -610,27 +613,49 @@ export function KnowledgeGraph() {
 
   return (
     <div ref={containerRef} className={`kg-container ${isDraggingBg ? 'is-dragging-bg' : ''}`}>
-      {/* ── Pixi Graph Renderer ── */}
-      <PixiGraph
-        ref={pixiRef}
-        graphData={graphData as unknown as PGGraphData}
-        width={dimensions.width}
-        height={dimensions.height}
-        hoveredNode={hoveredNode as PGNode | null}
-        selectedNodes={selectedNodes as PGNode[]}
-        selectedCluster={selectedCluster}
-        methodology={state.methodology || 'generic'}
-        isLocalMode={isLocalMode}
-        focusNodeId={focusNodeId}
-        forceParams={forceParams}
-        onNodeClick={handleNodeClick as any}
-        onNodeHover={handleNodeHover as any}
-        onNodeRightClick={handleNodeRightClick as any}
-        onBackgroundClick={() => {
-          setSelectedNodes([]);
-          setContextMenu(null);
-        }}
-      />
+      {/* ── Graph Renderer (2D / 3D Switchable) ── */}
+      {viewMode === '2d' ? (
+        <PixiGraph
+          ref={pixiRef}
+          graphData={graphData as unknown as PGGraphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          hoveredNode={hoveredNode as PGNode | null}
+          selectedNodes={selectedNodes as PGNode[]}
+          selectedCluster={selectedCluster}
+          methodology={state.methodology || 'generic'}
+          isLocalMode={isLocalMode}
+          focusNodeId={focusNodeId}
+          forceParams={forceParams}
+          onNodeClick={handleNodeClick as any}
+          onNodeHover={handleNodeHover as any}
+          onNodeRightClick={handleNodeRightClick as any}
+          onBackgroundClick={() => {
+            setSelectedNodes([]);
+            setContextMenu(null);
+          }}
+        />
+      ) : (
+        <ThreeGraph
+          graphData={graphData as unknown as PGGraphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          hoveredNode={hoveredNode as PGNode | null}
+          selectedNodes={selectedNodes as PGNode[]}
+          selectedCluster={selectedCluster}
+          methodology={state.methodology || 'generic'}
+          isLocalMode={isLocalMode}
+          focusNodeId={focusNodeId}
+          forceParams={forceParams}
+          onNodeClick={handleNodeClick as any}
+          onNodeHover={handleNodeHover as any}
+          onNodeRightClick={handleNodeRightClick as any}
+          onBackgroundClick={() => {
+            setSelectedNodes([]);
+            setContextMenu(null);
+          }}
+        />
+      )}
 
 
 
@@ -651,13 +676,23 @@ export function KnowledgeGraph() {
           {isZh ? '操作提示' : 'Tips'}
         </span>
         {!tipsCollapsed && (
-          <>
-            <span>• {t('graph.tipZoom')}</span>
-            <span>• {t('graph.tipPan')}</span>
-            <span>• {t('graph.tipDragNode')}</span>
-            <span>• {t('graph.tipDoubleClick')}</span>
-            <span>• {t('graph.tipSpace')}</span>
-          </>
+          viewMode === '2d' ? (
+            <>
+              <span>• {t('graph.tipZoom')}</span>
+              <span>• {t('graph.tipPan')}</span>
+              <span>• {t('graph.tipDragNode')}</span>
+              <span>• {t('graph.tipDoubleClick')}</span>
+              <span>• {t('graph.tipSpace')}</span>
+            </>
+          ) : (
+            <>
+              <span>• {isZh ? '滚轮滑动：缩放图谱' : 'Scroll wheel: Zoom graph'}</span>
+              <span>• {isZh ? '鼠标左键拖拽：旋转视角' : 'Left click + Drag: Rotate view'}</span>
+              <span>• {isZh ? '鼠标右键拖拽（或 Shift+拖拽）：平移画布' : 'Right click (or Shift+Drag): Pan view'}</span>
+              <span>• {isZh ? '按住节点拖动：三维空间移动节点' : 'Drag Node: Move node in 3D'}</span>
+              <span>• {isZh ? '双击/单击节点：平滑相机聚焦飞入' : 'Click/Double Click: Focus & fly-to node'}</span>
+            </>
+          )
         )}
       </div>
 
@@ -747,6 +782,53 @@ export function KnowledgeGraph() {
       >
         <IconRobot size={14} />
         <span>{isZh ? 'Agent 建议' : 'Agent Panel'}</span>
+      </button>
+
+      {/* 2D/3D View Mode Toggle */}
+      <button
+        className="agent-floating-toggle"
+        onClick={() => setViewMode(prev => prev === '2d' ? '3d' : '2d')}
+        style={{
+          right: isAgentOpen ? 344 : 12,
+          top: 54,
+          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          pointerEvents: 'auto',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'var(--bg-panel)',
+          color: 'var(--text-primary)',
+          borderColor: 'var(--border-subtle)',
+          padding: '8px 14px',
+          borderRadius: '8px',
+          fontWeight: 500,
+          boxShadow: 'var(--shadow-md)',
+          cursor: 'pointer',
+        }}
+      >
+        {viewMode === '2d' ? (
+          <>
+            {/* Box 3D Icon */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            <span style={{ fontSize: 12 }}>{isZh ? '3D 视图' : '3D View'}</span>
+          </>
+        ) : (
+          <>
+            {/* Grid 2D Icon */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="3" y1="15" x2="21" y2="15" />
+            </svg>
+            <span style={{ fontSize: 12 }}>{isZh ? '2D 视图' : '2D View'}</span>
+          </>
+        )}
       </button>
 
       {/* Agent Panel */}

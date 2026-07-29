@@ -292,10 +292,13 @@
 }
 
 .kg-legend-dot {
+  display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  forced-color-adjust: none !important;
+  color-scheme: only light !important;
 }
 
 .kg-legend-text {

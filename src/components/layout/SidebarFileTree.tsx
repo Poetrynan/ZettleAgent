@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { DirTreeNode, openFileExternal } from '../../lib/tauri';
 import { t } from '../../lib/i18n';
-import { IconFolder, IconFolderOpen, IconFile } from '../icons';
+import { IconFolder, IconFolderOpen, IconFile, IconChevronRight, IconFilePlus, IconFolderPlus } from '../icons';
 import type { TreeSortMode } from './Sidebar';
 import { TreeSectionHeader } from './tree/TreeSectionHeader';
 import { TreeChevron, TreeIndentSpacer, TreeCountBadge, TreeBookmarkPin } from './tree/TreeRowParts';
@@ -27,7 +27,19 @@ interface FileTreeProps {
   onNodeContextMenu: (e: React.MouseEvent, node: DirTreeNode) => void;
   bookmarks: string[];
   searchQuery: string;
+  inlineCreateFolderParentPath?: string | null;
+  inlineFolderName?: string;
+  setInlineFolderName?: (v: string) => void;
+  onExecuteCreateFolder?: () => void;
+  onCancelCreateFolder?: () => void;
+  selectedPath?: string | null;
+  setSelectedPath?: (p: string | null) => void;
+  onHoverCreateFile?: (folderPath: string) => void;
+  onHoverCreateFolder?: (folderPath: string) => void;
 }
+
+
+
 
 function getFileIcon(name: string) {
   const ext = name.split('.').pop()?.toLowerCase() || '';
@@ -95,7 +107,19 @@ export function SidebarFileTree(props: FileTreeProps) {
     onNodeContextMenu,
     bookmarks,
     searchQuery,
+    inlineCreateFolderParentPath,
+    inlineFolderName = '',
+    setInlineFolderName,
+    onExecuteCreateFolder,
+    onCancelCreateFolder,
+    selectedPath,
+    setSelectedPath,
+    onHoverCreateFile,
+    onHoverCreateFolder,
   } = props;
+
+
+
 
   const { state } = useApp();
 
@@ -106,19 +130,39 @@ export function SidebarFileTree(props: FileTreeProps) {
     return expandedFolders;
   }, [expandedFolders, searchExpandedFolders, searchQuery]);
 
+  const isParentInsideWorkspace = useMemo(() => {
+    if (!inlineCreateFolderParentPath) return false;
+    const parentNorm = inlineCreateFolderParentPath.replace(/\\/g, '/').toLowerCase();
+    return trees.some(wt => {
+      const rootNorm = wt.rootPath.replace(/\\/g, '/').toLowerCase();
+      return parentNorm.startsWith(rootNorm);
+    });
+  }, [inlineCreateFolderParentPath, trees]);
+
+
   const renderTreeNode = (node: DirTreeNode, depth: number) => {
     const isExpanded = activeExpanded.has(node.path);
 
     if (node.is_dir) {
       const isDragTarget = dragOverFolder === node.path;
+      const isSelected = selectedPath?.replace(/\\/g, '/') === node.path.replace(/\\/g, '/');
       return (
         <div key={node.path} style={{ display: 'flex', flexDirection: 'column' }}>
           <div
-            className={`tree-item${isDragTarget ? ' tree-drop-target' : ''}`}
+            className={`tree-item${isSelected ? ' active' : ''}${isDragTarget ? ' tree-drop-target' : ''}`}
             draggable
             onDragStart={(e) => onTreeDragStart(e, node)}
-            onClick={() => toggleFolder(node.path)}
+            onClick={() => {
+              toggleFolder(node.path);
+              if (isExpanded) {
+                setSelectedPath?.(null);
+              } else {
+                setSelectedPath?.(node.path);
+              }
+            }}
             onContextMenu={(e) => onNodeContextMenu(e, node)}
+
+
             onDragOver={(e) => onTreeDragOver(e, node.path)}
             onDragLeave={onTreeDragLeave}
             onDrop={(e) => onTreeDrop(e, node.path)}
@@ -141,12 +185,86 @@ export function SidebarFileTree(props: FileTreeProps) {
             <span className="tree-item-label" title={node.name}>{node.name}</span>
             {bookmarks.includes(node.path) && <TreeBookmarkPin />}
             <TreeCountBadge count={node.file_count} />
+            {/* Hover actions (VSCode/Cursor style) */}
+            <div className="tree-hover-actions">
+              {onHoverCreateFile && (
+                <button
+                  className="tree-hover-btn"
+                  onClick={(e) => { e.stopPropagation(); onHoverCreateFile(node.path); }}
+                  title={state.lang === 'zh' ? '在此文件夹新建文件' : 'New File in this folder'}
+                >
+                  <IconFilePlus size={13} />
+                </button>
+              )}
+              {onHoverCreateFolder && (
+                <button
+                  className="tree-hover-btn"
+                  onClick={(e) => { e.stopPropagation(); onHoverCreateFolder(node.path); }}
+                  title={state.lang === 'zh' ? '在此文件夹新建子文件夹' : 'New Folder in this folder'}
+                >
+                  <IconFolderPlus size={13} />
+                </button>
+              )}
+            </div>
           </div>
-          {isExpanded && node.children && (
+          {isExpanded && (
             <div className="tree-children-enter">
-              {sortChildren(node.children, sortMode, sortDesc).map((child) => renderTreeNode(child, depth + 1))}
+              {node.children && sortChildren(node.children, sortMode, sortDesc).map((child) => renderTreeNode(child, depth + 1))}
+              {inlineCreateFolderParentPath?.replace(/\\/g, '/') === node.path.replace(/\\/g, '/') && (
+
+                <div
+                  className="tree-item"
+                  style={{ '--depth': depth + 1, display: 'flex', alignItems: 'center', gap: '6px', cursor: 'default' } as React.CSSProperties}
+                >
+                  {/* Render vertical nesting guides based on depth */}
+                  {Array.from({ length: depth + 1 }).map((_, idx) => (
+                    <span
+                      key={idx}
+                      className="tree-indent-guide"
+                      style={{
+                        left: `calc(var(--tree-base-pad) + ${idx} * var(--tree-indent) + 8px)`
+                      }}
+                    />
+                  ))}
+                  <TreeIndentSpacer />
+                  <span className="tree-folder-icon" style={{ color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center' }}>
+                    <IconFolder size={13} />
+                  </span>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder={state.lang === 'zh' ? '输入文件夹名称...' : 'Enter folder name...'}
+                    autoFocus
+                    value={inlineFolderName}
+                    onChange={(e) => setInlineFolderName?.(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') onExecuteCreateFolder?.();
+                      else if (e.key === 'Escape') onCancelCreateFolder?.();
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => {
+                        onExecuteCreateFolder?.();
+                      }, 150);
+                    }}
+                    style={{
+                      height: '20px',
+                      padding: '1px 4px',
+                      fontSize: '11px',
+                      lineHeight: '1',
+                      flex: 1,
+                      minWidth: '0',
+                      border: '1px solid var(--accent-primary)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-primary)',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
+
         </div>
       );
     }
@@ -156,6 +274,7 @@ export function SidebarFileTree(props: FileTreeProps) {
     const isExternal = ['html', 'htm', 'csv', 'pdf', 'docx', 'png', 'jpg', 'jpeg', 'webp'].includes(ext);
 
     const handleFileClick = () => {
+      setSelectedPath?.(node.path);
       if (isMd) {
         setCurrentFile(node.path);
         setView('note');
@@ -167,10 +286,13 @@ export function SidebarFileTree(props: FileTreeProps) {
       }
     };
 
+    const isFileActive = (selectedPath?.replace(/\\/g, '/') === node.path.replace(/\\/g, '/')) || (state.currentFile === node.path);
+
     return (
       <div
         key={node.path}
-        className={`tree-item ${state.currentFile === node.path ? 'active' : ''}`}
+        className={`tree-item ${isFileActive ? 'active' : ''}`}
+
         draggable
         onDragStart={(e) => onTreeDragStart(e, node)}
         onClick={handleFileClick}
@@ -225,7 +347,8 @@ export function SidebarFileTree(props: FileTreeProps) {
           <span className="spinner" />
           <span>{t('sidebar.syncing')}</span>
         </div>
-      ) : trees.length === 0 ? (
+      ) : (trees.length === 0 && !inlineCreateFolderParentPath) ? (
+
         <div className="empty-state" style={{ padding: 'var(--space-8)' }}>
           <IconFolder size={48} />
           <div className="empty-state-title">
@@ -261,9 +384,8 @@ export function SidebarFileTree(props: FileTreeProps) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {trees.map((wt, idx) => {
+          {trees.map((wt) => {
             const isRootExpanded = activeExpanded.has(wt.rootPath);
-            const isPrimary = idx === 0;
             const dailyChild = wt.tree?.children.find(c => c.is_dir && c.name.toLowerCase() === 'daily');
             const fileCount = (wt.tree?.file_count ?? 0) - (dailyChild?.file_count ?? 0);
 
@@ -272,15 +394,44 @@ export function SidebarFileTree(props: FileTreeProps) {
                 <TreeSectionHeader
                   label={wt.rootName}
                   expanded={isRootExpanded}
-                  onToggle={() => toggleFolder(wt.rootPath)}
+                  onToggle={() => {
+                    toggleFolder(wt.rootPath);
+                    if (isRootExpanded) {
+                      setSelectedPath?.(null);
+                    } else {
+                      setSelectedPath?.(wt.rootPath);
+                    }
+                  }}
+
+                  className={selectedPath?.replace(/\\/g, '/') === wt.rootPath.replace(/\\/g, '/') ? 'active' : ''}
                   count={fileCount}
                   icon={<IconFolder size={13} />}
+
                   isDropTarget={dragOverFolder === wt.rootPath}
-                  trailing={isPrimary ? (
-                    <span className="tree-section-icon" title={state.lang === 'zh' ? '主文件夹' : 'Primary'}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                    </span>
-                  ) : undefined}
+                  trailing={
+                    <>
+                      <div className="tree-hover-actions">
+                        {onHoverCreateFile && (
+                          <button
+                            className="tree-hover-btn"
+                            onClick={(e) => { e.stopPropagation(); onHoverCreateFile(wt.rootPath); }}
+                            title={state.lang === 'zh' ? '在此文件夹新建文件' : 'New File'}
+                          >
+                            <IconFilePlus size={13} />
+                          </button>
+                        )}
+                        {onHoverCreateFolder && (
+                          <button
+                            className="tree-hover-btn"
+                            onClick={(e) => { e.stopPropagation(); onHoverCreateFolder(wt.rootPath); }}
+                            title={state.lang === 'zh' ? '在此文件夹新建子文件夹' : 'New Folder'}
+                          >
+                            <IconFolderPlus size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  }
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -290,16 +441,64 @@ export function SidebarFileTree(props: FileTreeProps) {
                   onDragLeave={onTreeDragLeave}
                   onDrop={(e) => onTreeDrop(e, wt.rootPath)}
                 />
-                {isRootExpanded && wt.tree && wt.tree.children.length > 0 && (
+                {isRootExpanded && wt.tree && (wt.tree.children.length > 0 || inlineCreateFolderParentPath?.replace(/\\/g, '/') === wt.rootPath.replace(/\\/g, '/')) && (
                   <div className="tree-children-enter">
                     {sortChildren(
                       wt.tree.children.filter((child) => !(child.is_dir && child.name.toLowerCase() === 'daily')),
                       sortMode,
                       sortDesc
                     ).map((child) => renderTreeNode(child, 0))}
+
+                    {inlineCreateFolderParentPath?.replace(/\\/g, '/') === wt.rootPath.replace(/\\/g, '/') && (
+                      <div
+                        className="tree-item"
+                        style={{
+                          '--depth': 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          cursor: 'default',
+                        } as React.CSSProperties}
+                      >
+                        <TreeIndentSpacer />
+                        <span className="tree-folder-icon" style={{ color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center' }}>
+                          <IconFolder size={13} />
+                        </span>
+                        <input
+                          type="text"
+                          className="input"
+                          placeholder={state.lang === 'zh' ? '输入文件夹名称...' : 'Enter folder name...'}
+                          autoFocus
+                          value={inlineFolderName}
+                          onChange={(e) => setInlineFolderName?.(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') onExecuteCreateFolder?.();
+                            else if (e.key === 'Escape') onCancelCreateFolder?.();
+                          }}
+                          onBlur={() => {
+                            setTimeout(() => {
+                              onExecuteCreateFolder?.();
+                            }, 150);
+                          }}
+                          style={{
+                            height: '20px',
+                            padding: '1px 4px',
+                            fontSize: '11px',
+                            lineHeight: '1',
+                            flex: 1,
+                            minWidth: '0',
+                            border: '1px solid var(--accent-primary)',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'var(--bg-primary)',
+                            color: 'var(--text-primary)',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
-                {isRootExpanded && wt.tree && wt.tree.children.length === 0 && (
+                {isRootExpanded && wt.tree && wt.tree.children.length === 0 && inlineCreateFolderParentPath?.replace(/\\/g, '/') !== wt.rootPath.replace(/\\/g, '/') && (
                   <div className="tree-empty-hint" style={{ '--depth': 0 } as React.CSSProperties}>
                     {state.lang === 'zh' ? '空文件夹' : 'Empty folder'}
                   </div>
@@ -307,8 +506,66 @@ export function SidebarFileTree(props: FileTreeProps) {
               </div>
             );
           })}
+
+          {/* Render inline create vault input at the end of the vault list if creating outside current vaults (e.g. on Desktop) */}
+          {inlineCreateFolderParentPath && !isParentInsideWorkspace && (
+
+            <div className="tree-section-block" style={{ padding: '4px 0' }}>
+              <div
+                className="tree-section-header"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '4px var(--tree-base-pad)',
+                  cursor: 'default',
+                  background: 'none',
+                }}
+              >
+                <span className="tree-section-chevron" style={{ opacity: 0 }}>
+                  <IconChevronRight size={12} />
+                </span>
+                <span className="tree-section-icon" style={{ color: 'var(--text-tertiary)' }}>
+                  <IconFolder size={13} />
+                </span>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={state.lang === 'zh' ? '在工作区创建新知识库...' : 'Create new vault in workspace...'}
+
+                  autoFocus
+                  value={inlineFolderName}
+                  onChange={(e) => setInlineFolderName?.(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onExecuteCreateFolder?.();
+                    else if (e.key === 'Escape') onCancelCreateFolder?.();
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      onExecuteCreateFolder?.();
+                    }, 150);
+                  }}
+                  style={{
+                    height: '22px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    lineHeight: '1',
+                    flex: 1,
+                    minWidth: '0',
+                    border: '1px solid var(--accent-primary)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      )
+
+}
     </div>
   );
 }
