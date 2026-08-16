@@ -770,7 +770,7 @@ export interface PlanStep {
 }
 
 export interface AgentEvent {
-type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified';
+type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage';
 message?: string;
 tool_call_id?: string;
 name?: string;
@@ -810,6 +810,35 @@ answer_preview?: string;
   layer?: 'L0' | 'L1' | 'L2';
   /** Localized human-readable intent name for display */
   intent_name?: string;
+  // Tool hook events (tool_blocked / tool_risk_notice / tool_redacted / memory_flushed)
+  // `reason` (declared above) carries the PRE-hook risk/veto explanation.
+  /** Number of secrets redacted by POST hook */
+  redactions?: number;
+  /** Number of memory items flushed before context fold */
+  count?: number;
+  // Lifecycle generation — stamped on EVERY event by `emit_agent_event`.
+  /** Run id of the turn that produced this event. Events from a superseded run are dropped. */
+  run_id?: string;
+  // Phase labels (phase events)
+  /** snake_case phase id: routing, calling_model, executing_tools, retrying, … */
+  phase?: string;
+  /** Pre-localized phase label for display */
+  label?: string;
+  /** Optional extra phase context */
+  detail?: string;
+  // Four-way token accounting (token_usage event, emitted once per turn)
+  /** Uncached prompt tokens */
+  input?: number;
+  /** Generated tokens */
+  output?: number;
+  /** Prompt tokens served from cache */
+  cache_read?: number;
+  /** Tokens written into the cache */
+  cache_write?: number;
+  /** Sum of the four disjoint buckets */
+  total?: number;
+  /** cache_read / (cache_read + input), 0..1 */
+  cache_hit_rate?: number;
 }
 
 export async function agentChat(request: AgentChatRequest): Promise<string> {
@@ -966,6 +995,17 @@ export async function saveChatMessage(
 
 export async function deleteChatSession(sessionId: string): Promise<void> {
   return invoke('delete_chat_session', { sessionId });
+}
+
+/**
+ * Drop `fromMessageId` and every message saved after it in this session.
+ * Backs the regenerate / edit-and-resend / error-retry flows: the discarded
+ * turn must leave the sqlite history too, or reloading the session would
+ * resurrect the reply the user just asked to redo.
+ * Returns the number of rows removed.
+ */
+export async function deleteChatMessagesFrom(sessionId: string, fromMessageId: string): Promise<number> {
+  return invoke('delete_chat_messages_from', { sessionId, fromMessageId });
 }
 
 export async function renameChatSession(sessionId: string, newTitle: string): Promise<void> {

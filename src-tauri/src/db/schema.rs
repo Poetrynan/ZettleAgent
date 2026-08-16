@@ -87,6 +87,29 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Content-addressed embedding cache.
+    //
+    // `sync_file` deletes and re-inserts every chunk of a touched file, so
+    // without this table an unrelated one-line edit forces re-embedding of
+    // the whole file. Keying vectors by SHA-256 of the chunk text lets
+    // unchanged chunks be backfilled instantly and for free — and also
+    // deduplicates byte-identical chunks across different notes.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS embedding_cache (
+            content_hash TEXT PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            last_used_at TEXT DEFAULT (datetime('now'))
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embedding_cache_last_used ON embedding_cache(last_used_at);",
+        [],
+    )?;
+
     // Create card_meta table for AI-generated Zettelkasten card information
     conn.execute(
         "CREATE TABLE IF NOT EXISTS card_meta (

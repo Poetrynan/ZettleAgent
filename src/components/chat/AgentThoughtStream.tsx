@@ -16,6 +16,7 @@ import { t, tf, getLang } from '../../lib/i18n';
 import { IconChevronDown } from '../icons';
 import { MarkdownRenderer } from '../editor/MarkdownRenderer';
 import { isOrchestrationNoise, cleanThoughtForDisplay, extractStageLabelOnly } from './agentAnswer';
+import { ToolResultBody, ToolRiskBanner, ToolRedactionBadge, toolKindOf } from './ToolCallCard';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -176,6 +177,14 @@ function StatusIndicator({ status, size = 13 }: { status: string; size?: number 
       </svg>
     );
   }
+  if (status === 'denied') {
+    // PRE-hook veto — shield-with-slash, amber (refused, not failed)
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--warning, #d97706)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-label="denied">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="8" y1="8" x2="16" y2="16"/>
+      </svg>
+    );
+  }
   // pending
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="pending" opacity={0.45}>
@@ -261,6 +270,7 @@ function TraceToolItem({
           <span className="trace-tool-name">{getToolDisplayName(tc.name)}</span>
           {argSummary && <span className="trace-arg-summary">{argSummary}</span>}
           <span className="trace-row-meta">
+            <ToolRedactionBadge count={tc.redactions} />
             {elapsed !== null && elapsed >= 1 && (
               <span className="trace-duration">{elapsed}s</span>
             )}
@@ -270,6 +280,7 @@ function TraceToolItem({
             </span>
           </span>
         </div>
+        <ToolRiskBanner toolCall={tc} />
         {tc.status === 'running' && tc.progressStage && (
           <div className="trace-tool-progress">
             <span className="trace-tool-progress-stage">{tc.progressStage}</span>
@@ -291,6 +302,18 @@ function TraceToolItem({
             )}
             {tc.result && (() => {
               const formatted = formatToolResultDisplay(tc.name, tc.result);
+              // Knowledge tools get a purpose-built renderer (note outline,
+              // ranked hits, graph stats). todo_write keeps its prose outcome
+              // line; anything else falls back to pretty-printed JSON.
+              const specialized = toolKindOf(tc.name) !== 'generic' && !formatted.outcomeLabel;
+              if (specialized) {
+                return (
+                  <div className="trace-detail-section">
+                    <div className="trace-detail-label">{isZhLang() ? '结果' : 'Result'}</div>
+                    <ToolResultBody toolCall={tc} />
+                  </div>
+                );
+              }
               return (
               <div className="trace-detail-section">
                 <div className="trace-detail-label">
@@ -539,6 +562,57 @@ export function AgentThoughtStream({
     return items;
   }, [agentTimeline, steps, toolCalls, isStreaming]);
 
+  // ── Header badges ─────────────────────────────────────────────────
+  // Surface the two turn-scoped diagnostics — tokens and wall-clock —
+  // in the header itself so the user doesn't have to expand the trace to
+  // see cache-hit rate or total time.
+  //
+  // NOTE: these three hooks MUST stay above the `chain.length === 0`
+  // early return below. Hooks are matched positionally across renders, so
+  // a hook after a conditional return makes the hook count vary with the
+  // data and React throws "Rendered fewer hooks than expected".
+  const tokenSummary = useMemo(() => {
+    if (!agentTimeline) return null;
+    for (let i = agentTimeline.length - 1; i >= 0; i--) {
+      const e = agentTimeline[i];
+      if (e.type !== 'system_note' || !e.content) continue;
+      if (!/^Tokens:\s*/i.test(e.content)) continue;
+      const body = e.content.replace(/^Tokens:\s*/i, '');
+      // Content shape:  "in 1,234 · out 88 · … · total 1,322 · hit 65%"
+      const totalMatch = body.match(/total\s+([\d,]+)/i);
+      const hitMatch = body.match(/hit\s+(\d+)%/i);
+      return {
+        total: totalMatch ? totalMatch[1] : null,
+        hit: hitMatch ? `${hitMatch[1]}%` : null,
+      };
+    }
+    return null;
+  }, [agentTimeline]);
+
+  // Bulk expand/collapse — one-shot commands, not a state toggle, so they
+  // stay in sync no matter what the user has clicked so far.
+  const expandAll = useCallback(() => {
+    const ids = new Set<string>();
+    chain.forEach(c => {
+      if (c.kind === 'thought') ids.add(c.id);
+    });
+    setExpandedThoughts(ids);
+    chain.forEach(c => {
+      if (c.kind === 'tool' && !expandedToolCalls.has(c.toolCall.id)) {
+        toggleToolCallExpand(c.toolCall.id);
+      }
+    });
+  }, [chain, expandedToolCalls, toggleToolCallExpand]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedThoughts(new Set());
+    chain.forEach(c => {
+      if (c.kind === 'tool' && expandedToolCalls.has(c.toolCall.id)) {
+        toggleToolCallExpand(c.toolCall.id);
+      }
+    });
+  }, [chain, expandedToolCalls, toggleToolCallExpand]);
+
   if (chain.length === 0) return null;
 
   const toolCount = chain.filter(c => c.kind === 'tool').length;
@@ -574,6 +648,9 @@ export function AgentThoughtStream({
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTraceOpen(o => !o); }
   };
 
+  const anythingExpanded = expandedThoughts.size > 0
+    || chain.some(c => c.kind === 'tool' && expandedToolCalls.has(c.toolCall.id));
+
   return (
     <div className={`agent-trace ${isStreaming ? 'streaming' : 'finished'}`}>
       {/* Summary header — always visible, toggles the trace body */}
@@ -589,6 +666,26 @@ export function AgentThoughtStream({
           {isStreaming ? <StatusIndicator status="running" /> : hasError ? <StatusIndicator status="error" /> : <ThoughtIcon />}
         </span>
         <span className="agent-trace-header-label">{headerLabel}</span>
+        {tokenSummary && (tokenSummary.total || tokenSummary.hit) && (
+          <span className="agent-trace-token-badge" title={isZh ? 'Token 用量' : 'Token usage'}>
+            {tokenSummary.total && (
+              <span>{isZh ? `${tokenSummary.total} tokens` : `${tokenSummary.total} tok`}</span>
+            )}
+            {tokenSummary.hit && <span className="agent-trace-token-hit">↺ {tokenSummary.hit}</span>}
+          </span>
+        )}
+        {/* Bulk expand/collapse — only useful once the trace is open and has
+            more than a couple of items. Stops click from toggling the trace. */}
+        {traceOpen && chain.length > 2 && (
+          <button
+            className="agent-trace-expand-all"
+            onClick={(e) => { e.stopPropagation(); anythingExpanded ? collapseAll() : expandAll(); }}
+            title={anythingExpanded ? (isZh ? '全部折叠' : 'Collapse all') : (isZh ? '全部展开' : 'Expand all')}
+            aria-label={anythingExpanded ? (isZh ? '全部折叠' : 'Collapse all') : (isZh ? '全部展开' : 'Expand all')}
+          >
+            {anythingExpanded ? (isZh ? '折叠' : 'Collapse') : (isZh ? '展开' : 'Expand')}
+          </button>
+        )}
         <span className={`trace-chevron ${traceOpen ? 'open' : ''}`} aria-hidden="true">
           <IconChevronDown size={13} />
         </span>
@@ -772,27 +869,23 @@ export function TypingIndicator() {
 }
 
 // ── RAG Progress Indicator ─────────────────────────────────────────
+// Only stages that represent a real wait get their own row. Building the
+// prompt from retrieved chunks is sub-millisecond in-memory work, and the
+// embedding call — when it happens — is done client-side before the backend
+// command is invoked, so neither is exposed as a visible checklist step.
+// Coarser, honest stages > fine-grained theater.
 
-const RAG_STEPS_FTS = [
+const RAG_STEPS = [
   { key: 'searching', label: 'Searching…' },
-  { key: 'context',   label: 'Building context…' },
   { key: 'generating', label: 'Generating…' },
 ];
 
-const RAG_STEPS_VECTOR = [
-  { key: 'embedding', label: 'Embedding…' },
-  { key: 'searching', label: 'Searching…' },
-  { key: 'context',   label: 'Building context…' },
-  { key: 'generating', label: 'Generating…' },
-];
-
-export function RagProgressIndicator({ stage, searchMode }: { stage: string; searchMode?: string }) {
-  const steps = (searchMode === 'hybrid' || searchMode === 'vector') ? RAG_STEPS_VECTOR : RAG_STEPS_FTS;
-  const currentIdx = steps.findIndex(s => s.key === stage);
+export function RagProgressIndicator({ stage }: { stage: string; searchMode?: string }) {
+  const currentIdx = RAG_STEPS.findIndex(s => s.key === stage);
 
   return (
     <div className="rag-progress">
-      {steps.map((step, i) => {
+      {RAG_STEPS.map((step, i) => {
         const isDone = i < currentIdx;
         const isActive = i === currentIdx;
         return (

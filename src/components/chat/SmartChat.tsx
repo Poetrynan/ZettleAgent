@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding } from '../../lib/tauri';
+import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom } from '../../lib/tauri';
 import type { SearchMode, AgentEvent, SearchResult, PlanStep } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
 import { IconSend, IconGlobe } from '../icons';
@@ -7,7 +7,7 @@ import { t } from '../../lib/i18n';
 
 import { listen } from '@tauri-apps/api/event';
 import { useChatSessions } from './useChatSessions';
-import type { Message, TimelineEntry } from './useChatSessions';
+import type { Message, TimelineEntry, ToolCallInfo } from './useChatSessions';
 
 import { SessionListPanel } from './SessionListPanel';
 import { ChatHeader } from './ChatHeader';
@@ -228,12 +228,18 @@ export function SmartChat() {
 
   const [webSearch, setWebSearch] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  /** True while the viewport is parked at the bottom and should follow new output. */
+  const stickToBottomRef = useRef(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const timelineIndexRef = useRef(0);
   const answerSourceRef = useRef<string | undefined>(undefined);
   /** After clear_text, next text_delta stream is the final answer (synthesis), not trace narration. */
   const answerStreamAfterClearRef = useRef(false);
+  /** Lifecycle Generation: id of the run we're currently rendering. Events
+   *  stamped with any other run id are discarded (see the `agent-event` listener). */
+  const currentRunIdRef = useRef('');
 
   // Export Modal states
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -331,8 +337,30 @@ export function SmartChat() {
   }, []);
 
   useEffect(() => {
+    // Only chase the bottom while the user is actually parked there. Once they
+    // scroll up to read history, streaming output must stop yanking the
+    // viewport down — `stickToBottomRef` is flipped by the scroll handler.
+    if (!stickToBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, showTyping]);
+
+  /** Distance from the bottom, in px, below which we consider the view "parked". */
+  const STICK_THRESHOLD_PX = 120;
+
+  const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom <= STICK_THRESHOLD_PX;
+    stickToBottomRef.current = atBottom;
+    // Only re-render when the button's visibility actually changes.
+    setShowScrollToBottom((prev) => (prev === !atBottom ? prev : !atBottom));
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    stickToBottomRef.current = true;
+    setShowScrollToBottom(false);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   const toggleToolCallExpand = useCallback((id: string) => {
     setExpandedToolCalls(prev => {
@@ -408,7 +436,39 @@ export function SmartChat() {
   useEffect(() => {
     const unlisten = listen<AgentEvent>('agent-event', (event) => {
       const e = event.payload;
+
+      // ── Lifecycle Generation gate ────────────────────────────────
+      // The backend stamps every event with the run id that produced it.
+      // `run_started` establishes the current run; anything arriving with a
+      // different id belongs to a superseded turn (crash, restart, rapid
+      // re-submit) and must not touch this conversation's state.
+      if (e.type === 'run_started') {
+        currentRunIdRef.current = e.run_id || '';
+        return;
+      }
+      if (e.run_id && currentRunIdRef.current && e.run_id !== currentRunIdRef.current) {
+        return; // stale run — drop silently
+      }
+
       switch (e.type) {
+        case 'phase':
+          // Explicit lifecycle phase. Rendered as a transient stage line so a
+          // stalled agent always shows *where* it is stalled.
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role !== 'assistant' || last.streaming === false) return prev;
+            const label = e.label || e.phase || '';
+            if (!label) return prev;
+            const timeline = (last.agentTimeline || []).filter(t => !(t.type === 'thought' && t.isStage));
+            const entry: TimelineEntry = {
+              type: 'thought',
+              content: label,
+              index: timelineIndexRef.current++,
+              isStage: true,
+            };
+            return [...prev.slice(0, -1), { ...last, agentTimeline: [...timeline, entry] }];
+          });
+          break;
         case 'thinking':
           setShowTyping(false);
           setMessages(prev => {
@@ -649,6 +709,89 @@ export function SmartChat() {
             return prev;
           });
           break;
+        case 'tool_blocked':
+        case 'tool_risk_notice':
+        case 'tool_redacted': {
+          // Tool hook events — patch hook metadata onto the matching tool card.
+          // `tool_blocked` marks the call denied (a ToolResult with the reason
+          // still follows, so the card never spins forever).
+          const patch: Partial<ToolCallInfo> =
+            e.type === 'tool_blocked'
+              ? { blocked: true, riskReason: e.reason || '', status: 'denied' as const }
+              : e.type === 'tool_risk_notice'
+                ? { riskReason: e.reason || '' }
+                : { redactions: e.redactions || 0 };
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role !== 'assistant' || last.streaming === false) return prev;
+            const updatedToolCalls = (last.toolCalls || []).map(tc =>
+              tc.id === e.tool_call_id ? { ...tc, ...patch } : tc
+            );
+            const updatedTimeline: TimelineEntry[] = (last.agentTimeline || []).map(te =>
+              te.type === 'tool_call' && te.toolCall && te.toolCall.id === e.tool_call_id
+                ? { ...te, toolCall: { ...te.toolCall, ...patch } }
+                : te
+            );
+            return [...prev.slice(0, -1), {
+              ...last,
+              toolCalls: updatedToolCalls,
+              agentTimeline: updatedTimeline,
+            }];
+          });
+          break;
+        }
+        case 'memory_flushed':
+          // Context fold flushed key facts to core memory — surface as a system note
+          // so the user knows nothing important was silently discarded.
+          if ((e.count || 0) > 0) {
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              if (last?.role !== 'assistant' || last.streaming === false) return prev;
+              const note: TimelineEntry = {
+                type: 'system_note',
+                content: `Saved ${e.count} item(s) to memory before compressing context`,
+                index: timelineIndexRef.current++,
+              };
+              return [...prev.slice(0, -1), {
+                ...last,
+                agentTimeline: [...(last.agentTimeline || []), note],
+              }];
+            });
+          }
+          break;
+        case 'token_usage': {
+          // Four-way accounting emitted once at turn end. Rendering it as a
+          // system note keeps the surface small — the four disjoint buckets +
+          // cache hit rate are the diagnostic signal the user needs.
+          const inputT = e.input ?? 0;
+          const outputT = e.output ?? 0;
+          const cacheR = e.cache_read ?? 0;
+          const cacheW = e.cache_write ?? 0;
+          const totalT = e.total ?? (inputT + outputT + cacheR + cacheW);
+          if (totalT === 0) break;
+          const hit = e.cache_hit_rate ?? 0;
+          const parts = [
+            `in ${inputT.toLocaleString()}`,
+            `out ${outputT.toLocaleString()}`,
+          ];
+          if (cacheR > 0) parts.push(`cache-read ${cacheR.toLocaleString()}`);
+          if (cacheW > 0) parts.push(`cache-write ${cacheW.toLocaleString()}`);
+          const rateStr = (cacheR + inputT) > 0 ? ` · hit ${(hit * 100).toFixed(0)}%` : '';
+          const note: TimelineEntry = {
+            type: 'system_note',
+            content: `Tokens: ${parts.join(' · ')} · total ${totalT.toLocaleString()}${rateStr}`,
+            index: timelineIndexRef.current++,
+          };
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role !== 'assistant') return prev;
+            return [...prev.slice(0, -1), {
+              ...last,
+              agentTimeline: [...(last.agentTimeline || []), note],
+            }];
+          });
+          break;
+        }
         case 'tool_result':
           setMessages(prev => {
             const last = prev[prev.length - 1];
@@ -693,7 +836,14 @@ export function SmartChat() {
 
               const updatedToolCalls = tcList.map(tc =>
                 tc.id === e.tool_call_id
-                  ? { ...tc, result: e.content || '', status: 'done' as const, endTime: new Date() }
+                  ? {
+                      ...tc,
+                      result: e.content || '',
+                      // A PRE-hook veto keeps its `denied` status; the result event
+                      // only carries the refusal reason for the model.
+                      status: tc.blocked ? ('denied' as const) : ('done' as const),
+                      endTime: new Date(),
+                    }
                   : tc
               );
               const doneTc = updatedToolCalls.find(tc => tc.id === e.tool_call_id);
@@ -944,7 +1094,17 @@ export function SmartChat() {
     }
   }, []);
 
-  const handleSend = async (customPrompt?: string, customMode?: 'agent' | 'rag') => {
+  const handleSend = async (
+    customPrompt?: string,
+    customMode?: 'agent' | 'rag',
+    /**
+     * Conversation to build `chat_history` from, replacing the render-time
+     * `messages` snapshot. Required by regenerate / edit / retry: those flows
+     * truncate state first, and React has not re-rendered by the time this
+     * runs, so the closure would still hold the discarded turn.
+     */
+    historyOverride?: Message[],
+  ) => {
     const activeMode = customMode || mode;
     const rawInput = customPrompt !== undefined ? customPrompt : input;
     if ((!rawInput.trim() && attachedNotes.length === 0) || isLoading) return;
@@ -999,7 +1159,7 @@ export function SmartChat() {
         setRagProgress(ragNeedsQueryEmbedding(effectiveMode) ? 'embedding' : 'searching');
       }
       const historyMsgs: Array<{role: string; content: string}> = [];
-      for (const m of messages) {
+      for (const m of (historyOverride ?? messages)) {
         if (m.streaming || !m.content.trim()) continue;
         // Strip the "[stopped generation]" tag so the AI doesn't continue from where it left off
         const cleanedContent = m.content.replace(/\n*\[.*?已停止生成.*?\]\s*$/, '').replace(/\n*\[.*?stopped.*?\]\s*$/, '').trim();
@@ -1253,6 +1413,60 @@ export function SmartChat() {
     handleSendRef.current = handleSend;
   });
 
+  // ── Truncate-and-resend ────────────────────────────────────────────
+  // Regenerate, edit-and-resend, and error-retry are the same operation with
+  // a different anchor: drop the conversation from some user message onward,
+  // then re-run that user message. Everything after the anchor is discarded
+  // from both React state and sqlite, so a session reload can't resurrect the
+  // reply the user just rejected.
+  const resendFromUserMessage = useCallback(async (
+    userIndex: number,
+    overrideContent?: string,
+  ) => {
+    if (isLoading) return;
+    const anchor = messages[userIndex];
+    if (!anchor || anchor.role !== 'user') return;
+
+    const query = (overrideContent ?? anchor.content).trim();
+    if (!query) return;
+
+    // History is everything strictly before the anchor — handleSend appends
+    // the fresh user turn itself.
+    const keep = messages.slice(0, userIndex);
+    setMessages(keep);
+
+    // Persisted rows for the anchor and everything after it must go too.
+    // Non-fatal: a failure here only means a stale row lingers in history.
+    try {
+      await deleteChatMessagesFrom(sess.sessionId, anchor.id);
+    } catch (e) {
+      console.warn('[SmartChat] Failed to prune persisted messages:', e);
+    }
+
+    await handleSendRef.current(query, undefined, keep);
+  }, [isLoading, messages, sess.sessionId]);
+
+  /** Redo the AI reply at `assistantIndex` using the user turn that prompted it. */
+  const handleRegenerate = useCallback((assistantIndex: number) => {
+    // Walk back to the user message this reply answered.
+    for (let i = assistantIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        void resendFromUserMessage(i);
+        return;
+      }
+    }
+  }, [messages, resendFromUserMessage]);
+
+  /** Replace a sent user message and re-run the turn from there. */
+  const handleEditResend = useCallback((userIndex: number, newContent: string) => {
+    void resendFromUserMessage(userIndex, newContent);
+  }, [resendFromUserMessage]);
+
+  /** Re-run the turn that produced a failed reply. Same path as regenerate. */
+  const handleRetryError = useCallback((assistantIndex: number) => {
+    handleRegenerate(assistantIndex);
+  }, [handleRegenerate]);
+
   useEffect(() => {
     const handleAgentTaskEvent = (e: Event) => {
       const customEvent = e as CustomEvent<{ prompt: string; mode?: 'agent' | 'rag' }>;
@@ -1420,6 +1634,12 @@ export function SmartChat() {
             };
           }));
         }}
+        onRegenerate={handleRegenerate}
+        onEditResend={handleEditResend}
+        onRetryError={handleRetryError}
+        onScroll={handleMessagesScroll}
+        showScrollToBottom={showScrollToBottom}
+        onScrollToBottom={scrollToBottom}
         isZh={isZh}
       />
 

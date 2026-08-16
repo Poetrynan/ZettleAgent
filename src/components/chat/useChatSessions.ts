@@ -48,13 +48,19 @@ export interface ToolCallInfo {
   name: string;
   arguments: string;
   result?: string;
-  status: 'pending' | 'running' | 'done' | 'error';
+  status: 'pending' | 'running' | 'done' | 'error' | 'denied';
   startTime?: Date;
   endTime?: Date;
   /** Streaming progress stage label (from tool_progress events). */
   progressStage?: string;
   /** Optional partial content preview from tool_progress events. */
   progressPreview?: string;
+  /** PRE-hook explanation for an elevated-risk or vetoed call. */
+  riskReason?: string;
+  /** True when a PRE hook vetoed the call outright (destructive pattern). */
+  blocked?: boolean;
+  /** Number of secret-shaped values scrubbed by the POST redaction hook. */
+  redactions?: number;
 }
 
 // Unified timeline entry — interleaves thinking, tool calls, and text in chronological order.

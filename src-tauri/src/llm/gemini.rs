@@ -8,6 +8,7 @@ use crate::llm::prompted_thinking::{
 
 use super::ToolCallResponse;
 use super::openai::build_http_client;
+use crate::llm::token_usage::{observe_stream_usage, record_request, TokenUsage};
 
 /// Convert our ToolDef (OpenAI format) to Gemini's functionDeclarations
 fn tool_defs_to_gemini(tools: &[ToolDef]) -> serde_json::Value {
@@ -157,6 +158,7 @@ pub(crate) async fn send_and_parse_gemini_tools(
     let mut thought_parser: Option<ThoughtStreamParser> = None;
     let mut tool_calls = Vec::new();
     let mut fc_index = 0;
+    let mut usage = TokenUsage::default();
 
     loop {
         // Poll with a short timeout so user-cancel works even while the
@@ -194,6 +196,9 @@ pub(crate) async fn send_and_parse_gemini_tools(
             if line_str.is_empty() || line_str.starts_with(':') { continue; }
             if let Some(data) = line_str.strip_prefix("data: ") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                    // `usageMetadata` repeats cumulatively on every chunk; the
+                    // field-wise max merge keeps only the final totals.
+                    observe_stream_usage(&mut usage, &parsed);
                     if let Some(candidates) = parsed["candidates"].as_array() {
                         if !candidates.is_empty() {
                             if let Some(parts) = candidates[0]["content"]["parts"].as_array() {
@@ -244,6 +249,8 @@ pub(crate) async fn send_and_parse_gemini_tools(
     }
 
     flush_content_parser(config, app_handle, &mut thought_parser, &mut text_content);
+
+    record_request(&usage);
 
     Ok(ToolCallResponse { content: text_content, tool_calls })
 }

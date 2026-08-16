@@ -63,11 +63,25 @@ pub fn get_unindexed_chunks(
     state: State<'_, AppState>,
     limit: usize,
 ) -> Result<Vec<(i64, String)>, ZettelError> {
-    let conn = state.db.lock()?;
+    let mut conn = state.db.lock()?;
+
+    // ── Embedding Cache: backfill from cache first ──────────────────
+    // Unchanged chunks that went through a sync_file DELETE+INSERT cycle
+    // can be satisfied from the content-hash cache without any model call.
+    let bf = crate::db::embedding_cache::backfill_null_embeddings(&mut conn, limit)
+        .unwrap_or_default();
+    if bf.filled > 0 {
+        pipeline_log::log_embedding_info(&format!(
+            "embedding_cache: backfilled {}/{} chunks from cache",
+            bf.filled, bf.scanned
+        ));
+    }
+
+    // Return whatever is still NULL (true cache misses).
     let mut stmt = conn.prepare("SELECT id, content FROM chunks WHERE embedding IS NULL LIMIT ?1")?;
     let rows = stmt.query_map([limit], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
     let chunks = rows.collect::<Result<Vec<_>, _>>()?;
-    pipeline_log::log_embedding_info(&format!("get_unindexed_chunks: requested={}, returned={}", limit, chunks.len()));
+    pipeline_log::log_embedding_info(&format!("get_unindexed_chunks: requested={}, returned={} (after cache backfill)", limit, chunks.len()));
     Ok(chunks)
 }
 
@@ -78,19 +92,59 @@ pub fn save_chunk_embeddings(
 ) -> Result<(), ZettelError> {
     let count = embeddings.len();
     let mut conn = state.db.lock()?;
+
+    // ── Resolve chunk text once so we can write-through the cache ───
+    // Doing this before opening the transaction keeps the write path a single
+    // batched writer rather than interleaving reads and writes.
+    let id_to_text: std::collections::HashMap<i64, String> = {
+        let ids: Vec<i64> = embeddings.iter().map(|(id, _)| *id).collect();
+        if ids.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            let placeholders: String =
+                std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
+            let sql = format!("SELECT id, content FROM chunks WHERE id IN ({})", placeholders);
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                rusqlite::params_from_iter(ids.iter()),
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            rows.filter_map(|r| r.ok()).collect()
+        }
+    };
+
     let tx = conn.transaction().map_err(|e| ZettelError::System(format!("Failed to start transaction: {}", e)))?;
     {
         let mut update_chunk_stmt = tx.prepare("UPDATE chunks SET embedding = ?1 WHERE id = ?2")?;
         let mut insert_vec_stmt = tx.prepare("INSERT OR REPLACE INTO chunks_vec (id, embedding) VALUES (?1, ?2)")?;
+        // Write-through cache: key on SHA-256 of the source text so a future
+        // resync of the same chunk (or a byte-identical chunk in another file)
+        // is a zero-cost lookup.
+        let mut cache_stmt = tx.prepare(
+            "INSERT INTO embedding_cache (content_hash, embedding, dim, last_used_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(content_hash) DO UPDATE SET
+               embedding = excluded.embedding,
+               dim = excluded.dim,
+               last_used_at = datetime('now')",
+        )?;
 
         for (id, emb_vec) in embeddings {
             let emb_blob: Vec<u8> = emb_vec.iter().flat_map(|f| f.to_le_bytes()).collect();
             update_chunk_stmt.execute(rusqlite::params![emb_blob, id])?;
             insert_vec_stmt.execute(rusqlite::params![id, emb_blob])?;
+            if let Some(text) = id_to_text.get(&id) {
+                let hash = crate::db::embedding_cache::content_hash(text);
+                cache_stmt.execute(rusqlite::params![
+                    hash,
+                    emb_blob,
+                    crate::db::embedding_cache::EMBEDDING_DIM as i64
+                ])?;
+            }
         }
     }
     tx.commit().map_err(|e| ZettelError::System(format!("Failed to commit transaction: {}", e)))?;
-    pipeline_log::log_embedding_info(&format!("save_chunk_embeddings: saved {} chunk embeddings", count));
+    pipeline_log::log_embedding_info(&format!("save_chunk_embeddings: saved {} chunk embeddings + cache", count));
     Ok(())
 }
 

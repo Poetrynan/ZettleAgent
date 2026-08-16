@@ -105,6 +105,26 @@ pub(super) fn execute_search_notes(
         results.truncate(limit);
     }
 
+    // ── Time-decay + MMR rerank ─────────────────────────────────────
+    // Regex mode is an exact-match lookup, so leave its ordering alone.
+    // Otherwise reorder on rank position (the only score signal comparable
+    // across FTS / vector / hybrid), decayed by note age and diversified.
+    if !use_regex && results.len() > 1 {
+        let cands = crate::db::rerank::from_ranked(
+            results.iter().map(|r| (r.chunk_id, r.file_path.as_str())),
+        );
+        let order = crate::db::rerank::rerank(&conn, cands, limit.min(results.len()), None, None);
+        let rank_of: std::collections::HashMap<i64, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.chunk_id, i))
+            .collect();
+        // Keep only reranked survivors, in their new order.
+        results.retain(|r| rank_of.contains_key(&r.chunk_id));
+        results.sort_by_key(|r| rank_of.get(&r.chunk_id).copied().unwrap_or(usize::MAX));
+    }
+
+
     let output: Vec<serde_json::Value> = results
         .iter()
         .map(|r| {
@@ -292,28 +312,52 @@ pub(super) fn execute_find_similar_notes(
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
 
-    // Run vector search
-    let results = search::vector_search(&conn, &embedding, limit + 1)?;
+    // Run vector search — over-fetch so the reranker has room to trade
+    // relevance for recency and diversity before we cut to `limit`.
+    let overfetch = (limit + 1).saturating_mul(3).max(10);
+    let results = search::vector_search(&conn, &embedding, overfetch)?;
 
-    // Filter out the query note itself
-    let filtered: Vec<_> = results
+    // Drop the query note itself, then rerank: time-decay (30-day half-life)
+    // pulls stale notes down, MMR (λ=0.7) breaks up near-duplicate hits.
+    let candidates: Vec<crate::db::rerank::Candidate> = results
         .iter()
         .filter(|r| r.file_path != note_path)
-        .take(limit)
+        .map(|r| crate::db::rerank::Candidate {
+            chunk_id: r.chunk_id,
+            file_path: r.file_path.clone(),
+            relevance: (1.0 - r.score).max(0.0), // cosine distance → similarity
+            age_days: None,                       // hydrated inside rerank()
+            embedding: None,                      // hydrated inside rerank()
+        })
         .collect();
 
-    if filtered.is_empty() {
+    let reranked = crate::db::rerank::rerank(&conn, candidates, limit, None, None);
+
+    if reranked.is_empty() {
         return Ok("No similar notes found.".to_string());
     }
 
-    let mut output = format!("Found {} similar notes:\n\n", filtered.len());
-    for (i, r) in filtered.iter().enumerate() {
+    // Re-associate reranked candidates with their content for display.
+    let by_chunk: std::collections::HashMap<i64, &search::SearchResult> =
+        results.iter().map(|r| (r.chunk_id, r)).collect();
+
+    let mut output = format!("Found {} similar notes:\n\n", reranked.len());
+    for (i, c) in reranked.iter().enumerate() {
+        let content = by_chunk
+            .get(&c.chunk_id)
+            .map(|r| r.content.as_str())
+            .unwrap_or("");
+        let preview = if content.chars().count() > 100 {
+            content.chars().take(100).collect::<String>()
+        } else {
+            content.to_string()
+        };
         output.push_str(&format!(
-            "{}. {} (similarity: {:.3})\n   {}\n\n",
+            "{}. {} (score: {:.3})\n   {}\n\n",
             i + 1,
-            r.file_path,
-            1.0 - r.score, // cosine distance → similarity
-            if r.content.len() > 100 { &r.content[..100] } else { &r.content },
+            c.file_path,
+            c.relevance, // post-decay relevance
+            preview,
         ));
     }
 

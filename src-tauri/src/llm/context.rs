@@ -60,28 +60,65 @@ pub async fn compress_context_window(
 
     let budget = max_tokens.saturating_sub(query_tokens);
 
+    // ── Memory flush before fold ──────────────────────────────────────
+    // Older turns are about to be dropped. Extract high-signal facts
+    // (preferences / decisions / findings) into the vault's core memory
+    // FIRST so the fold does not silently discard them. Heuristic-only —
+    // no extra LLM call, so this is safe to run on every compression.
+    if let Some(vault) = super::tool_hooks::active_vault_path() {
+        let flushed = super::tool_hooks::flush_memory_before_fold(messages, &vault);
+        if flushed > 0 {
+            log::info!("Context fold: flushed {} item(s) to core memory", flushed);
+            if let Some(app) = super::tool_hooks::active_app_handle() {
+                super::emit_agent_event(&app, super::AgentEvent::MemoryFlushed { count: flushed });
+            }
+        }
+    }
+
     // Keep system message (first) and recent messages, remove oldest middle messages
     if messages.len() <= 2 {
         return; // nothing to compress
     }
 
     let system_msg = messages.first().cloned();
-    let mut kept: Vec<ChatMessage> = Vec::new();
-    let mut used_tokens = 0;
+    let original_len = messages.len();
 
-    // Walk from the end, keeping messages that fit
-    for msg in messages.iter().rev() {
+    // ── Build the keep-set (indices into `messages`, excluding system at 0) ──
+    // Two rules layered on top of the plain "newest fits first" walk:
+    //   1. WHITELIST — protected messages survive regardless of budget.
+    //   2. TURN ATOMICITY — an assistant message carrying `tool_calls` and all
+    //      of its `tool` replies are kept or dropped together. Splitting them
+    //      produces a history that OpenAI/Claude reject ("tool message without
+    //      preceding tool_calls"), which is why this needs to be enforced here
+    //      rather than left to chance.
+    let mut keep: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut used_tokens = 0usize;
+
+    for idx in (1..original_len).rev() {
+        let msg = &messages[idx];
         let msg_tokens = estimate_tokens(&msg.content);
+        if is_protected(msg) {
+            // Whitelisted: keep it even if it blows the budget. Losing an image
+            // or a cancelled-operation marker silently corrupts the transcript.
+            used_tokens = used_tokens.saturating_add(msg_tokens);
+            keep.insert(idx);
+            continue;
+        }
         if used_tokens + msg_tokens > budget {
-            break;
+            continue; // too big — but keep scanning, a later small msg may fit
         }
         used_tokens += msg_tokens;
-        kept.push(msg.clone());
+        keep.insert(idx);
     }
-    kept.reverse();
 
-    // Reconstruct: system + compressed messages
-    let original_len = messages.len();
+    enforce_turn_atomicity(messages, &mut keep);
+
+    // ── Reconstruct: system + kept messages in original order ──
+    let kept: Vec<ChatMessage> = (1..original_len)
+        .filter(|i| keep.contains(i))
+        .map(|i| messages[i].clone())
+        .collect();
+
     messages.clear();
     if let Some(sys) = system_msg {
         let removed = original_len.saturating_sub(kept.len() + 1); // +1 for system msg
@@ -97,6 +134,101 @@ pub async fn compress_context_window(
         }
     }
     messages.extend(kept);
+}
+
+/// Messages that must never be dropped by compaction.
+///
+/// Mirrors AutoClaw's compaction whitelist: dropping any of these leaves the
+/// transcript actively misleading rather than merely shorter.
+fn is_protected(msg: &ChatMessage) -> bool {
+    // Images — the model cannot re-fetch them, and a dangling reference is worse
+    // than a longer context.
+    if msg.content.contains("data:image/")
+        || msg.content.contains("![](")
+        || msg.content.contains("\"type\":\"image\"")
+    {
+        return true;
+    }
+    // Cancelled / interrupted operation markers — needed so the model does not
+    // re-attempt an operation the user explicitly stopped.
+    let lower = msg.content.to_lowercase();
+    if lower.contains("cancelled")
+        || lower.contains("user rejected")
+        || lower.contains("approval timed out")
+        || lower.contains("tool call cancelled")
+    {
+        return true;
+    }
+    false
+}
+
+/// Ensure no assistant/tool turn is split across the fold boundary.
+///
+/// Providers require that every `tool` message be preceded by an assistant
+/// message whose `tool_calls` contains the matching id, AND that every
+/// `tool_call` in a kept assistant message has a matching `tool` reply.
+/// Anything that cannot satisfy both is removed as a unit.
+fn enforce_turn_atomicity(
+    messages: &[ChatMessage],
+    keep: &mut std::collections::HashSet<usize>,
+) {
+    // Map tool_call_id → index of the assistant message that issued it.
+    let mut issuer: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // Map assistant index → indices of its tool replies.
+    let mut replies: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for (idx, msg) in messages.iter().enumerate() {
+        if let Some(ref calls) = msg.tool_calls {
+            for call in calls {
+                issuer.insert(call.id.clone(), idx);
+            }
+        }
+    }
+    for (idx, msg) in messages.iter().enumerate() {
+        if let Some(ref id) = msg.tool_call_id {
+            if let Some(&owner) = issuer.get(id) {
+                replies.entry(owner).or_default().push(idx);
+            } else {
+                // Orphan tool message with no issuer anywhere in history —
+                // it can never be valid, so never keep it.
+                keep.remove(&idx);
+            }
+        }
+    }
+
+    // Iterate to a fixed point: dropping a group can orphan another.
+    loop {
+        let mut changed = false;
+
+        // A kept tool reply requires its issuing assistant message.
+        for (id, &owner) in issuer.iter().map(|(k, v)| (k, v)).collect::<Vec<_>>() {
+            let _ = id;
+            let owner_kept = keep.contains(&owner);
+            let owned = replies.get(&owner).cloned().unwrap_or_default();
+            let any_reply_kept = owned.iter().any(|i| keep.contains(i));
+
+            if any_reply_kept && !owner_kept {
+                // Prefer keeping the parent (it is usually short — just the
+                // tool_calls envelope) over discarding real tool output.
+                keep.insert(owner);
+                changed = true;
+            }
+            if owner_kept && owned.iter().any(|i| !keep.contains(i)) {
+                // A partially-answered assistant turn is invalid. Drop the whole
+                // group rather than send a malformed history.
+                keep.remove(&owner);
+                for i in &owned {
+                    keep.remove(i);
+                }
+                changed = true;
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
 }
 
 // ── Tool Result Compression ───────────────────────────────────────────

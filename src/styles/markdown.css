@@ -254,6 +254,92 @@
 }
 
 /* Code blocks */
+.md-code-wrapper {
+  margin: var(--space-3) 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Bare variant: the fence declared no language, so treat it as prose/quote —
+   no header bar, just a hover-revealed copy button in the top-right. */
+.md-code-wrapper-bare {
+  position: relative;
+  border: none;
+  overflow: visible;
+}
+
+/* The wrapper carries no border in the bare variant, so the <pre> keeps its
+   own frame (the generic `.md-code-wrapper .md-code-block` reset below strips
+   it for the header variant, where the wrapper owns the frame instead). */
+.md-code-wrapper-bare .md-code-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.md-code-wrapper-bare .md-code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-subtle);
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.md-code-wrapper-bare:hover .md-code-copy-btn,
+.md-code-wrapper-bare .md-code-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.md-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.md-code-lang {
+  font-family: var(--font-mono);
+  font-size: var(--text-xxs, 11px);
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.md-code-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.md-code-copy-btn:hover {
+  background: var(--bg-surface-hover, rgba(99, 102, 241, 0.1));
+  color: var(--text-secondary);
+}
+
+.md-code-copy-btn:active {
+  transform: scale(0.9);
+}
+
+/* Code block nested in a wrapper drops its own border/radius/margin — the
+   wrapper owns those now. */
+.md-code-wrapper .md-code-block {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
 .md-code-block {
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);

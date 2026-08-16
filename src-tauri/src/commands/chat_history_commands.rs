@@ -175,6 +175,49 @@ pub fn delete_chat_session(
     Ok(())
 }
 
+/// Delete every message in `session_id` whose `created_at` is at or after the
+/// row identified by `from_message_id`, inclusive. Used by the frontend
+/// regenerate / edit-and-resend / error-retry flows: the caller passes the id
+/// of the user message being redone; every message from that point on (the
+/// user's own row and the failed assistant reply) is removed before a fresh
+/// turn is appended. `INSERT OR REPLACE` on `save_chat_message` alone can't
+/// clean up because the new user row is minted with a different id.
+///
+/// The scope is deliberately narrow — session-bounded, inclusive-of-anchor —
+/// so it cannot delete history from an unrelated session even if the caller
+/// gets the ids wrong.
+#[tauri::command]
+pub fn delete_chat_messages_from(
+    state: State<'_, AppState>,
+    session_id: String,
+    from_message_id: String,
+) -> Result<u32, ZettelError> {
+    let conn = state.db.lock()?;
+    // Look up the anchor row's timestamp inside the target session so a
+    // stray id from a different session simply matches nothing.
+    let anchor: Option<String> = conn
+        .query_row(
+            "SELECT created_at FROM chat_messages WHERE id = ?1 AND session_id = ?2",
+            params![from_message_id, session_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let deleted = if let Some(ts) = anchor {
+        conn.execute(
+            "DELETE FROM chat_messages
+             WHERE session_id = ?1 AND created_at >= ?2",
+            params![session_id, ts],
+        )? as u32
+    } else {
+        0
+    };
+    conn.execute(
+        "UPDATE chat_sessions SET updated_at = datetime('now') WHERE id = ?1",
+        params![session_id],
+    )?;
+    Ok(deleted)
+}
+
 #[tauri::command]
 pub fn rename_chat_session(
     state: State<'_, AppState>,
@@ -362,6 +405,7 @@ pub fn delete_ai_memory(
 }
 
 /// Get active memories as strings (for injection into system prompt)
+#[allow(dead_code)]
 pub fn get_memory_strings(
     conn: &rusqlite::Connection,
     limit: usize,

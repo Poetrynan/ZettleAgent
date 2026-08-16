@@ -21,7 +21,7 @@ pub const KNOWLEDGE_TOOLS: &[&str] = &[
     "get_backlinks", "get_note_tags", "get_note_metadata",
     "query_relations", "get_timeline", "get_vault_stats", "run_lint",
     "web_search", "fetch_web_content",
-    "read_memory", "update_memory",
+    "read_memory", "search_memory", "update_memory",
     "read_canvas",
     // New tools
     "add_relation", "get_relations_by_type",     // Graph write (read-heavy agent can also add relations)
@@ -43,7 +43,7 @@ pub const CREATOR_TOOLS: &[&str] = &[
     "create_note", "edit_note", "patch_note", "append_to_note",
     "create_folder", "read_canvas", "modify_canvas",
     "web_search", "fetch_web_content", "list_workspace_folders",
-    "read_memory", "update_memory",
+    "read_memory", "search_memory", "update_memory",
     // New tools
     "query_database",                             // Structured queries for context
     "create_canvas",                              // Create new canvases
@@ -62,7 +62,7 @@ pub const CURATOR_TOOLS: &[&str] = &[
     "run_lint", "get_vault_stats",
     "get_graph", "get_backlinks",
     "get_note_tags", "search_by_tag", "get_note_metadata", "query_relations",
-    "read_memory", "update_memory",
+    "read_memory", "search_memory", "update_memory",
     // New tools
     "add_relation", "delete_relation", "get_relations_by_type",  // Full graph write access
     "query_database",                                             // Structured queries

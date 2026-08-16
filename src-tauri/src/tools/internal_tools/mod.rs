@@ -546,6 +546,29 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
+        // 23b. search_memory
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "search_memory".to_string(),
+                description: "Search Archival Memory — the full long-term fact store. The most relevant few entries are already injected each turn; call this only when you need something the injected set didn't cover (older facts, a different topic). read_memory covers Core Memory instead.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Keywords describing the fact you're looking for."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max entries to return (1-25, default 10).",
+                            "default": 10
+                        }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
         // 24. update_memory
         ToolDef {
             tool_type: "function".to_string(),
@@ -1372,6 +1395,7 @@ pub async fn try_execute(
         "get_vault_stats" => Some(workspace_ops::execute_get_vault_stats(db)),
         "run_lint" => Some(workspace_ops::execute_run_lint(db, vault_path)),
         "read_memory" => Some(workspace_ops::execute_read_memory(vault_path)),
+        "search_memory" => Some(workspace_ops::execute_search_memory(arguments, db)),
         "update_memory" => Some(workspace_ops::execute_update_memory(arguments, vault_path)),
 
         // ── New Tools ──────────────────────────────────────────────

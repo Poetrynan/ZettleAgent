@@ -550,9 +550,60 @@ pub fn shutdown_mcp_pool() {
     }
 }
 
+/// Cached tool definitions per enabled-config fingerprint.
+///
+/// `collect_mcp_tools` used to run on EVERY agent turn, and each run spawns a
+/// child process (or opens an SSE connection) per server, does the
+/// `initialize` + `tools/list` handshake, then immediately kills it. That is a
+/// full process cold-start on the critical path of every single message — the
+/// user waits for it before the first token. Tool lists only change when the
+/// server binary or the config changes, so cache them keyed by a fingerprint
+/// of the enabled configs; any config edit yields a different key and refetches.
+static TOOL_CACHE: OnceLock<Mutex<HashMap<u64, Vec<ToolDef>>>> = OnceLock::new();
+
+fn config_fingerprint(configs: &[McpServerConfig]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for c in configs.iter().filter(|c| c.enabled) {
+        c.name.hash(&mut hasher);
+        c.command.hash(&mut hasher);
+        c.args.hash(&mut hasher);
+        // HashMap iteration order is not stable, so sort the env pairs first —
+        // otherwise the same config could hash differently between runs and
+        // silently defeat the cache.
+        let mut env: Vec<(&String, &String)> = c.env.iter().collect();
+        env.sort();
+        env.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Drop the cached tool lists. Call after the user edits MCP settings so the
+/// next turn re-handshakes instead of serving a stale list.
+pub fn invalidate_tool_cache() {
+    if let Some(cache) = TOOL_CACHE.get() {
+        if let Ok(mut map) = cache.lock() {
+            map.clear();
+        }
+    }
+}
+
 /// Connect to all enabled MCP servers and collect their tool definitions.
 /// Returns (tool_defs, errors). Errors are non-fatal -- servers that fail to connect are skipped.
+///
+/// Results are cached by config fingerprint (see [`TOOL_CACHE`]). Errors are
+/// deliberately NOT cached: a server that was down should be retried next turn.
 pub fn collect_mcp_tools(configs: &[McpServerConfig]) -> (Vec<crate::llm::ToolDef>, Vec<String>) {
+    let key = config_fingerprint(configs);
+    let cache = TOOL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            log::debug!("MCP: tool cache hit ({} tools)", hit.len());
+            return (hit.clone(), Vec::new());
+        }
+    }
+
     let mut all_tools = Vec::new();
     let mut errors = Vec::new();
 
@@ -571,6 +622,14 @@ pub fn collect_mcp_tools(configs: &[McpServerConfig]) -> (Vec<crate::llm::ToolDe
                 log::warn!("{}", msg);
                 errors.push(msg);
             }
+        }
+    }
+
+    // Only cache a clean sweep. If any server errored the list is incomplete,
+    // and caching it would hide the missing tools until the app restarts.
+    if errors.is_empty() {
+        if let Ok(mut map) = cache.lock() {
+            map.insert(key, all_tools.clone());
         }
     }
 

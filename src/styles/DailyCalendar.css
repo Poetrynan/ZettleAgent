@@ -8,6 +8,48 @@
   color: var(--text-primary);
   overflow: hidden;
   animation: fadeIn var(--duration-normal) var(--ease-out);
+  /* Query the pane's own width, not the viewport's: this view is narrowed by
+     dragging the side panels, which leaves the viewport width unchanged, so a
+     media query would never fire. */
+  container-type: inline-size;
+  container-name: calendar;
+}
+
+/* Narrow pane: the side-by-side calendar + preview split stops being readable
+   long before it overflows, so tighten the chrome and drop the preview to a
+   strip below the calendar. */
+@container calendar (max-width: 860px) {
+  .calendar-container {
+    flex-direction: column;
+  }
+
+  .calendar-preview-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    height: auto;
+    max-height: 45%;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .calendar-main {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  .calendar-week-days,
+  .calendar-grid {
+    gap: var(--space-2);
+  }
+
+  .calendar-stat-card {
+    padding: var(--space-3);
+  }
+
+  .calendar-day-cell {
+    padding: var(--space-2);
+    min-height: 56px;
+  }
 }
 
 .calendar-main {
@@ -41,6 +83,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  min-width: 0;
 }
 
 .calendar-icon-wrapper {
@@ -291,6 +334,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -301,7 +345,11 @@
 
 .calendar-week-days {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, 1fr) not 1fr: a bare `1fr` means minmax(auto, 1fr), whose `auto`
+     floor is the track's min-content width. That floor makes the 7 columns
+     refuse to shrink, so the grid overflows a narrow .calendar-main and gets
+     clipped by .calendar-container's overflow:hidden. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--space-3);
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-3);
@@ -315,14 +363,17 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: var(--space-2) 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(6, 1fr);
   gap: var(--space-3);
   flex: 1;
+  min-width: 0;
 }
 
 /* Day Cell Styles - Enhanced */
@@ -342,6 +393,7 @@
     border-color 0.2s ease,
     background 0.2s ease;
   min-height: 80px;
+  min-width: 0;
   overflow: hidden;
   opacity: 1;
   transform: none;
@@ -486,7 +538,10 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Same minmax(0, …) reason as the calendar grid: "AVG WORDS/DAY" gives the
+     track a min-content floor that would otherwise push the row past its
+     container. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-4);
 }
 
@@ -535,6 +590,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  /* "AVG WORDS/DAY" has no space before "DAY", so plain word-wrap can't break
+     it and the label would jut out of a narrow card. */
+  overflow-wrap: anywhere;
 }
 
 /* Legend & Bottom Controls - Enhanced */
@@ -580,7 +638,13 @@
 
 /* Right side preview panel - Enhanced */
 .calendar-preview-panel {
-  width: 440px;
+  /* 440px is the *preferred* width, not a floor. A flex item defaults to
+     min-width:auto, so without min-width:0 this panel could not shrink below
+     the min-content width of .preview-header (title + "Open & Edit" side by
+     side, ~550px) — it stole space from .calendar-main and pushed the calendar
+     grid out of the container. */
+  flex: 0 1 440px;
+  min-width: 0;
   background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
@@ -600,7 +664,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* Let the action button drop under the title instead of forcing the panel
+     wider than its allotted width. */
+  flex-wrap: wrap;
+  gap: var(--space-3);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+}
+
+.preview-header-info {
+  min-width: 0;
 }
 
 .preview-header-info h2 {

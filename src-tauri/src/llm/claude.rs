@@ -10,6 +10,7 @@ use crate::llm::prompted_thinking::{
 
 use super::ToolCallResponse;
 use super::openai::build_http_client;
+use crate::llm::token_usage::{observe_stream_usage, record_request, TokenUsage};
 
 /// Convert our ToolDef (OpenAI format) to Claude's tool format
 fn tool_defs_to_claude(tools: &[ToolDef]) -> Vec<serde_json::Value> {
@@ -222,6 +223,7 @@ pub(crate) async fn send_and_parse_claude_tools(
         input_json: String,
     }
     let mut active_blocks = std::collections::HashMap::<usize, ClaudeToolBlock>::new();
+    let mut usage = TokenUsage::default();
     let mut text_block_indices = std::collections::HashSet::<usize>::new();
 
     loop {
@@ -262,6 +264,11 @@ pub(crate) async fn send_and_parse_claude_tools(
             if let Some(data) = line_str.strip_prefix("data: ") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                     let event_type = parsed["type"].as_str().unwrap_or("");
+                    // Anthropic splits usage across events: `message_start`
+                    // nests input/cache counts under `message.usage`, while
+                    // `message_delta` carries `output_tokens` at top level.
+                    observe_stream_usage(&mut usage, &parsed);
+                    observe_stream_usage(&mut usage, &parsed["message"]);
                     match event_type {
                         "content_block_start" => {
                             if let Some(idx) = parsed["index"].as_u64() {
@@ -362,6 +369,8 @@ pub(crate) async fn send_and_parse_claude_tools(
             });
         }
     }
+
+    record_request(&usage);
 
     Ok(ToolCallResponse { content: text_content, tool_calls })
 }

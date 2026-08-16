@@ -188,13 +188,74 @@ pub fn get_skill_detail(skill_dir: &str) -> anyhow::Result<SkillDetail> {
 }
 
 /// Scan all configured skill directories and return combined results.
+/// Scan every configured directory, with a mtime-keyed cache.
+///
+/// This runs at least twice on every agent turn (`collect_skill_prompts` for
+/// the system prompt, `collect_skill_tool_defs` for the tool list), and each
+/// call does `read_dir` + parses every `manifest.json`. Cache the parsed result
+/// keyed by a fingerprint of the directory list plus each dir's mtime, so an
+/// unchanged skill folder is scanned from disk once, not on every message. A
+/// new/removed/edited skill bumps the containing dir's mtime → cache miss.
+static SCAN_CACHE: std::sync::OnceLock<std::sync::Mutex<(u64, Vec<SkillInfo>)>> =
+    std::sync::OnceLock::new();
+
+fn scan_fingerprint(directories: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for dir in directories {
+        dir.hash(&mut hasher);
+        // Fold in the directory's own mtime (catches add/remove of a skill) and
+        // each immediate subdirectory's mtime (catches edits to a manifest).
+        if let Ok(meta) = std::fs::metadata(dir) {
+            if let Ok(m) = meta.modified() {
+                if let Ok(d) = m.duration_since(std::time::UNIX_EPOCH) {
+                    d.as_secs().hash(&mut hasher);
+                }
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut sub: Vec<(String, u64)> = Vec::new();
+            for e in entries.flatten() {
+                if let Ok(meta) = e.metadata() {
+                    if meta.is_dir() {
+                        let secs = meta
+                            .modified()
+                            .ok()
+                            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        sub.push((e.file_name().to_string_lossy().into_owned(), secs));
+                    }
+                }
+            }
+            // read_dir order is not stable across platforms — sort for a stable hash.
+            sub.sort();
+            sub.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
 pub fn scan_all_skill_directories(directories: &[String]) -> Vec<SkillInfo> {
+    let key = scan_fingerprint(directories);
+    let cache = SCAN_CACHE.get_or_init(|| std::sync::Mutex::new((0, Vec::new())));
+
+    if let Ok(guard) = cache.lock() {
+        if guard.0 == key && !directories.is_empty() {
+            return guard.1.clone();
+        }
+    }
+
     let mut all_skills = Vec::new();
     for dir in directories {
         match scan_skill_directory(dir) {
             Ok(skills) => all_skills.extend(skills),
             Err(e) => log::warn!("Failed to scan skill directory '{}': {}", dir, e),
         }
+    }
+
+    if let Ok(mut guard) = cache.lock() {
+        *guard = (key, all_skills.clone());
     }
     all_skills
 }

@@ -4,7 +4,6 @@ use crate::llm::{self, ChatMessage, LlmConfig};
 use crate::db::search;
 use crate::error::ZettelError;
 use super::{ChatRequest, ChatResponse, RagChatRequest, CardMetadataRequest};
-use std::time::Duration;
 
 #[tauri::command]
 pub async fn chat_with_llm(request: ChatRequest) -> Result<ChatResponse, ZettelError> {
@@ -141,18 +140,43 @@ fn trim_history(history: &[ChatMessage], max_chars: usize) -> Vec<ChatMessage> {
 }
 
 /// R-3: Rewrite ambiguous queries into standalone search queries using LLM.
-/// Only triggers when the query is short or contains pronouns/deictic references.
+/// Only triggers when the query is genuinely short or carries an unresolved
+/// deictic reference.
+///
+/// The gate used to be `chars().count() < 30 || [...pronouns].contains(p)`,
+/// which fired on nearly every turn and cost a full blocking LLM round-trip
+/// before the answer could start streaming:
+///   - 30 *characters* is a complete sentence in Chinese ("帮我总结这周的笔记要点"
+///     is 11 chars), so the length test almost always passed.
+///   - the pronoun list was matched with a bare `contains`, so `"it"` matched
+///     inside `with` / `item` / `limit` / `write` / `position` — almost every
+///     English query hit too.
+/// Now: a much lower length floor, and word-boundary matching for the Latin
+/// pronouns so only a real standalone pronoun counts.
 async fn rewrite_query_for_search(
     config: &LlmConfig,
     original_query: &str,
     chat_history: Option<&[ChatMessage]>,
 ) -> String {
-    // Only rewrite if query is short/ambiguous and there's conversation history
-    let needs_rewrite = original_query.chars().count() < 30
-        || ["这个", "那个", "它", "上面", "刚才", "之前", "还有", "其他",
-            "this", "that", "it", "above", "earlier", "more", "other"]
-            .iter()
-            .any(|p| original_query.to_lowercase().contains(p));
+    /// A genuinely context-dependent query is very short — anything longer
+    /// normally carries its own subject and searches fine as-is.
+    const SHORT_QUERY_CHARS: usize = 12;
+
+    let lower = original_query.to_lowercase();
+
+    // CJK deictics have no word boundaries, so substring matching is correct here.
+    let cjk_deictic = ["这个", "那个", "上面", "刚才", "之前", "上述", "他们", "它们"]
+        .iter()
+        .any(|p| original_query.contains(p));
+
+    // Latin pronouns must match as whole words, otherwise "it" swallows
+    // "with"/"item"/"limit" and the gate degenerates to "always rewrite".
+    let latin_deictic = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| matches!(w, "this" | "that" | "these" | "those" | "it" | "they" | "them" | "above" | "earlier"));
+
+    let needs_rewrite =
+        original_query.chars().count() < SHORT_QUERY_CHARS || cjk_deictic || latin_deictic;
 
     let history = match chat_history {
         Some(h) if !h.is_empty() && needs_rewrite => h,
@@ -161,7 +185,9 @@ async fn rewrite_query_for_search(
 
     // Build a minimal context from last 3 messages
     let recent: Vec<String> = history.iter().rev().take(3).rev().map(|m| {
-        format!("{}: {}", m.role, &m.content[..m.content.len().min(200)])
+        // Slice on a char boundary — `&s[..200]` panics mid-codepoint on CJK.
+        let preview: String = m.content.chars().take(200).collect();
+        format!("{}: {}", m.role, preview)
     }).collect();
 
     let messages = vec![
@@ -486,11 +512,10 @@ pub async fn rag_search_and_stream(
         }
     ));
 
-    // Stage 2: Building context
-    let _ = app.emit("rag-progress", serde_json::json!({
-        "stage": "context",
-        "chunks": context_chunks.len(),
-    }));
+    // No progress event between search and generation: building the prompt from
+    // the retrieved chunks is in-memory string work that finishes in well under
+    // a millisecond, so the retrieval stage simply stays lit until the LLM call
+    // actually starts. `search_done` above is the audit trail for chunk counts.
 
     let methodology = request.methodology.as_deref().unwrap_or("zettelkasten");
     let system_prompt = crate::llm::prompts::rag_system_prompt(methodology);
@@ -592,8 +617,14 @@ pub async fn agent_chat(
     app: tauri::AppHandle,
     request: super::AgentChatRequest,
 ) -> Result<String, ZettelError> {
-    // Reset the user-cancel flag at the start of a fresh agent turn.
-    llm::reset_agent_stop();
+    // Mint a fresh run id. This subsumes the old `reset_agent_stop()` since
+    // `begin_agent_run()` resets the stop flag internally and also publishes a
+    // `RunStarted` event so the frontend can filter stale payloads.
+    let run_id = llm::begin_agent_run();
+    let _ = app.emit("agent-event", serde_json::json!({
+        "type": "run_started",
+        "run_id": run_id,
+    }));
 
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
@@ -655,6 +686,15 @@ pub async fn agent_chat(
     let tools = crate::tools::get_all_tool_defs(&mcp_tools, &skill_dirs);
     let mut messages = request.messages;
 
+    // Extract the last user message early: archival recall keys off it, so we
+    // need this value BEFORE the memory-loading block below. It is recomputed
+    // later verbatim for downstream routing to keep the diff minimal — cost is
+    // one linear scan of a small Vec.
+    let user_query_for_recall: String = messages.iter().rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
     // ── Layered Memory Loading (2026 MemGPT-style) ───────────────────
 
     // Layer 1: Core Memory — structured memory.md, always loaded in system prompt
@@ -685,10 +725,23 @@ pub async fn agent_chat(
         core_parts.join("\n")
     };
 
-    // Layer 2: Archival Memory — ai_memory table entries (count only; Agent uses read_memory to access)
-    let archival_count = {
-        let conn = state.db.lock().map_err(|e| ZettelError::System(e.to_string()))?;
-        crate::commands::chat_history_commands::get_memory_strings(&conn, 1000).len()
+    // Layer 2: Archival Memory — lexically recall the most relevant facts for
+    // this turn's query (Mem0-style retrieval). We inject the actual contents,
+    // not just a count, so the model can use them without an extra tool round
+    // trip. Expired facts are pruned first so they never surface.
+    let archival_recalled: Vec<crate::db::memory_store::ArchivalMemory> = {
+        match state.db.lock() {
+            Ok(conn) => {
+                let _ = crate::db::memory_store::prune_expired(&conn);
+                crate::db::memory_store::recall(
+                    &conn,
+                    &user_query_for_recall,
+                    crate::db::memory_store::RECALL_LIMIT,
+                )
+                .unwrap_or_default()
+            }
+            Err(_) => Vec::new(),
+        }
     };
 
     // Build unified memories context string for agent prompts
@@ -701,11 +754,16 @@ pub async fn agent_chat(
             ctx.push('\n');
         }
 
-        if archival_count > 0 {
-            ctx.push_str(&format!(
-                "\n_({} archival memories available — use `read_memory` to search when needed)_\n",
-                archival_count
-            ));
+        if !archival_recalled.is_empty() {
+            ctx.push_str("\n### Recalled Memory (relevant to this request)\n");
+            for m in &archival_recalled {
+                if m.category.is_empty() {
+                    ctx.push_str(&format!("- {}\n", m.content));
+                } else {
+                    ctx.push_str(&format!("- [{}] {}\n", m.category, m.content));
+                }
+            }
+            ctx.push_str("_(More may exist — use `search_memory` to look for anything not shown here.)_\n");
         }
 
         ctx
@@ -843,7 +901,11 @@ pub async fn agent_chat(
             "正在将请求路由到合适的 Agent…"
         },
     }));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // (The earlier 300ms `sleep` here existed only to let the frontend "routing"
+    // animation play — but the animation is already event-driven, so the sleep
+    // was pure dead time on the hot path. Same reasoning applies to the two
+    // sleeps below and the one in `agents/instance.rs`. Total reclaimed per
+    // turn: 850ms of pure wait before the first LLM byte.)
 
     // Use new three-layer hybrid classifier (with conversation context)
     let history_for_classify: Vec<ChatMessage> = chat_history
@@ -977,19 +1039,23 @@ pub async fn agent_chat(
         "stage": "loading_tools",
         "message": "Loading tools & building agent…",
     }));
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let registry = crate::agents::registry::AgentRegistry::new_with_defaults(
         &config, &memories_context, &skills_context, methodology, &current_time, &vault_info,
     );
 
     // 3. Execute via Orchestrator
     crate::chat_file_log::log_agent("stage planning");
+    // Register the active vault so tool hooks / the context compressor can
+    // flush key facts to core memory without threading the path through.
+    crate::llm::tool_hooks::set_active_vault_path(&vault_path);
+    // Register the AppHandle so background flushers can emit MemoryFlushed
+    // events (compress_context_window isn't itself invoked with a handle).
+    crate::llm::tool_hooks::set_active_app_handle(app.clone());
     let _ = app.emit("agent-event", serde_json::json!({
         "type": "stage",
         "stage": "planning",
         "message": "Planning & executing…",
     }));
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let db = state.db.clone();
     let vault = vault_path.clone();
     let vault_paths_for_closure = all_vault_paths.clone();
@@ -1015,8 +1081,13 @@ pub async fn agent_chat(
         },
         &app,
     )
-    .await
-    .map_err(|e| {
+    .await;
+
+    // A failed or cancelled turn still consumed tokens, so report accounting
+    // before the error path short-circuits.
+    llm::emit_turn_token_usage(&app);
+
+    let result = result.map_err(|e| {
         crate::chat_file_log::log_agent(&format!("error orchestrator {}", e));
         ZettelError::Llm(llm::format_llm_user_error(&e.to_string()))
     })?;
@@ -1027,21 +1098,25 @@ pub async fn agent_chat(
     ));
 
     // ── Post-Conversation Memory Extraction (2026 Mem0-style) ────────
-    // Spawn a background task to extract facts from the conversation
-    // and merge them into Core Memory. Does not block the response.
+    // Spawn a background task to extract facts from the conversation and
+    // dual-write them: Core Memory (memory.md, structured/bounded) + Archival
+    // Memory (ai_memory table, recall-scored). Does not block the response.
     {
         let extract_config = config.clone();
         let extract_messages = chat_history.clone();
         let extract_vault = vault_path.clone();
+        let extract_db = state.db.clone();
         tokio::spawn(async move {
-            match crate::llm::memory_extractor::extract_and_merge(
+            match crate::llm::memory_extractor::extract_and_merge_enhanced(
                 &extract_config,
                 &extract_messages,
                 &extract_vault,
+                Some(extract_db),
+                None,
             ).await {
                 Ok(count) => {
                     if count > 0 {
-                        log::info!("Memory extraction: merged {} new facts into Core Memory", count);
+                        log::info!("Memory extraction: merged {} new facts (core + archival)", count);
                     }
                 }
                 Err(e) => {
@@ -1161,6 +1236,7 @@ pub fn add_mcp_server(
 
     let new_json = serde_json::to_string(&configs)?;
     let _ = crate::db::schema::set_setting(&conn, "mcp_servers", &new_json);
+    crate::tools::mcp_client::invalidate_tool_cache();
     Ok(())
 }
 
@@ -1180,6 +1256,7 @@ pub fn remove_mcp_server(
 
     let new_json = serde_json::to_string(&configs)?;
     let _ = crate::db::schema::set_setting(&conn, "mcp_servers", &new_json);
+    crate::tools::mcp_client::invalidate_tool_cache();
     Ok(())
 }
 

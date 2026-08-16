@@ -7,6 +7,7 @@ use crate::llm::prompted_thinking::{
     ThoughtStreamParser, dispatch_content_delta, flush_content_parser, is_native_reasoning,
     emit_thinking,
 };
+use crate::llm::token_usage::{observe_stream_usage, record_request, TokenUsage};
 
 use super::ToolCallResponse;
 
@@ -52,6 +53,13 @@ pub(crate) async fn send_and_parse_openai_tools(
         stream: true,
         prompt_cache_key: None,
         tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
+        // Ask providers that honor it to emit a final usage-bearing chunk.
+        // Providers that reject unknown fields are filtered by the whitelist.
+        stream_options: if super::supports_stream_usage(super::detect_provider(config)) {
+            Some(serde_json::json!({ "include_usage": true }))
+        } else {
+            None
+        },
     };
 
     let mut builder = client.post(&config.api_url).json(&request);
@@ -84,6 +92,7 @@ pub(crate) async fn send_and_parse_openai_tools(
     let mut tool_assemblers = std::collections::HashMap::<usize, ToolCallAssembler>::new();
     let mut stream_done = false;
     let mut finish_reason: Option<String> = None;
+    let mut usage = TokenUsage::default();
 
     'outer: loop {
         // Poll the stream with a short timeout so the user-cancel flag is
@@ -132,6 +141,9 @@ pub(crate) async fn send_and_parse_openai_tools(
             }
             if let Some(data) = line_str.strip_prefix("data: ") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                    // Usage arrives on a trailing chunk whose `choices` array is
+                    // empty, so it must be read before the non-empty guard below.
+                    observe_stream_usage(&mut usage, &parsed);
                     if let Some(choices) = parsed["choices"].as_array() {
                         if !choices.is_empty() {
                             // Track finish_reason to detect truncation vs normal completion
@@ -246,6 +258,8 @@ pub(crate) async fn send_and_parse_openai_tools(
             });
         }
     }
+
+    record_request(&usage);
 
     Ok(ToolCallResponse { content, tool_calls })
 }

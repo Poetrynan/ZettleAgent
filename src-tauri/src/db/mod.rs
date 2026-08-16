@@ -1,6 +1,9 @@
 pub mod schema;
 pub mod sync;
 pub mod search;
+pub mod embedding_cache;
+pub mod rerank;
+pub mod memory_store;
 
 use rusqlite::Connection;
 use std::path::Path;

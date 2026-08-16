@@ -50,13 +50,12 @@ Respond in the same language as the note content. If the note is in Chinese, res
     )
 }
 
-/// System prompt for Agent mode (tool-calling chat).
-/// Defines the Agent's role, tool usage guidelines, and safety constraints.
-/// `memories` are long-term memory entries injected from the ai_memory table.
-/// `skills_context` is the combined SKILL.md content from loaded Skills.
-/// `methodology` determines note type vocabulary (zettelkasten, para, gtd, etc.)
-/// `current_time` is the current local time string for time-aware queries.
-/// `vault_info` is optional vault name / note count hint.
+/// DEPRECATED: This function is dead code — zero call sites. The active prompt
+/// is `base_agent_prompt()` (used by registry.rs for all 4 agents). Kept
+/// temporarily as reference for the Canvas Push schema and Canvas Discussion
+/// rules that were migrated into `base_agent_prompt` during Phase 44.
+/// TODO: Delete once the migration is confirmed stable.
+#[allow(dead_code)]
 pub fn agent_system_prompt(memories: &[String], skills_context: &str, methodology: &str, current_time: &str, vault_info: &str) -> String {
     let note_types_section = match methodology {
         "para" => "## Knowledge Methodology: PARA\nThe user follows the PARA method. Note types: **project** (active goals), **area** (ongoing responsibilities), **resource** (reference material), **archive** (completed/inactive). When creating or classifying notes, use these types.",
@@ -91,7 +90,7 @@ Detailed descriptions are in each tool's definition. Use this as a routing guide
   - `rename_note` · `move_note` · `merge_notes` · `delete_note` · `create_folder`
 **Canvas**: `read_canvas` · `modify_canvas`
 **Web**: `web_search` · `fetch_web_content`
-**Memory**: `read_memory` · `update_memory` (read→merge→write)
+**Memory**: `read_memory` · `search_memory` · `update_memory` (read→merge→write)
 **Workspace**: `list_workspace_folders`
 
 ## Canvas Push (Chat → Canvas)
@@ -141,7 +140,7 @@ When the user selects nodes on the canvas and sends them for discussion, you wil
 
 ## Memory Management
 - **Core Memory** (always loaded below): Verified user preferences, workflow habits, important decisions.
-- **Archival Memory**: Historical memories in database. Use `read_memory` to search when needed.
+- **Archival Memory**: Long-term fact store in the database. The most relevant entries are auto-injected each turn; use `search_memory` when you need something not shown.
 - **Saving**: Use `update_memory` with `section` parameter (`preferences`, `habits`, `decisions`, `vault`).
   - Always `read_memory` first before updating.
   - Auto-detect triggers: "remember this", "以后都这样做", "我偏好...", "always do X"
@@ -649,7 +648,7 @@ Only use this when your current tools genuinely cannot fulfill the request."#;
 fn role_suffix(role: &str) -> &'static str {
     match role {
         "creator" => r#"## Role Focus: Creator
-You specialize in writing and editing notes. Prefer `patch_note` for targeted edits and `edit_note` only for full rewrites. Always search for existing content first to avoid duplicates. Preserve `<!-- @user -->` blocks. Use [[wikilinks]] to connect ideas. Include YAML frontmatter (type, tags, created date). One clear idea per note."#,
+You specialize in writing and editing notes. Always search for existing content first to avoid duplicates. Preserve `<!-- @user -->` blocks. Use [[wikilinks]] to connect ideas. Include YAML frontmatter (type, tags, created date). One clear idea per note."#,
         "curator" => r#"## Role Focus: Curator
 You specialize in vault health and organization. Diagnose first (`run_lint`, `get_vault_stats`) before changing anything. Confirm before destructive operations (delete/merge). Group related batch operations together. Present a prioritized plan, then execute and report."#,
         _ => r#"## Role Focus: Knowledge
@@ -680,10 +679,6 @@ pub fn base_agent_prompt(
 
     let mut prompt = format!(r#"You are ZettelAgent — an AI agent operating inside a personal knowledge base (Obsidian-style vault). You act autonomously through tools and decide yourself when a task is done.
 
-## Current Context
-- Current time: {current_time}
-{vault_info}
-
 {method_section}
 
 {suffix}
@@ -698,6 +693,7 @@ pub fn base_agent_prompt(
 5. **Do not repeat yourself.** Never call the same tool with the same arguments twice. Cross-verify tool results against each other before synthesizing.
 6. **Cite sources.** Reference notes with [[Note Title]] wikilinks.
 7. **Be concise.** The final answer should be tight and useful. No filler, no restating the question, no emoji.
+
 ## Tool Categories
 - **Search & Read**: search_notes, list_notes, read_note, batch_read_notes, find_similar_notes, search_by_tag
 - **Graph**: get_graph, get_local_graph, find_shortest_path, query_relations, get_backlinks
@@ -706,8 +702,53 @@ pub fn base_agent_prompt(
 - **Canvas**: read_canvas, modify_canvas, create_canvas, group_canvas_nodes, arrange_canvas_by
 - **Diagnostics**: run_lint, get_vault_stats
 - **Web**: web_search, fetch_web_content
-- **Memory**: read_memory, update_memory
+- **Memory**: read_memory, search_memory, update_memory
 - **Planning**: todo_write (live plan shown to the user)
+
+## Memory Management
+- **Core Memory** (always loaded below): Verified user preferences, workflow habits, important decisions.
+- **Archival Memory**: Long-term fact store in the database. The most relevant entries are auto-injected each turn; use `search_memory` when you need something not shown.
+- **Saving**: Use `update_memory` with `section` parameter (`preferences`, `habits`, `decisions`, `vault`).
+  - Always `read_memory` first before updating.
+  - Auto-detect triggers: "remember this", "以后都这样做", "我偏好...", "always do X"
+  - Don't save trivial or session-specific info.
+
+## Canvas Push (Chat → Canvas)
+When the user discusses canvas-related topics and you want to push analysis results back to the canvas, use the `[CANVAS_PUSH]` marker in your final response. This will automatically add nodes/edges to the user's canvas.
+
+**Syntax** (the surrounding code fences are required for parsing):
+```
+[CANVAS_PUSH]
+```json
+{{
+  "nodes": [
+    {{ "id": "node1", "label": "Concept A", "file": "optional/note/path.md" }},
+    {{ "id": "node2", "label": "Concept B", "x": 300, "y": 200 }}
+  ],
+  "edges": [
+    {{ "source": "node1", "target": "node2", "label": "supports", "relationType": "supports" }}
+  ]
+}}
+```
+[/CANVAS_PUSH]
+```
+
+**When to use**:
+- User says "把这些推送到画布" or "push this to canvas"
+- You've analyzed relationships and want to visualize them
+- You've identified missing connections that should be drawn
+
+## Canvas Discussion (Canvas → Chat)
+When the user selects nodes on the canvas and sends them for discussion, you will receive:
+- **Attached Notes**: Full content of the selected note cards (in "Attached Notes for Context" section)
+- **Text Node Content**: Content from sticky notes / text nodes (inline in the user message)
+- **Node Names**: The specific node titles in the user's prompt
+
+**How to respond**:
+1. **Analyze the actual content** — read the attached note content carefully; do NOT say you cannot access canvas.
+2. **Use tools to enrich** — call `read_note`, `get_local_graph`, `query_relations`, or `find_similar_notes` to discover deeper connections beyond what's immediately visible.
+3. **Structure your analysis** — cover: semantic connections, shared themes, complementary/contradictory aspects, and knowledge network implications.
+4. **Suggest CANVAS_PUSH** — if you discover new relationships worth visualizing, include a `[CANVAS_PUSH]` block in your response.
 
 {conversation_context}
 
@@ -715,16 +756,17 @@ pub fn base_agent_prompt(
 - **Pure social** (greeting, thanks, banter) with no task: respond naturally in 1–3 sentences; no tools; no forced knowledge-base references.
 - **Follow-ups** that reference earlier turns: read message history first; use tools if needed to act on what was discussed; never substitute a generic feature list when the user is continuing a task.
 
-## Canvas Push
-To visualize findings on canvas, use the `[CANVAS_PUSH]` marker with JSON nodes/edges.
+{agent_handoff}
 
-{agent_handoff}"#,
-        current_time = current_time,
-        vault_info = vault_info,
+## Current Context
+- Current time: {current_time}
+{vault_info}"#,
         method_section = method_section,
         suffix = suffix,
         agent_handoff = AGENT_HANDOFF,
         conversation_context = CONVERSATION_CONTEXT_GUIDANCE,
+        current_time = current_time,
+        vault_info = vault_info,
     );
 
     if !memories_context.is_empty() {
@@ -794,4 +836,106 @@ Rules:
 - Every reasoning step before a tool call must be inside <thought>...</thought>
 - After receiving tool results, analyze them inside <thought> before acting again
 - Keep the final answer concise and outside <thought> tags"#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build(role: &str) -> String {
+        base_agent_prompt(role, "", "", "zettelkasten", "2026-08-13 12:00", "- Vault: demo (12 notes)")
+    }
+
+    /// The frontend parser (`SmartChat.tsx`) matches
+    /// `[CANVAS_PUSH] ```json … ``` [/CANVAS_PUSH]`. If the prompt stops
+    /// teaching that exact shape, the model emits something the regex misses
+    /// and canvas push silently no-ops — which is exactly the bug that shipped
+    /// when this section lived only in the dead `agent_system_prompt`.
+    #[test]
+    fn canvas_push_schema_is_present_for_every_role() {
+        for role in ["knowledge", "creator", "curator", "unknown"] {
+            let p = build(role);
+            assert!(p.contains("[CANVAS_PUSH]"), "{role}: missing open marker");
+            assert!(p.contains("[/CANVAS_PUSH]"), "{role}: missing close marker");
+            assert!(p.contains("```json"), "{role}: missing json fence the parser requires");
+            assert!(p.contains("\"nodes\""), "{role}: missing nodes key");
+            assert!(p.contains("\"edges\""), "{role}: missing edges key");
+            assert!(p.contains("\"relationType\""), "{role}: missing relationType key");
+            // `{{` in the format string must render as a single literal brace.
+            assert!(!p.contains("{{"), "{role}: unescaped double brace leaked into output");
+        }
+    }
+
+    #[test]
+    fn canvas_discussion_rules_are_present() {
+        let p = build("knowledge");
+        assert!(p.contains("Canvas Discussion"));
+        // The specific instruction that stops the model from claiming it has
+        // no canvas access when note content was in fact attached.
+        assert!(p.contains("do NOT say you cannot access canvas"));
+    }
+
+    #[test]
+    fn memory_management_section_advertises_search_memory() {
+        let p = build("knowledge");
+        assert!(p.contains("## Memory Management"));
+        assert!(p.contains("Core Memory"));
+        assert!(p.contains("Archival Memory"));
+        assert!(p.contains("search_memory"), "archival search tool must be discoverable");
+        assert!(p.contains("update_memory"));
+    }
+
+    /// Prompt caching is prefix-based: every provider only reuses the cache
+    /// while the leading tokens are byte-identical. `current_time` changes on
+    /// every single turn, so it must sit at the very END — otherwise the whole
+    /// prompt is a cache miss every turn and `cache_read` stays at zero.
+    #[test]
+    fn volatile_context_stays_at_the_end_so_the_prefix_can_cache() {
+        let p = build("knowledge");
+        let idx = p.find("2026-08-13 12:00").expect("current_time must be injected");
+        let tail_start = p.len().saturating_sub(300);
+        assert!(
+            idx >= tail_start,
+            "current_time at byte {idx} of {} — must be within the last 300 bytes",
+            p.len()
+        );
+    }
+
+    #[test]
+    fn role_focus_differs_per_role() {
+        assert!(build("creator").contains("Role Focus: Creator"));
+        assert!(build("curator").contains("Role Focus: Curator"));
+        assert!(build("knowledge").contains("Role Focus: Knowledge"));
+        // Unknown roles fall back to Knowledge rather than emitting an empty section.
+        assert!(build("nonsense").contains("Role Focus: Knowledge"));
+    }
+
+    /// `[ROUTE:…]` is genuinely consumed by `agents::instance::parse_next_action`,
+    /// so the handoff contract must keep listing the exact tokens it parses.
+    #[test]
+    fn route_handoff_tokens_match_the_parser() {
+        let p = build("knowledge");
+        assert!(p.contains("[ROUTE:create]"));
+        assert!(p.contains("[ROUTE:curate]"));
+        assert!(p.contains("[ROUTE:knowledge]"));
+    }
+
+    #[test]
+    fn memories_and_skills_append_only_when_non_empty() {
+        let bare = base_agent_prompt("knowledge", "", "", "zettelkasten", "t", "v");
+        assert!(!bare.contains("## Your Memory of This User"));
+        assert!(!bare.contains("## Loaded Skills"));
+
+        let filled = base_agent_prompt(
+            "knowledge",
+            "- prefers dark theme",
+            "skill body",
+            "zettelkasten",
+            "t",
+            "v",
+        );
+        assert!(filled.contains("## Your Memory of This User"));
+        assert!(filled.contains("- prefers dark theme"));
+        assert!(filled.contains("## Loaded Skills"));
+    }
 }

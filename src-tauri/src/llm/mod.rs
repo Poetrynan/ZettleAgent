@@ -11,6 +11,15 @@ pub mod planning;
 pub mod plan_guard;
 pub mod adaptive_prompt;
 pub mod agent_recovery;
+pub mod tool_hooks;
+pub mod token_usage;
+
+// Re-export tool hook system items
+pub use tool_hooks::{
+    HookOutcome, HookStage, run_pre_hooks, run_post_hooks, run_abort_hook,
+    set_active_vault_path, active_vault_path, flush_memory_before_fold,
+    set_active_app_handle, active_app_handle,
+};
 
 // Re-export approval gate items
 pub use approval::{
@@ -199,6 +208,43 @@ pub enum AgentEvent {
         #[serde(default)]
         answer_stream: bool,
     },
+    /// A PRE hook vetoed a tool call before execution (destructive pattern).
+    #[serde(rename = "tool_blocked")]
+    ToolBlocked { tool_call_id: String, name: String, reason: String },
+    /// A PRE hook flagged a write op as elevated-risk (surfaced in the approval card).
+    #[serde(rename = "tool_risk_notice")]
+    ToolRiskNotice { tool_call_id: String, name: String, reason: String },
+    /// A POST hook scrubbed secret-shaped values from tool output.
+    #[serde(rename = "tool_redacted")]
+    ToolRedacted { tool_call_id: String, name: String, redactions: u32 },
+    /// Key info was flushed to core memory before a context fold.
+    #[serde(rename = "memory_flushed")]
+    MemoryFlushed { count: u32 },
+    /// A new agent run began. The frontend records `run_id` and drops any
+    /// subsequent event carrying a different one.
+    #[serde(rename = "run_started")]
+    RunStarted { run_id: String },
+    /// Explicit lifecycle phase transition.
+    #[serde(rename = "phase")]
+    Phase {
+        phase: AgentPhase,
+        /// Pre-localized label so the frontend needs no phase→text table.
+        label: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// Four-way token accounting for the turn. Emitted once at turn end.
+    /// The four buckets are disjoint, so `total` is their sum.
+    #[serde(rename = "token_usage")]
+    TokenUsage {
+        input: u64,
+        output: u64,
+        cache_read: u64,
+        cache_write: u64,
+        total: u64,
+        /// `cache_read / (cache_read + input)`, in `[0, 1]`.
+        cache_hit_rate: f64,
+    },
 }
 
 /// Format an agent event as a single log line (no huge stream payloads).
@@ -319,13 +365,63 @@ pub fn format_agent_event(event: &AgentEvent) -> String {
                 "clear_text".to_string()
             }
         }
+        AgentEvent::ToolBlocked { tool_call_id, name, reason } => {
+            format!("tool_blocked id={} name={} reason={}", tool_call_id, name,
+                crate::chat_file_log::trunc(reason, 160))
+        }
+        AgentEvent::ToolRiskNotice { tool_call_id, name, reason } => {
+            format!("tool_risk_notice id={} name={} reason={}", tool_call_id, name,
+                crate::chat_file_log::trunc(reason, 160))
+        }
+        AgentEvent::ToolRedacted { tool_call_id, name, redactions } => {
+            format!("tool_redacted id={} name={} count={}", tool_call_id, name, redactions)
+        }
+        AgentEvent::MemoryFlushed { count } => {
+            format!("memory_flushed count={}", count)
+        }
+        AgentEvent::RunStarted { run_id } => {
+            format!("run_started id={}", run_id)
+        }
+        AgentEvent::Phase { phase, label, .. } => {
+            format!("phase {} — {}", phase.as_str(), label)
+        }
+        AgentEvent::TokenUsage {
+            input,
+            output,
+            cache_read,
+            cache_write,
+            total,
+            cache_hit_rate,
+        } => {
+            format!(
+                "token_usage_total in={} out={} cache_read={} cache_write={} total={} hit_rate={:.2}",
+                input, output, cache_read, cache_write, total, cache_hit_rate
+            )
+        }
     }
 }
 
 /// Emit agent event to UI and append to `logs/agent.log`.
+///
+/// Every payload is stamped with the active `run_id` so the frontend can drop
+/// events belonging to a superseded run. Serializing to a `Value` first keeps
+/// the `AgentEvent` enum free of a run-id field on all 19 variants.
 pub fn emit_agent_event(app_handle: &tauri::AppHandle, event: AgentEvent) {
     crate::chat_file_log::log_agent(&format_agent_event(&event));
-    let _ = app_handle.emit("agent-event", event);
+    match serde_json::to_value(&event) {
+        Ok(serde_json::Value::Object(mut map)) => {
+            map.insert(
+                "run_id".to_string(),
+                serde_json::Value::String(current_run_id()),
+            );
+            let _ = app_handle.emit("agent-event", serde_json::Value::Object(map));
+        }
+        // Non-object payloads shouldn't occur (the enum is internally tagged),
+        // but emit unstamped rather than dropping the event.
+        _ => {
+            let _ = app_handle.emit("agent-event", event);
+        }
+    }
 }
 
 /// Request body for OpenAI-compatible chat completions API.
@@ -341,6 +437,34 @@ pub(crate) struct ChatRequest {
     pub prompt_cache_key: Option<String>, // Kimi-specific
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDef>>,
+    /// `{"include_usage": true}` — asks an OpenAI-compatible provider to append
+    /// a final usage-bearing chunk to the stream. Omitted entirely for
+    /// providers not known to accept it, since strict gateways reject unknown
+    /// request fields outright.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<serde_json::Value>,
+}
+
+/// Whether this OpenAI-compatible provider accepts `stream_options`.
+///
+/// Deliberately a whitelist rather than a blacklist: an unrecognized endpoint
+/// (self-hosted gateway, proxy, local server) may reject the field and fail
+/// the whole request, and losing token accounting is much cheaper than losing
+/// the response.
+pub(crate) fn supports_stream_usage(provider: &str) -> bool {
+    matches!(
+        provider,
+        "openai"
+            | "deepseek"
+            | "moonshot"
+            | "qwen"
+            | "zhipu"
+            | "siliconflow"
+            | "openrouter"
+            | "together"
+            | "groq"
+            | "minimax"
+    )
 }
 
 /// A chunk of a streaming response.
@@ -380,6 +504,156 @@ pub fn cancel_agent_turn_global() {
 /// Check whether the active turn has been cancelled by the user.
 pub fn is_agent_cancelled() -> bool {
     agent_stop_flag().load(std::sync::atomic::Ordering::SeqCst)
+}
+
+// ── Lifecycle Generation ───────────────────────────────────────────
+// Every agent turn gets a fresh run id. All emitted events are stamped with
+// it, and the frontend drops any event whose id does not match the run it is
+// currently rendering. This is what keeps a crashed / superseded run from
+// writing into a brand-new conversation: the stale task may still be alive
+// inside tokio, but its output is now unaddressable.
+
+fn run_id_slot() -> &'static std::sync::Mutex<String> {
+    static SLOT: OnceLock<std::sync::Mutex<String>> = OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new(String::new()))
+}
+
+/// Start a new agent run: mints a fresh run id, clears the stop flag, and
+/// returns the id so the caller can announce it via `AgentEvent::RunStarted`.
+pub fn begin_agent_run() -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    if let Ok(mut guard) = run_id_slot().lock() {
+        *guard = id.clone();
+    }
+    reset_agent_stop();
+    token_usage::reset_turn_usage();
+    crate::chat_file_log::log_agent(&format!("run_started id={}", id));
+    id
+}
+
+/// Emit the turn's accumulated four-way token usage. No-op when the provider
+/// reported nothing, so a gateway that strips `usage` produces no misleading
+/// all-zero card in the UI.
+pub fn emit_turn_token_usage(app_handle: &tauri::AppHandle) {
+    let u = token_usage::turn_usage();
+    if u.is_empty() {
+        return;
+    }
+    emit_agent_event(app_handle, AgentEvent::TokenUsage {
+        input: u.input,
+        output: u.output,
+        cache_read: u.cache_read,
+        cache_write: u.cache_write,
+        total: u.total(),
+        cache_hit_rate: u.cache_hit_rate(),
+    });
+}
+
+/// The run id of the active turn (empty before the first run).
+pub fn current_run_id() -> String {
+    run_id_slot().lock().map(|g| g.clone()).unwrap_or_default()
+}
+
+/// True when `run_id` belongs to a superseded run and its work should be
+/// discarded rather than applied.
+pub fn is_stale_run(run_id: &str) -> bool {
+    !run_id.is_empty() && run_id != current_run_id()
+}
+
+// ── Phase Labels ───────────────────────────────────────────────────
+
+/// Explicit lifecycle phases for one agent turn.
+///
+/// Without these, a stalled agent is a spinner with no location. Each
+/// transition emits an event, so "stuck" always resolves to a phase name in
+/// both the UI and `logs/agent.log`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPhase {
+    Routing,
+    Classifying,
+    LoadingTools,
+    Planning,
+    CallingModel,
+    ExecutingTools,
+    AwaitingApproval,
+    CompressingContext,
+    Retrying,
+    Synthesizing,
+    Finalizing,
+    Done,
+    Cancelled,
+    Failed,
+}
+
+impl AgentPhase {
+    /// Stable snake_case identifier (matches the serde representation).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentPhase::Routing => "routing",
+            AgentPhase::Classifying => "classifying",
+            AgentPhase::LoadingTools => "loading_tools",
+            AgentPhase::Planning => "planning",
+            AgentPhase::CallingModel => "calling_model",
+            AgentPhase::ExecutingTools => "executing_tools",
+            AgentPhase::AwaitingApproval => "awaiting_approval",
+            AgentPhase::CompressingContext => "compressing_context",
+            AgentPhase::Retrying => "retrying",
+            AgentPhase::Synthesizing => "synthesizing",
+            AgentPhase::Finalizing => "finalizing",
+            AgentPhase::Done => "done",
+            AgentPhase::Cancelled => "cancelled",
+            AgentPhase::Failed => "failed",
+        }
+    }
+
+    /// Human-readable label for the trace UI.
+    pub fn label(&self, zh: bool) -> &'static str {
+        if zh {
+            match self {
+                AgentPhase::Routing => "正在选择角色…",
+                AgentPhase::Classifying => "正在理解意图…",
+                AgentPhase::LoadingTools => "正在加载工具…",
+                AgentPhase::Planning => "正在规划…",
+                AgentPhase::CallingModel => "正在等待模型…",
+                AgentPhase::ExecutingTools => "正在执行工具…",
+                AgentPhase::AwaitingApproval => "等待你确认…",
+                AgentPhase::CompressingContext => "正在压缩上下文…",
+                AgentPhase::Retrying => "网络波动，正在重试…",
+                AgentPhase::Synthesizing => "正在整合结果…",
+                AgentPhase::Finalizing => "正在收尾…",
+                AgentPhase::Done => "已完成",
+                AgentPhase::Cancelled => "已停止",
+                AgentPhase::Failed => "执行失败",
+            }
+        } else {
+            match self {
+                AgentPhase::Routing => "Selecting agent…",
+                AgentPhase::Classifying => "Understanding intent…",
+                AgentPhase::LoadingTools => "Loading tools…",
+                AgentPhase::Planning => "Planning…",
+                AgentPhase::CallingModel => "Waiting for the model…",
+                AgentPhase::ExecutingTools => "Running tools…",
+                AgentPhase::AwaitingApproval => "Waiting for your approval…",
+                AgentPhase::CompressingContext => "Compressing context…",
+                AgentPhase::Retrying => "Transient error — retrying…",
+                AgentPhase::Synthesizing => "Synthesizing results…",
+                AgentPhase::Finalizing => "Finalizing…",
+                AgentPhase::Done => "Completed",
+                AgentPhase::Cancelled => "Stopped",
+                AgentPhase::Failed => "Failed",
+            }
+        }
+    }
+}
+
+/// Emit a phase transition. Thin wrapper so call sites stay one line.
+pub fn emit_phase(app_handle: &tauri::AppHandle, phase: AgentPhase, zh: bool) {
+    emit_agent_event(app_handle, AgentEvent::Phase {
+        phase,
+        label: phase.label(zh).to_string(),
+        detail: None,
+    });
 }
 
 use std::sync::OnceLock;
@@ -510,6 +784,8 @@ pub async fn chat_completion(
                     None
                 },
                 tools: None,
+                // Non-streaming: usage arrives in the response body itself.
+                stream_options: None,
             };
 
             let mut builder = client.post(&config.api_url).json(&request);
@@ -705,6 +981,11 @@ pub async fn chat_completion_stream(
                 None
             },
             tools: None,
+            stream_options: if supports_stream_usage(provider) {
+                Some(serde_json::json!({ "include_usage": true }))
+            } else {
+                None
+            },
         };
 
         let mut builder = client.post(&config.api_url).json(&request);
@@ -884,6 +1165,66 @@ fn is_search_near_duplicate(tool_name: &str, args: &str, executed: &[(String, St
     false
 }
 
+// ── Retry Grace: transient vs deterministic tool failures ──────────
+
+/// Classify a tool result as a *transient* failure worth one retry.
+///
+/// The distinction matters: retrying "note not found" burns a round-trip and
+/// tells the model nothing new, while retrying a dropped connection usually
+/// succeeds. Only network/timeout/lock-contention shapes are retried.
+fn is_transient_tool_error(content: &str) -> bool {
+    if !(content.starts_with("Error:") || content.starts_with("error:")) {
+        return false;
+    }
+    let lower = content.to_lowercase();
+
+    // Deterministic failures — a retry cannot change the outcome.
+    const PERMANENT: &[&str] = &[
+        "not found",
+        "does not exist",
+        "no such file",
+        "invalid argument",
+        "invalid parameter",
+        "missing required",
+        "already exists",
+        "unknown tool",
+        "permission denied",
+        "user rejected",
+        "unsupported",
+        "parse error",
+        "invalid json",
+    ];
+    if PERMANENT.iter().any(|p| lower.contains(p)) {
+        return false;
+    }
+
+    // Transient shapes — worth exactly one more attempt.
+    const TRANSIENT: &[&str] = &[
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection closed",
+        "connection refused",
+        "error sending request",
+        "temporarily unavailable",
+        "database is locked",
+        "resource busy",
+        "too many requests",
+        "429",
+        "502",
+        "503",
+        "504",
+        "dns",
+        "tls",
+        "network",
+    ];
+    TRANSIENT.iter().any(|p| lower.contains(p))
+}
+
+/// Grace delay before a retry attempt. Short enough that the user does not
+/// perceive a stall, long enough that a transient blip has cleared.
+const RETRY_GRACE_MS: u64 = 1200;
+
 // ── Tool Result Summarization ──────────────────────────────────────
 
 /// Tools whose output is already compact and should NOT be summarized.
@@ -1022,7 +1363,11 @@ async fn run_synthesis_pass(
     Ok(answer)
 }
 
-/// Run synthesis up to twice when the first pass is empty or errors.
+/// Run synthesis up to once (no retry). The earlier 2-attempt loop added a
+/// full extra LLM round-trip on every failure — which in practice meant: model
+/// produces a slightly terse answer → classified as "meta-stub" → new synthesis
+/// call → wait another 2-5s → user perceives extreme slowness. One attempt is
+/// enough: if it fails, fall back to `extract_best_loop_answer` which is free.
 async fn run_synthesis_with_retry(
     config: &LlmConfig,
     messages: &[ChatMessage],
@@ -1032,38 +1377,27 @@ async fn run_synthesis_with_retry(
     total_tool_calls: usize,
     base_label: &str,
 ) -> Option<String> {
-    for attempt in 0..2u8 {
-        let label = if attempt == 0 {
-            base_label.to_string()
-        } else {
-            format!("{base_label}_retry")
-        };
-        match run_synthesis_pass(
-            config,
-            messages,
-            user_query,
-            task_kind,
-            app_handle,
-            total_tool_calls,
-            &label,
-        )
-        .await
-        {
-            Ok(answer) if !answer.trim().is_empty() => {
-                if attempt > 0 {
-                    crate::chat_file_log::log_agent(&format!("synthesis_pass_retry_ok {base_label}"));
-                }
-                return Some(answer);
-            }
-            Ok(_) => {
-                crate::chat_file_log::log_agent(&format!("synthesis_pass_empty {label}"));
-            }
-            Err(e) => {
-                crate::chat_file_log::log_agent(&format!("synthesis_pass_error {label} {e}"));
-            }
+    match run_synthesis_pass(
+        config,
+        messages,
+        user_query,
+        task_kind,
+        app_handle,
+        total_tool_calls,
+        base_label,
+    )
+    .await
+    {
+        Ok(answer) if !answer.trim().is_empty() => Some(answer),
+        Ok(_) => {
+            crate::chat_file_log::log_agent(&format!("synthesis_pass_empty {base_label}"));
+            None
+        }
+        Err(e) => {
+            crate::chat_file_log::log_agent(&format!("synthesis_pass_error {base_label} {e}"));
+            None
         }
     }
-    None
 }
 
 /// Human-readable stage label for a tool, shown as streaming progress before
@@ -1155,6 +1489,10 @@ fn flush_pending_tool_results(
     reason: &str,
 ) {
     for (tool_call_id, name) in pending.drain(..) {
+        // ── ABORT hook stage ───────────────────────────────────────
+        // Records the terminal state of a tool call that never produced a
+        // result (user cancelled, turn ended, duplicate break).
+        tool_hooks::run_abort_hook(&name, reason);
         emit_agent_event(
             app_handle,
             AgentEvent::ToolResult {
@@ -1341,6 +1679,7 @@ where
         }
 
         // ── Context Window Compression ──────────────────────────────
+        emit_phase(app_handle, AgentPhase::CompressingContext, user_zh);
         compress_context_window(config, messages, &user_query, max_context).await;
         // Enforce tool budget (State Graph constraints)
         // Greetings/small-talk: no tools at all — the model physically cannot
@@ -1385,6 +1724,7 @@ where
 
         // Send request and parse response using provider-specific adapter
         let tools_for_request = &active_tools;
+        emit_phase(app_handle, AgentPhase::CallingModel, user_zh);
         let resp = match provider {
             "claude" => send_and_parse_claude_tools(config, &exec_messages, tools_for_request, app_handle).await?,
             "gemini" => send_and_parse_gemini_tools(config, &exec_messages, tools_for_request, app_handle).await?,
@@ -1486,15 +1826,64 @@ where
         emit_agent_event(app_handle, AgentEvent::ClearText { answer_stream: false });
 
         // 1. Prepare parallel tool execution inputs
-        let tool_calls_data: Vec<(String, String, String)> = resp.tool_calls.iter().map(|tc| {
+        let mut tool_calls_data: Vec<(String, String, String)> = resp.tool_calls.iter().map(|tc| {
             (tc.id.clone(), tc.function.name.clone(), tc.function.arguments.clone())
         }).collect();
+
+        // ── PRE hook stage ──────────────────────────────────────────
+        // Runs before any execution so a hook can veto the call, rewrite its
+        // arguments, or attach a risk reason that the approval card surfaces.
+        // Outcomes are computed up-front (not inside the future) so rewritten
+        // args live as long as the futures that borrow them.
+        let mut pre_outcomes: Vec<tool_hooks::HookOutcome> = Vec::with_capacity(tool_calls_data.len());
+        for (tc_id, tc_name, tc_args) in tool_calls_data.iter_mut() {
+            let outcome = tool_hooks::run_pre_hooks(tc_name, tc_args);
+            if let Some(ref rewritten) = outcome.replace_args {
+                crate::chat_file_log::log_agent(&format!(
+                    "tool_hook_rewrite: PRE hook rewrote args for '{}'", tc_name));
+                *tc_args = rewritten.clone();
+            }
+            if outcome.blocked {
+                emit_agent_event(app_handle, AgentEvent::ToolBlocked {
+                    tool_call_id: tc_id.clone(),
+                    name: tc_name.clone(),
+                    reason: outcome.reason.clone(),
+                });
+            } else if outcome.risk_upgrade {
+                emit_agent_event(app_handle, AgentEvent::ToolRiskNotice {
+                    tool_call_id: tc_id.clone(),
+                    name: tc_name.clone(),
+                    reason: outcome.reason.clone(),
+                });
+            }
+            pre_outcomes.push(outcome);
+        }
+        let tool_calls_data = tool_calls_data;
 
         // 2. Build concurrent futures (A-7: includes timing)
         let mut tool_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = (String, String, String, u64)> + Send + '_>>> = Vec::new();
         let mut duplicate_count = 0usize;
-        for (tc_id, tc_name, tc_args) in &tool_calls_data {
+        for (idx, (tc_id, tc_name, tc_args)) in tool_calls_data.iter().enumerate() {
             total_tool_calls += 1;
+            let pre = &pre_outcomes[idx];
+
+            // PRE hook veto: never execute, feed the reason back to the model so
+            // it can pick a different approach instead of blindly retrying.
+            if pre.blocked {
+                let tc_id_clone = tc_id.clone();
+                let tc_name_clone = tc_name.clone();
+                let reason = pre.reason.clone();
+                emit_agent_event(app_handle, AgentEvent::ToolStart {
+                    tool_call_id: tc_id.clone(),
+                    name: tc_name.clone(),
+                    arguments: tc_args.clone(),
+                });
+                pending_tool_results.push((tc_id.clone(), tc_name.clone()));
+                tool_futures.push(Box::pin(async move {
+                    (tc_id_clone, tc_name_clone, format!("Error: {}", reason), 0u64)
+                }));
+                continue;
+            }
 
             if tc_name == "web_search" || tc_name == "fetch_web_content" {
                 web_search_count += 1;
@@ -1582,7 +1971,13 @@ where
 
                 // Emit approval request for write tools
                 if needs_approval {
-                    let action_desc = format!("{}: {}", tc_name, tc_args.chars().take(200).collect::<String>());
+                    // PRE hook risk reason is prepended so the approval card
+                    // explains WHY this write is elevated-risk, not just what it does.
+                    let action_desc = if pre.risk_upgrade && !pre.reason.is_empty() {
+                        format!("{}\n{}: {}", pre.reason, tc_name, tc_args.chars().take(200).collect::<String>())
+                    } else {
+                        format!("{}: {}", tc_name, tc_args.chars().take(200).collect::<String>())
+                    };
                     let diff_json = build_approval_diff_data(tc_name, tc_args);
                     emit_agent_event(app_handle, AgentEvent::ApprovalRequired {
                             action_description: action_desc,
@@ -1717,20 +2112,99 @@ where
         }
 
         // 3. Resolve futures in parallel
-        let results = futures_util::future::join_all(tool_futures).await;
+        emit_phase(app_handle, AgentPhase::ExecutingTools, user_zh);
+        let mut results = futures_util::future::join_all(tool_futures).await;
+
+        // ── Retry Grace ─────────────────────────────────────────────
+        // A transient failure (network blip, timeout, lock contention) is not
+        // yet a terminal failure. Wait a short grace window, then retry the
+        // affected tools once. Deterministic failures (not-found, bad-args)
+        // are never retried — see `is_transient_tool_error`. Cancelled turns
+        // skip retry entirely.
+        if !is_agent_cancelled() {
+            let retry_idx: Vec<usize> = results
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, name, content, _))| {
+                    // Never retry the inline control-plane tool or approval outcomes.
+                    name != "todo_write" && is_transient_tool_error(content)
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            if !retry_idx.is_empty() {
+                emit_phase(app_handle, AgentPhase::Retrying, user_zh);
+                tokio::time::sleep(std::time::Duration::from_millis(RETRY_GRACE_MS)).await;
+                for &i in &retry_idx {
+                    if is_agent_cancelled() {
+                        break;
+                    }
+                    let (tc_id, tc_name, prev_content, prev_ms) = results[i].clone();
+                    // Recover original args from this iteration's call data.
+                    let args = tool_calls_data
+                        .iter()
+                        .find(|(id, _, _)| id == &tc_id)
+                        .map(|(_, _, a)| a.clone())
+                        .unwrap_or_default();
+
+                    crate::chat_file_log::log_agent(&format!(
+                        "retry_grace: retrying transient failure for '{}' after {}ms",
+                        tc_name, RETRY_GRACE_MS
+                    ));
+                    emit_agent_event(app_handle, AgentEvent::ToolProgress {
+                        tool_call_id: tc_id.clone(),
+                        stage: if user_zh { "网络波动，正在重试…".to_string() } else { "Transient error — retrying…".to_string() },
+                        preview: None,
+                    });
+
+                    let start = std::time::Instant::now();
+                    let res = tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        tool_executor(&tc_name, &args),
+                    ).await;
+                    let retry_ms = prev_ms.saturating_add(start.elapsed().as_millis() as u64);
+                    let new_content = match res {
+                        Ok(Ok(v)) => v,
+                        Ok(Err(e)) => format!("Error: {} (after retry)", e),
+                        Err(_) => format!("Error: Tool '{}' timed out after 30 seconds (after retry).", tc_name),
+                    };
+                    // Keep the retry result only if it's no longer a transient error;
+                    // otherwise preserve the original message (avoids churn without gain).
+                    if !is_transient_tool_error(&new_content) {
+                        results[i] = (tc_id, tc_name, new_content, retry_ms);
+                    } else {
+                        let _ = prev_content;
+                    }
+                }
+            }
+        }
 
         // 4. Update message history with parallel tool outputs
         for (tc_id, tc_name, content, duration_ms) in results {
+            // ── POST hook stage ─────────────────────────────────────
+            // Runs *before* the ToolResult event so the frontend, logs, and
+            // context history all see the redacted / compressed view. The
+            // original raw content only exists inside the executor future.
+            let post = tool_hooks::run_post_hooks(&tc_name, &content);
+            let after_hook = post.replace_content.clone().unwrap_or(content);
+            if post.redactions > 0 {
+                emit_agent_event(app_handle, AgentEvent::ToolRedacted {
+                    tool_call_id: tc_id.clone(),
+                    name: tc_name.clone(),
+                    redactions: post.redactions,
+                });
+            }
+
             emit_agent_event(app_handle, AgentEvent::ToolResult {
                     tool_call_id: tc_id.clone(),
                     name: tc_name.clone(),
-                    content: content.clone(),
+                    content: after_hook.clone(),
                     duration_ms,
                 },);
 
             let max_tool_result_chars = 25000;
             let summarize_threshold = 3000;
-            let mut sanitized_content: String = content.chars()
+            let mut sanitized_content: String = after_hook.chars()
                 .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
                 .collect();
 

@@ -16,6 +16,19 @@ pub struct ExtractedFact {
     pub content: String,
     #[serde(default)]
     pub replaces: Option<String>,
+    /// LLM-assigned importance in `[1, 10]`. Controls `weight` in archival store.
+    /// Defaults to 5 (medium) if the model omits it.
+    #[serde(default = "default_importance")]
+    pub importance: u8,
+    /// Optional time-to-live in days. Facts about transient state ("currently
+    /// reading X", "working on project Y this week") should carry a short TTL.
+    /// `null`/absent = durable.
+    #[serde(default)]
+    pub ttl_days: Option<u32>,
+}
+
+fn default_importance() -> u8 {
+    5
 }
 
 /// System prompt for the extraction LLM call
@@ -40,6 +53,8 @@ Return a JSON array of objects. Each object has:
 - "section": one of "preferences", "habits", "decisions", "vault", "research"
 - "content": the fact to remember (concise, single line)
 - "replaces": (optional) if this fact contradicts/supersedes an existing memory item, include the old item text here
+- "importance": integer 1-10. 9-10 = the user explicitly asked to remember it. 7-8 = a stable preference or decision. 4-6 = useful context. 1-3 = marginal (prefer not to emit at all).
+- "ttl_days": (optional) integer. Set this ONLY for facts that are true right now but will expire — "currently reading X" (30), "working on Y this sprint" (14). Omit entirely for durable facts like language preference or vault layout.
 
 If there is NOTHING worth extracting, return an empty array: []
 
@@ -72,12 +87,26 @@ fn extraction_user_message(messages: &[ChatMessage], existing_memory: &str) -> S
     )
 }
 
-/// Extract memories from a conversation and merge into core memory.
-/// Returns the number of new facts merged.
+/// Extract memories from a conversation and merge into both memory layers.
+///
+/// Returns the number of new facts merged into Core Memory.
+///
+/// Two-layer write, matching the Letta/Mem0 split:
+/// - **Core Memory** (`memory.md`) — every fact, since it is the always-injected
+///   curated surface the user can read and edit.
+/// - **Archival** (`ai_memory`) — the same facts with a real `category`
+///   (the resolved section), a real `weight` (derived from the model's
+///   `importance`), and `expires_at` when the model marked the fact transient.
+///   Recalled on demand instead of always injected.
+///
+/// `db` is optional so the extractor stays unit-testable and so a missing DB
+/// degrades to core-memory-only rather than failing the whole extraction.
 pub async fn extract_and_merge(
     config: &LlmConfig,
     messages: &[ChatMessage],
     vault_path: &str,
+    db: Option<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>>,
+    session_id: Option<&str>,
 ) -> anyhow::Result<usize> {
     // Skip if conversation is too short (< 4 messages)
     let meaningful_messages: Vec<_> = messages
@@ -159,6 +188,29 @@ pub async fn extract_and_merge(
     for fact in &facts {
         let section_name = resolve_section_name(&fact.section);
 
+        // ── Layer 2: Archival (ai_memory) ──────────────────────────
+        // Written first so a fact reaches the recallable store even if the
+        // core-memory dedup below treats it as already-present. Category is
+        // the resolved section; weight scales the model's 1-10 importance
+        // into the store's [0.1, 2.0] band (importance 5 → weight 1.0).
+        if let Some(ref db_arc) = db {
+            if let Ok(conn) = db_arc.lock() {
+                if let Some(ref replaces) = fact.replaces {
+                    let _ = crate::db::memory_store::delete_matching(&conn, replaces);
+                }
+                let weight = (fact.importance.clamp(1, 10) as f64) / 5.0;
+                let _ = crate::db::memory_store::upsert_fact(
+                    &conn,
+                    &fact.content,
+                    &section_name,
+                    weight,
+                    fact.ttl_days,
+                    session_id,
+                );
+            }
+        }
+
+        // ── Layer 1: Core Memory (memory.md) ───────────────────────
         // Ensure section exists
         if !mem.sections.iter().any(|(name, _)| name == &section_name) {
             mem.sections.push((section_name.clone(), Vec::new()));
@@ -306,35 +358,49 @@ pub fn message_importance(message: &ChatMessage) -> u8 {
     score.min(10)
 }
 
-/// Enhanced memory extraction with better filtering and conflict detection
+/// Extraction entry point: gate on conversation substance, then extract.
+///
+/// This is what callers should use. The importance gate exists so a session of
+/// "ok", "thanks", "do that" never triggers a paid LLM call and never dilutes
+/// memory with filler. `extract_and_merge` remains public for callers that
+/// want to bypass the gate.
 pub async fn extract_and_merge_enhanced(
     config: &LlmConfig,
     messages: &[ChatMessage],
     vault_path: &str,
+    db: Option<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>>,
+    session_id: Option<&str>,
 ) -> anyhow::Result<usize> {
     // Filter meaningful messages
     let meaningful_messages: Vec<&ChatMessage> = messages
         .iter()
         .filter(|m| is_meaningful_message(m))
         .collect();
-    
+
     if meaningful_messages.len() < 4 {
         return Ok(0);
     }
-    
+
     // Calculate average importance
     let avg_importance: f64 = meaningful_messages
         .iter()
         .map(|m| message_importance(m) as f64)
         .sum::<f64>() / meaningful_messages.len() as f64;
-    
+
     // Skip if average importance is too low (most messages are trivial)
     if avg_importance < 4.0 {
         return Ok(0);
     }
-    
+
     // Use the original extraction logic with filtered messages
-    extract_and_merge(config, &meaningful_messages.into_iter().cloned().collect::<Vec<_>>(), vault_path).await
+    extract_and_merge(
+        config,
+        &meaningful_messages.into_iter().cloned().collect::<Vec<_>>(),
+        vault_path,
+        db,
+        session_id,
+    )
+    .await
 }
 
 /// Detect and resolve memory conflicts

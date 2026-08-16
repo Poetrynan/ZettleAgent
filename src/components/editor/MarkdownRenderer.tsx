@@ -72,6 +72,45 @@ function normalizeTitle(title: string): string {
   return result;
 }
 
+/** Copy button for a single fenced code block. */
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const handleCopy = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // clipboard API can be unavailable in some webview contexts
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [code]);
+  return (
+    <button
+      className="md-code-copy-btn"
+      onClick={handleCopy}
+      title={copied ? 'Copied!' : 'Copy code'}
+      aria-label={copied ? 'Copied' : 'Copy code'}
+    >
+      {copied ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function getTextFromChildren(children: React.ReactNode): string {
   if (typeof children === 'string') return children;
   if (typeof children === 'number') return String(children);
@@ -328,6 +367,8 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
           // Style code blocks
           pre: ({ children }) => {
             const childArray = React.Children.toArray(children);
+            let language = '';
+            let rawCode = '';
             if (childArray.length === 1 && React.isValidElement(childArray[0])) {
               const child = childArray[0];
               const codeProps = child.props as any;
@@ -335,8 +376,39 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
                 const content = getTextFromChildren(codeProps.children).trim();
                 return <MermaidRenderer content={content} />;
               }
+              // `rehype-highlight` writes the fence info string as `language-xxx`.
+              const langMatch = typeof codeProps?.className === 'string'
+                ? codeProps.className.match(/language-([\w+#-]+)/)
+                : null;
+              language = langMatch ? langMatch[1] : '';
+              rawCode = getTextFromChildren(codeProps?.children);
+            } else {
+              rawCode = getTextFromChildren(children);
             }
-            return <pre className="md-code-block">{children}</pre>;
+            // When the fence declares a language, render a full header (language
+            // label + copy button) — that's a signal the block is source code and
+            // deserves affordance. Without a language, keep the block quiet:
+            // just the raw <pre> plus a hover-revealed copy button. A knowledge
+            // vault uses ```` ``` ```` freely for quotes, command output, and plain
+            // fixed-width prose, so a permanent "text" header on every one of
+            // those adds noise without value.
+            if (language) {
+              return (
+                <div className="md-code-wrapper">
+                  <div className="md-code-header">
+                    <span className="md-code-lang">{language}</span>
+                    <CodeCopyButton code={rawCode} />
+                  </div>
+                  <pre className="md-code-block">{children}</pre>
+                </div>
+              );
+            }
+            return (
+              <div className="md-code-wrapper md-code-wrapper-bare">
+                <pre className="md-code-block">{children}</pre>
+                <CodeCopyButton code={rawCode} />
+              </div>
+            );
           },
           code: ({ className: codeClass, children }) => {
             if (codeClass && codeClass.includes('language-mermaid')) {

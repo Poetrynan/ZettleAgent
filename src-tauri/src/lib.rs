@@ -225,6 +225,7 @@ pipeline_log::init(&app_data_dir);
             commands::create_chat_session,
             commands::save_chat_message,
             commands::delete_chat_session,
+            commands::delete_chat_messages_from,
             commands::rename_chat_session,
             commands::export_chat_session,
             commands::export_all_sessions,

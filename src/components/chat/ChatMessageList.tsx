@@ -1,4 +1,4 @@
-import { useState, useCallback, RefObject } from 'react';
+import { useState, useCallback, useEffect, useRef, RefObject } from 'react';
 import { Message } from './useChatSessions';
 import {
   IconUser,
@@ -105,6 +105,96 @@ export function CopyButton({ content }: { content: string }) {
   );
 }
 
+// ── Message action buttons ─────────────────────────────────────────
+// Hover-revealed regenerate / edit / retry actions. They share the "reset the
+// conversation to this point and re-run" primitive on the parent — this UI
+// layer just decides which anchor to point at.
+
+function IconRegenerate({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12a9 9 0 1 1-3-6.7" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  );
+}
+
+function IconEdit({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function RegenerateButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button className="chat-msg-action-btn" onClick={onClick} title={label} aria-label={label}>
+      <IconRegenerate size={13} />
+    </button>
+  );
+}
+
+function EditButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button className="chat-msg-action-btn" onClick={onClick} title={label} aria-label={label}>
+      <IconEdit size={13} />
+    </button>
+  );
+}
+
+/**
+ * Inline editor over a user message. Enter submits, Shift+Enter newlines,
+ * Escape cancels. Committing calls `onSubmit` with the trimmed content —
+ * parent handles truncation and resend.
+ */
+function UserMessageEditor({
+  initial, onSubmit, onCancel, isZh,
+}: { initial: string; onSubmit: (v: string) => void; onCancel: () => void; isZh: boolean }) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // Place caret at end and auto-grow to fit initial content.
+    el.setSelectionRange(el.value.length, el.value.length);
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 300)}px`;
+  }, []);
+  const commit = () => {
+    const trimmed = value.trim();
+    if (trimmed && trimmed !== initial.trim()) onSubmit(trimmed);
+    else onCancel();
+  };
+  return (
+    <div className="chat-user-edit">
+      <textarea
+        ref={ref}
+        className="chat-user-edit-textarea"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          const el = e.currentTarget;
+          el.style.height = 'auto';
+          el.style.height = `${Math.min(el.scrollHeight, 300)}px`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        }}
+      />
+      <div className="chat-user-edit-actions">
+        <button className="chat-user-edit-btn" onClick={onCancel}>{isZh ? '取消' : 'Cancel'}</button>
+        <button className="chat-user-edit-btn primary" onClick={commit}>
+          {isZh ? '发送' : 'Send'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Messages List component ───────────────────────────────────
 
 interface ChatMessageListProps {
@@ -130,6 +220,18 @@ interface ChatMessageListProps {
   onSelectTemplate?: (prompt: string) => void;
   /** 审批卡片解决回调(approved/rejected 后由父组件移除卡片) */
   onApprovalResolved?: (approvalId: string, approved: boolean) => void;
+  /** Redo the AI reply at this index (walks back to its prompting user turn). */
+  onRegenerate?: (assistantIndex: number) => void;
+  /** Replace the user message at this index and re-run from there. */
+  onEditResend?: (userIndex: number, newContent: string) => void;
+  /** Re-run the turn that produced the failed reply at this index. */
+  onRetryError?: (assistantIndex: number) => void;
+  /** Scroll handler on the scrollable message container (drives stick-to-bottom). */
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
+  /** Show the floating scroll-to-bottom button. */
+  showScrollToBottom?: boolean;
+  /** Jump back to the newest message. */
+  onScrollToBottom?: () => void;
   isZh?: boolean;
 }
 
@@ -146,10 +248,19 @@ export function ChatMessageList({
   activeTemplates = [],
   onSelectTemplate,
   onApprovalResolved,
+  onRegenerate,
+  onEditResend,
+  onRetryError,
+  onScroll,
+  showScrollToBottom,
+  onScrollToBottom,
   isZh = true,
 }: ChatMessageListProps) {
+  // Index of the user message currently being edited inline, if any.
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   return (
-    <div className="panel-content" style={{ padding: 0 }}>
+    <div className="panel-content chat-scroll-area" style={{ padding: 0, position: 'relative' }} onScroll={onScroll}
+      role="log" aria-live="polite" aria-relevant="additions text">
       {messages.length === 0 ? (
         <div className="chat-empty-state">
           <div className="chat-empty-icon">
@@ -192,11 +303,12 @@ export function ChatMessageList({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {messages.map((msg) => (
+          {messages.map((msg, idx) => (
             <div key={msg.id} className={`chat-message ${msg.role === 'user' ? 'chat-message-user' : ''}`}>
               <div className={`chat-avatar ${msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'}`}>
                 {msg.role === 'user' ? <IconUser size={14} /> : <IconRobot size={14} />}
               </div>
+              <div className={`chat-bubble-col ${msg.role === 'user' ? 'chat-bubble-col-user' : ''}`}>
               <div className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`}>
                 {/* Multi-Agent Role Label */}
                 {msg.role === 'assistant' && msg.agentName && (
@@ -294,6 +406,7 @@ export function ChatMessageList({
                             <span>{isZh ? '回答' : 'Answer'}</span>
                           </div>
                           <MarkdownRenderer content={streamingAnswer} className="chat-markdown" />
+                          <span className="chat-stream-cursor" aria-hidden="true" />
                         </>
                       );
                     }
@@ -313,6 +426,9 @@ export function ChatMessageList({
                           </div>
                         )}
                         {answer && <MarkdownRenderer content={answer} className="chat-markdown" />}
+                        {/* Blinking caret so "still writing" is visually distinct
+                            from "finished" without reading the trace header. */}
+                        {msg.streaming && answer && <span className="chat-stream-cursor" aria-hidden="true" />}
                         {msg.streaming && !answer && (
                           ragProgress && mode === 'rag'
                             ? <RagProgressIndicator stage={ragProgress} searchMode={searchMode} />
@@ -322,21 +438,82 @@ export function ChatMessageList({
                     );
                   })()
                 ) : (
-                  <div>{msg.content}</div>
+                  editingIndex === idx ? (
+                    <UserMessageEditor
+                      initial={msg.content}
+                      onSubmit={(newContent) => { setEditingIndex(null); onEditResend?.(idx, newContent); }}
+                      onCancel={() => setEditingIndex(null)}
+                      isZh={isZh}
+                    />
+                  ) : (
+                    /* Full markdown only when the user actually pasted a fenced
+                       code block — running the renderer over ordinary prose
+                       would turn stray `_` / `*` into unintended emphasis.
+                       Everything else just needs newlines preserved. */
+                    /```/.test(msg.content)
+                      ? <MarkdownRenderer content={msg.content} className="chat-markdown" />
+                      : <div className="chat-user-text">{msg.content}</div>
+                  )
                 )}
-                {/* Copy Button for AI messages */}
-                {msg.role === 'assistant' && msg.content && !msg.streaming && !msg.isError && (
+              </div>
+              {/* Action row — sits OUTSIDE the bubble so buttons never overlap
+                  message text. Row-level hover on .chat-bubble-col reveals it. */}
+              {msg.role === 'user' && editingIndex !== idx && (
+                <div className="chat-msg-actions user-actions">
+                  <EditButton
+                    onClick={() => setEditingIndex(idx)}
+                    label={isZh ? '编辑' : 'Edit'}
+                  />
+                </div>
+              )}
+              {/* Copy Button for AI messages */}
+              {msg.role === 'assistant' && msg.content && !msg.streaming && !msg.isError && (
+                <div className="chat-msg-actions">
                   <CopyButton content={
                     (msg.agentTimeline && msg.agentTimeline.some(e => e.type === 'thought'))
                       ? msg.agentTimeline.filter(e => e.type === 'thought').map(e => e.content || '').join('')
                       : resolveThinkingAndAnswer(msg).answer || msg.content
                   } />
-                )}
+                  <RegenerateButton
+                    onClick={() => onRegenerate?.(idx)}
+                    label={isZh ? '重新生成' : 'Regenerate'}
+                  />
+                </div>
+              )}
+              {/* Retry button for error messages */}
+              {msg.role === 'assistant' && msg.isError && !msg.streaming && (
+                <div className="chat-msg-actions">
+                  <button
+                    className="chat-msg-action-btn retry-btn"
+                    onClick={() => onRetryError?.(idx)}
+                    title={isZh ? '重试' : 'Retry'}
+                    aria-label={isZh ? '重试' : 'Retry'}
+                  >
+                    <IconRegenerate size={13} />
+                    <span>{isZh ? '重试' : 'Retry'}</span>
+                  </button>
+                </div>
+              )}
               </div>
             </div>
           ))}
           <div ref={messagesEndRef} />
         </div>
+      )}
+      {/* Floating jump-to-newest. Only appears once the user has scrolled away,
+          which is also when auto-follow is suspended. */}
+      {showScrollToBottom && messages.length > 0 && (
+        <button
+          className="chat-scroll-bottom-btn"
+          onClick={onScrollToBottom}
+          title={isZh ? '回到最新' : 'Jump to latest'}
+          aria-label={isZh ? '回到最新' : 'Jump to latest'}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <polyline points="19 12 12 19 5 12" />
+          </svg>
+        </button>
       )}
     </div>
   );

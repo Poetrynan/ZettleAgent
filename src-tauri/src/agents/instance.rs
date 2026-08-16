@@ -1,5 +1,4 @@
 use crate::llm::{self, ChatMessage, LlmConfig, ToolDef, AgentEvent};
-use std::time::Duration;
 
 /// Execution configuration for an agent — controls loop limits.
 /// Replaces the hardcoded values in chat_completion_with_tools().
@@ -101,8 +100,9 @@ impl AgentInstance {
         // 5. Filter tools to only allowed subset
         let filtered_tools = self.filter_tools(all_tools);
 
-        // 6. Emit "role_selected" event to frontend
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        // 6. Emit "role_selected" event to frontend.
+        // The earlier 150ms sleep here was purely for animation timing; the
+        // event alone is enough — the frontend already sequences its own UI.
         llm::emit_agent_event(
             app_handle,
             AgentEvent::RoleSelected {

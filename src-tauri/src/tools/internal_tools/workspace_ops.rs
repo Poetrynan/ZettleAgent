@@ -469,6 +469,62 @@ pub(super) fn execute_read_memory(vault_path: &str) -> anyhow::Result<String> {
     Ok(output)
 }
 
+// ── 21b. search_memory ─────────────────────────────────────────────
+
+/// Search Archival Memory (the unbounded `ai_memory` store) on demand.
+///
+/// `read_memory` only exposes Core Memory (`memory.md`), which is deliberately
+/// small and always in the prompt. Archival Memory grows without bound, so only
+/// the top few relevant entries are auto-injected per turn. This tool lets the
+/// agent reach the rest when the auto-recall missed something — the
+/// `archival_memory_search` pattern from MemGPT/Letta.
+pub(super) fn execute_search_memory(
+    arguments: &str,
+    db: &std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let query = args["query"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
+
+    // Cap so a large `limit` can't flood the context window.
+    let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 25) as usize;
+
+    let conn = db
+        .lock()
+        .map_err(|e| anyhow::anyhow!("Database lock poisoned: {}", e))?;
+
+    let hits = crate::db::memory_store::recall(&conn, query, limit)?;
+    let total = crate::db::memory_store::live_count(&conn).unwrap_or(0);
+
+    if hits.is_empty() {
+        return Ok(format!(
+            "No archival memory matched \"{}\". ({} entries stored in total.)",
+            query, total
+        ));
+    }
+
+    let mut out = format!(
+        "## Archival Memory — {} match(es) for \"{}\"\n\n",
+        hits.len(),
+        query
+    );
+    for m in &hits {
+        let score = m.score.unwrap_or(0.0);
+        if m.category.is_empty() {
+            out.push_str(&format!("- {} _(score {:.2})_\n", m.content, score));
+        } else {
+            out.push_str(&format!(
+                "- [{}] {} _(score {:.2})_\n",
+                m.category, m.content, score
+            ));
+        }
+    }
+    out.push_str(&format!("\n_{} entries stored in total._\n", total));
+
+    Ok(out)
+}
+
 // ── 22. update_memory ──────────────────────────────────────────────
 
 pub(super) fn execute_update_memory(arguments: &str, vault_path: &str) -> anyhow::Result<String> {
