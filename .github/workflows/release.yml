@@ -5,12 +5,66 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.2). Must already exist.'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+# One release run per tag. A re-push of the same tag cancels the stale run
+# instead of racing it and uploading half the matrix twice.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
+  # Cheap gate that runs once. Catches the classic "tagged v0.1.2 but the
+  # manifests still say 0.1.1" mistake before burning 4 platform builds.
+  verify-version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag and version
+        id: resolve
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not semver-shaped (expected vMAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"    >> "$GITHUB_OUTPUT"
+
+      - name: Assert manifests match the tag
+        shell: bash
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          PKG=$(node -p "require('./package.json').version")
+          CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+
+          echo "tag=$VERSION package.json=$PKG tauri.conf.json=$CONF Cargo.toml=$CARGO"
+
+          FAIL=0
+          for pair in "package.json:$PKG" "tauri.conf.json:$CONF" "Cargo.toml:$CARGO"; do
+            name="${pair%%:*}"; got="${pair##*:}"
+            if [ "$got" != "$VERSION" ]; then
+              echo "::error file=$name::$name is $got but the tag says $VERSION"
+              FAIL=1
+            fi
+          done
+          [ "$FAIL" -eq 0 ] || exit 1
+
   build:
+    needs: verify-version
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +86,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-version.outputs.tag }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -83,17 +139,26 @@ jobs:
       - name: Verify offline assets (pre-bundle)
         run: npm run verify-offline
 
-      # Read release notes for body content
+      # Rewrites every vX.Y.Z occurrence in the notes to the tag being shipped,
+      # so the notes file never needs a hardcoded version bump. The heredoc
+      # delimiter is deliberately unlikely to appear in release prose.
       - name: Load release notes
         id: notes
         shell: bash
+        env:
+          TAG: ${{ needs.verify-version.outputs.tag }}
         run: |
-          # Replace version placeholder in notes and escape for YAML multiline
-          BODY=$(cat .github/release-notes/latest.md | sed "s/v0\.1\.0/${{ github.ref_name }}/g")
+          NOTES=.github/release-notes/latest.md
+          if [ ! -f "$NOTES" ]; then
+            echo "::warning::$NOTES missing — releasing with an empty body."
+            printf 'body=\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BODY=$(sed -E "s/v[0-9]+\.[0-9]+\.[0-9]+/${TAG}/g" "$NOTES")
           {
-            echo "body<<EOF"
+            echo "body<<ZETTEL_NOTES_EOF"
             echo "$BODY"
-            echo "EOF"
+            echo "ZETTEL_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
       # beforeBuildCommand = download-model + tsc + vite build
@@ -104,8 +169,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'ZettelAgent ${{ github.ref_name }}'
+          tagName: ${{ needs.verify-version.outputs.tag }}
+          releaseName: 'ZettelAgent ${{ needs.verify-version.outputs.tag }}'
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

@@ -1,6 +1,6 @@
 [package]
 name = "zettelagent"
-version = "0.1.1"
+version = "0.1.2"
 description = "ZettelAgent - AI-Powered Zettelkasten Desktop Application"
 authors = ["you"]
 edition = "2021"
