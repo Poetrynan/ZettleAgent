@@ -45,7 +45,7 @@ pub async fn resolve_conflict(
         _ => return Err(format!("Unknown resolution: {}", resolution)),
     };
 
-    std::fs::write(&file_path, &final_content)
+    crate::file_lock::safe_write(std::path::Path::new(&file_path), &final_content)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
     Ok(true)

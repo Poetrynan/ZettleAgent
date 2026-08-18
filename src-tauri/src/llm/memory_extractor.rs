@@ -72,10 +72,14 @@ fn extraction_user_message(messages: &[ChatMessage], existing_memory: &str) -> S
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Truncate very long conversations to last ~3000 chars
-    let conversation = if conversation.len() > 3000 {
-        let start = conversation.len() - 3000;
-        format!("...(truncated)\n{}", &conversation[start..])
+    // Truncate very long conversations to last ~3000 chars.
+    // Must count chars (not bytes) — byte slicing panics mid-codepoint on CJK text.
+    let conversation = if conversation.chars().count() > 3000 {
+        let tail: String = {
+            let chars: Vec<char> = conversation.chars().collect();
+            chars[chars.len() - 3000..].iter().collect()
+        };
+        format!("...(truncated)\n{}", tail)
     } else {
         conversation
     };

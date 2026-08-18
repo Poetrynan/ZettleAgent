@@ -2,7 +2,9 @@
 // Tool definitions and dispatch live here; implementations are in sub-modules.
 
 mod search_ops;
-mod note_ops;
+// `pub(crate)` so the trash / undo commands can reuse `note_ops::move_to_trash`
+// instead of growing a second recycle-bin implementation.
+pub(crate) mod note_ops;
 mod graph_ops;
 mod web_ops;
 mod canvas_ops;
@@ -1360,13 +1362,13 @@ pub async fn try_execute(
 
         // Note operations
         "read_note" => Some(note_ops::execute_read_note(arguments, vault_path, all_vault_paths)),
-        "create_note" => Some(note_ops::execute_create_note(arguments, vault_path, all_vault_paths)),
-        "edit_note" => Some(note_ops::execute_edit_note(arguments, vault_path, all_vault_paths)),
-        "patch_note" => Some(note_ops::execute_patch_note(arguments, vault_path, all_vault_paths)),
-        "apply_edit" => Some(note_ops::execute_apply_edit(arguments, vault_path, all_vault_paths)),
+        "create_note" => Some(note_ops::execute_create_note(arguments, vault_path, db, all_vault_paths)),
+        "edit_note" => Some(note_ops::execute_edit_note(arguments, vault_path, db, all_vault_paths)),
+        "patch_note" => Some(note_ops::execute_patch_note(arguments, vault_path, db, all_vault_paths)),
+        "apply_edit" => Some(note_ops::execute_apply_edit(arguments, vault_path, db, all_vault_paths)),
         "rename_note" => Some(note_ops::execute_rename_note(arguments, vault_path, db, all_vault_paths)),
         "delete_note" => Some(note_ops::execute_delete_note(arguments, vault_path, db, all_vault_paths)),
-        "append_to_note" => Some(note_ops::execute_append_to_note(arguments, vault_path, all_vault_paths)),
+        "append_to_note" => Some(note_ops::execute_append_to_note(arguments, vault_path, db, all_vault_paths)),
         "move_note" => Some(note_ops::execute_move_note(arguments, vault_path, db, all_vault_paths)),
         "merge_notes" => Some(note_ops::execute_merge_notes(arguments, vault_path, db, all_vault_paths)),
         "batch_read_notes" => Some(note_ops::execute_batch_read_notes(arguments, vault_path, all_vault_paths)),
@@ -1416,7 +1418,7 @@ pub async fn try_execute(
 
         // Wikilink Management
         "resolve_wikilink" => Some(note_ops::execute_resolve_wikilink(arguments, db)),
-        "fix_broken_link" => Some(note_ops::execute_fix_broken_link(arguments)),
+        "fix_broken_link" => Some(note_ops::execute_fix_broken_link(arguments, db, vault_path, all_vault_paths)),
 
         // Index & Sync
         "get_embedding_status" => Some(workspace_ops::execute_get_embedding_status(db)),

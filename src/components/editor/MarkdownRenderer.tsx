@@ -8,21 +8,8 @@ import 'katex/dist/katex.min.css';
 import { useApp } from '../../contexts/AppContext';
 import { listMarkdownFiles, resolveWikilink } from '../../lib/tauri';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import mermaid from 'mermaid';
+import { renderMermaid } from './mermaidLoader';
 import { useHoverPreview, HoverPreviewCard } from './HoverPreview';
-
-// Detect dark mode
-const isDarkMode = () => {
-  return document.documentElement.getAttribute('data-theme') === 'dark' ||
-         document.body.classList.contains('dark-theme') ||
-         window.matchMedia('(prefers-color-scheme: dark)').matches;
-};
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: isDarkMode() ? 'dark' : 'default',
-  securityLevel: 'loose',
-});
 
 
 interface MarkdownRendererProps {
@@ -138,21 +125,29 @@ export function MermaidRenderer({ content }: MermaidRendererProps) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    
+
     const id = `mermaid-view-${Math.random().toString(36).substring(2, 9)}`;
     containerRef.current.innerHTML = '<div style="color: var(--text-secondary, #666); font-size: 14px;">Rendering diagram...</div>';
     setError(null);
 
-    mermaid.render(id, content)
-      .then(({ svg }) => {
+    // First diagram on screen pays for importing the engine; the placeholder
+    // above already occupies the space, so nothing jumps when it arrives.
+    let alive = true;
+    renderMermaid(id, content)
+      .then((svg) => {
+        if (!alive) return;
         if (containerRef.current) {
           containerRef.current.innerHTML = svg;
         }
       })
       .catch((err) => {
+        if (!alive) return;
         console.error('Mermaid view render error:', err);
         setError(err.message || String(err));
       });
+    // The content can change while the engine or the render is still in flight;
+    // a late resolution must not overwrite the newer diagram.
+    return () => { alive = false; };
   }, [content]);
 
   if (error) {

@@ -64,7 +64,17 @@ pub(super) fn execute_search_notes(
         all
     } else {
         // Try hybrid search if embedding index is available, otherwise fall back to FTS5
+        // Relevance rerank (Tier 1) is applied inside the `*_reranked` wrappers:
+        // the agent's `search_notes` is the call site that benefits most, since the
+        // model only ever sees the top few hits and cannot scroll for a better one.
+        // `external: None` — the agent loop is sync and holds the DB lock here, so
+        // Tiers 2/3 are not reachable; they degrade to Tier 1 by contract.
+        // Architectural, not a TODO: the cross-encoder runs in the webview and an
+        // agent tool call has no webview in the loop for that turn. Bridging it
+        // would require suspending the tool call on a frontend round trip.
+        let rerank_config = crate::db::search::rerank::active_config();
         let fetch_limit = if folder.is_empty() { limit } else { limit * 3 };
+
         let has_embeddings: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1",
             [],
@@ -73,6 +83,8 @@ pub(super) fn execute_search_notes(
 
         if has_embeddings {
             // Use FTS top-1 result's embedding as the query vector for hybrid search
+            // (this probe is a seed lookup, not a result set — reranking a 1-row
+            // list is a no-op anyway, so it stays on the plain function).
             let fts_top = search::full_text_search(&conn, query, 1)?;
             if let Some(top_result) = fts_top.first() {
                 // Load the chunk's embedding from chunks_vec
@@ -86,17 +98,31 @@ pub(super) fn execute_search_notes(
                         .chunks_exact(4)
                         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                         .collect();
-                    search::hybrid_search(&conn, query, &query_emb, fetch_limit)?
+                    search::hybrid_search_reranked(
+                        &conn,
+                        query,
+                        &query_emb,
+                        fetch_limit,
+                        &rerank_config,
+                        None,
+                    )?
                 } else {
-                    search::full_text_search(&conn, query, fetch_limit)?
+                    search::full_text_search_reranked(
+                        &conn,
+                        query,
+                        fetch_limit,
+                        &rerank_config,
+                        None,
+                    )?
                 }
             } else {
-                search::full_text_search(&conn, query, fetch_limit)?
+                search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?
             }
         } else {
-            search::full_text_search(&conn, query, fetch_limit)?
+            search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?
         }
     };
+
 
     // Apply folder filter (for FTS results)
     if !folder.is_empty() && !use_regex {
@@ -251,33 +277,53 @@ pub(super) fn execute_list_notes(
         _ => "ORDER BY path",
     };
 
-    let (query_sql, total_sql) = if folder.is_empty() {
+    // The folder pattern is bound, never interpolated: a folder name containing a quote
+    // used to produce invalid SQL (and could smuggle in extra conditions). ESCAPE '\' is
+    // required because `escape_like_pattern` escapes with a backslash — without it,
+    // list_notes({"folder":"my_notes"}) matched nothing.
+    let (query_sql, total_sql, like_pattern) = if folder.is_empty() {
         (
             format!("SELECT path, title FROM files {} LIMIT ?1", order_clause),
             "SELECT COUNT(*) FROM files".to_string(),
+            None,
         )
     } else {
         let folder_norm = folder.replace('\\', "/");
-        let like_pattern = format!("{}%", escape_like_pattern(&folder_norm));
         (
-            format!("SELECT path, title FROM files WHERE replace(path, '\\', '/') LIKE '{}' {} LIMIT ?1", like_pattern, order_clause),
-            format!("SELECT COUNT(*) FROM files WHERE replace(path, '\\', '/') LIKE '{}'", like_pattern),
+            format!(
+                "SELECT path, title FROM files WHERE replace(path, '\\', '/') LIKE ?2 ESCAPE '\\' {} LIMIT ?1",
+                order_clause
+            ),
+            "SELECT COUNT(*) FROM files WHERE replace(path, '\\', '/') LIKE ?1 ESCAPE '\\'".to_string(),
+            Some(format!("{}%", escape_like_pattern(&folder_norm))),
         )
     };
 
-    let total: i64 = conn.query_row(&total_sql, [], |r| r.get(0)).unwrap_or(0);
+    let total: i64 = match &like_pattern {
+        Some(p) => conn
+            .query_row(&total_sql, rusqlite::params![p], |r| r.get(0))
+            .unwrap_or(0),
+        None => conn.query_row(&total_sql, [], |r| r.get(0)).unwrap_or(0),
+    };
     let mut stmt = conn.prepare(&query_sql)?;
-    let results: Vec<serde_json::Value> = stmt
-        .query_map(rusqlite::params![limit], |row| {
-            let path: String = row.get(0)?;
-            let title: Option<String> = row.get(1)?;
-            Ok(serde_json::json!({
-                "path": path,
-                "title": title.unwrap_or_default()
-            }))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<serde_json::Value> {
+        let path: String = row.get(0)?;
+        let title: Option<String> = row.get(1)?;
+        Ok(serde_json::json!({
+            "path": path,
+            "title": title.unwrap_or_default()
+        }))
+    };
+    let results: Vec<serde_json::Value> = match &like_pattern {
+        Some(p) => stmt
+            .query_map(rusqlite::params![limit, p], map_row)?
+            .filter_map(|r| r.ok())
+            .collect(),
+        None => stmt
+            .query_map(rusqlite::params![limit], map_row)?
+            .filter_map(|r| r.ok())
+            .collect(),
+    };
     Ok(serde_json::to_string_pretty(&json!({
         "total_notes": total,
         "shown": results.len(),
@@ -385,7 +431,7 @@ pub(super) fn execute_search_by_tag(
                 COALESCE(am.note_type, '') as note_type, am.tags_json
          FROM ai_note_metadata am
          LEFT JOIN files f ON f.path = am.file_path
-         WHERE LOWER(am.tags_json) LIKE ?1
+         WHERE LOWER(am.tags_json) LIKE ?1 ESCAPE '\'
          ORDER BY f.title
          LIMIT 50"
     )?;
@@ -413,4 +459,77 @@ pub(super) fn execute_search_by_tag(
         "notes": results
     }))?)
 }
+
+#[cfg(test)]
+mod rerank_wiring_tests {
+    use super::*;
+    use crate::db::search::rerank::{self, RerankConfig, RerankMode};
+
+    fn db() -> Arc<Mutex<Connection>> {
+        Arc::new(Mutex::new(crate::db::search::test_db_with_ranking_disagreement()))
+    }
+
+    /// Order of `file_path` as the agent actually sees it in the tool result.
+    fn hit_paths(payload: &str) -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(payload).unwrap();
+        v["results"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|r| r["file_path"].as_str().unwrap_or_default().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The agent's `search_notes` is the call site that matters most: the model
+    /// only ever reads the first couple of hits and cannot scroll for a better
+    /// one. Under Tier 1 the exact-phrase note must come back first.
+    #[test]
+    fn search_notes_applies_lexical_rerank() {
+        let _g = rerank::config_guard();
+        rerank::store_config(RerankConfig::lexical());
+        let db = db();
+        let out =
+            execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db).unwrap();
+        let paths = hit_paths(&out);
+        assert!(!paths.is_empty(), "fixture should produce hits: {}", out);
+        assert_eq!(paths[0], "b.md", "expected the reranked winner first: {:?}", paths);
+    }
+
+    /// `Off` must leave the pre-existing behaviour (FTS order, then the
+    /// time-decay/MMR pass) exactly as it was before this stage was wired in.
+    #[test]
+    fn search_notes_off_keeps_pre_rerank_order() {
+        let _g = rerank::config_guard();
+        let db = db();
+
+        rerank::store_config(RerankConfig { mode: RerankMode::Off, ..Default::default() });
+        let off = hit_paths(&execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db).unwrap());
+
+        // Same query straight through the plain function, for reference.
+        let plain: Vec<String> = {
+            let conn = db.lock().unwrap();
+            crate::db::search::full_text_search(&conn, "knowledge graph", 5)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.file_path)
+                .collect()
+        };
+        assert_eq!(off, plain, "Off must not reorder anything");
+    }
+
+    /// A Chinese query has to traverse tokenize_query's CJK-bigram branch, the
+    /// scorer, and the JSON projection without panicking. Content is ASCII here,
+    /// so an empty hit list is a legitimate outcome — absence of panic is the test.
+    #[test]
+    fn search_notes_chinese_query_does_not_panic() {
+        let _g = rerank::config_guard();
+        rerank::store_config(RerankConfig::lexical());
+        let db = db();
+        let out = execute_search_notes(r#"{"query":"知识图谱是什么","limit":5}"#, &db).unwrap();
+        let _ = hit_paths(&out);
+    }
+}
+
 

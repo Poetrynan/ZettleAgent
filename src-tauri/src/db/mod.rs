@@ -4,6 +4,7 @@ pub mod search;
 pub mod embedding_cache;
 pub mod rerank;
 pub mod memory_store;
+pub mod review_store;
 
 use rusqlite::Connection;
 use std::path::Path;

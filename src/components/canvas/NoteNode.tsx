@@ -4,7 +4,7 @@ import { readMarkdownFile, writeMarkdownFile } from '../../lib/tauri';
 import { MilkdownEditor } from '../editor/MilkdownEditor';
 import { useApp } from '../../contexts/AppContext';
 import { t } from '../../lib/i18n';
-import { marked } from 'marked';
+import { renderMarkdownSafe } from '../../lib/sanitizeHtml';
 
 export function NoteNode({ id, data, selected }: any) {
   const { setView, setCurrentFile, showToast } = useApp();
@@ -190,14 +190,14 @@ export function NoteNode({ id, data, selected }: any) {
           /* Medium zoom: static HTML preview only, no Milkdown */
           <div
             className="note-node-preview text-node-markdown"
-            dangerouslySetInnerHTML={{ __html: content ? (marked.parse(content) as string) : '' }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdownSafe(content) }}
           />
         ) : isEditing ? (
           <MilkdownEditor value={content} onChange={handleSave} />
         ) : (
           <div
             className="note-node-preview text-node-markdown"
-            dangerouslySetInnerHTML={{ __html: content ? (marked.parse(content) as string) : '' }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdownSafe(content) }}
           />
         )}
       </div>

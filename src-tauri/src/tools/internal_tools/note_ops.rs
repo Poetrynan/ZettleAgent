@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 // Note operations: read, create, edit, patch, rename, delete, append, move, merge, batch_read, ocr_image
 
-use super::helpers::{resolve_path_multi_vault, is_path_in_any_vault, normalize_db_path, walk_md_files};
+use super::helpers::{resolve_path_multi_vault, is_path_in_any_vault, normalize_db_path, walk_md_files, snapshot_before_write, resolve_for_containment, snapshot_path_key, journal_write, strip_verbatim_prefix};
 use crate::import::ocr;
 
 pub(super) fn execute_read_note(
@@ -35,6 +35,7 @@ pub(super) fn execute_read_note(
 pub(super) fn execute_create_note(
     arguments: &str,
     vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
     all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
@@ -95,7 +96,18 @@ pub(super) fn execute_create_note(
     }
 
     let sanitized = crate::frontmatter::sanitize_frontmatter(content);
-    std::fs::write(&full_path, sanitized)?;
+    crate::file_lock::safe_write(&full_path, &sanitized)?;
+    // No pre-image exists for a brand-new note, but the journal still needs the row:
+    // undoing the turn means making the file go away again.
+    journal_write(
+        db,
+        "create_note",
+        "create",
+        &snapshot_path_key(&full_path),
+        None,
+        None,
+        None,
+    );
     Ok(format!("Successfully created note: {} (in workspace: {})", path, target_vault))
 }
 
@@ -103,6 +115,7 @@ pub(super) fn execute_create_note(
 pub(super) fn execute_edit_note(
     arguments: &str,
     vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
     all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
@@ -120,8 +133,20 @@ pub(super) fn execute_edit_note(
         anyhow::bail!("File does not exist: {}", path);
     }
 
+    // Whole-file overwrite — keep the pre-image so the user can undo it.
+    let snapshot_id = snapshot_before_write(db, &canonical)?;
+
     let sanitized = crate::frontmatter::sanitize_frontmatter(content);
-    std::fs::write(&canonical, sanitized)?;
+    crate::file_lock::safe_write(&canonical, &sanitized)?;
+    journal_write(
+        db,
+        "edit_note",
+        "write",
+        &snapshot_path_key(&canonical),
+        None,
+        snapshot_id,
+        None,
+    );
     Ok(format!("Successfully edited note: {}", path))
 }
 
@@ -129,6 +154,7 @@ pub(super) fn execute_edit_note(
 pub(super) fn execute_patch_note(
     arguments: &str,
     vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
     all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
@@ -151,6 +177,7 @@ pub(super) fn execute_patch_note(
     }
 
     let mut content = std::fs::read_to_string(&canonical)?;
+    let original = content.clone();
     let mut results: Vec<String> = Vec::new();
 
     for (i, patch) in patches.iter().enumerate() {
@@ -172,7 +199,7 @@ pub(super) fn execute_patch_note(
             results.push(format!(
                 "Patch #{}: NOT FOUND — no match for {:?}",
                 i + 1,
-                if search.len() > 60 { format!("{}...", &search[..57]) } else { search.to_string() }
+                if search.chars().count() > 60 { format!("{}...", search.chars().take(57).collect::<String>()) } else { search.to_string() }
             ));
             continue;
         }
@@ -190,7 +217,23 @@ pub(super) fn execute_patch_note(
     }
 
     let sanitized = crate::frontmatter::sanitize_frontmatter(&content);
-    std::fs::write(&canonical, sanitized)?;
+    let mut snapshot_id = None;
+    if sanitized != original {
+        // Only spend a restore point when the bytes on disk actually change.
+        snapshot_id = snapshot_before_write(db, &canonical)?;
+    }
+    crate::file_lock::safe_write(&canonical, &sanitized)?;
+    if snapshot_id.is_some() {
+        journal_write(
+            db,
+            "patch_note",
+            "write",
+            &snapshot_path_key(&canonical),
+            None,
+            snapshot_id,
+            None,
+        );
+    }
 
     let summary = results.join("\n");
     Ok(format!("Patched note: {}\n{}", path, summary))
@@ -202,6 +245,7 @@ pub(super) fn execute_patch_note(
 pub(super) fn execute_apply_edit(
     arguments: &str,
     vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
     all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
@@ -260,8 +304,8 @@ pub(super) fn execute_apply_edit(
             }
 
             // Show context around potential matches for debugging
-            let snippet = if old_string.len() > 40 {
-                format!("{}...", &old_string[..37])
+            let snippet = if old_string.chars().count() > 40 {
+                format!("{}...", old_string.chars().take(37).collect::<String>())
             } else {
                 old_string.to_string()
             };
@@ -287,7 +331,23 @@ pub(super) fn execute_apply_edit(
 
     // Write the file
     let sanitized = crate::frontmatter::sanitize_frontmatter(&content);
-    std::fs::write(&canonical, sanitized)?;
+    let mut snapshot_id = None;
+    if sanitized != original {
+        // Only spend a restore point when the bytes on disk actually change.
+        snapshot_id = snapshot_before_write(db, &canonical)?;
+    }
+    crate::file_lock::safe_write(&canonical, &sanitized)?;
+    if snapshot_id.is_some() {
+        journal_write(
+            db,
+            "apply_edit",
+            "write",
+            &snapshot_path_key(&canonical),
+            None,
+            snapshot_id,
+            None,
+        );
+    }
 
     let summary = results.join("\n");
     Ok(format!(
@@ -343,8 +403,8 @@ pub fn generate_diff(old: &str, new: &str) -> String {
         diff.push_str(&format!(" {}\n", old_lines[i]));
     }
 
-    if diff.len() > 2000 {
-        diff.truncate(2000);
+    if diff.chars().count() > 2000 {
+        diff = diff.chars().take(2000).collect();
         diff.push_str("\n... (diff truncated)");
     }
 
@@ -375,16 +435,22 @@ fn find_fuzzy_match_range(content: &str, pattern: &str) -> Option<(usize, usize)
         return None;
     }
 
+    // `content.lines()` strips `\r\n`, so advancing the offset with a fixed `+1` for the
+    // newline drifts by one byte per line on CRLF files (the dominant case on Windows)
+    // and makes the returned range slice through the wrong bytes — corrupting the note.
+    // `split_inclusive('\n')` keeps each terminator, so `segment.len()` is the true advance.
     let mut pos = 0;
-    for line in content.lines() {
+    for segment in content.split_inclusive('\n') {
+        let without_lf = segment.strip_suffix('\n').unwrap_or(segment);
+        let line = without_lf.strip_suffix('\r').unwrap_or(without_lf);
         let line_start = pos;
-        let line_end = pos + line.len();
+        let line_end = pos + line.len(); // excludes any trailing '\r'/'\n', preserving it on write
 
         if line.trim() == pattern_trimmed {
             return Some((line_start, line_end));
         }
 
-        pos = line_end + 1; // +1 for newline
+        pos += segment.len();
     }
 
     None
@@ -436,6 +502,9 @@ pub(super) fn execute_rename_note(
     }
 
     // Rename on filesystem
+    // Key the journal off the pre-rename canonical path — after the move the old path
+    // no longer canonicalizes, so it cannot be derived later.
+    let old_key = strip_verbatim_prefix(&old_canonical.to_string_lossy());
     std::fs::rename(&old_canonical, &new_full)?;
 
     // Update database records: all tables that reference file paths
@@ -443,6 +512,17 @@ pub(super) fn execute_rename_note(
     let new_canonical = new_full.canonicalize().unwrap_or(new_full.clone());
     let old_norm = normalize_db_path(&old_canonical);
     let new_norm = normalize_db_path(&new_canonical);
+
+    // Undo of a rename is a rename back, so only the two endpoints are needed.
+    journal_write(
+        db,
+        "rename_note",
+        "rename",
+        &old_key,
+        Some(&snapshot_path_key(&new_canonical)),
+        None,
+        None,
+    );
 
     // Also try with the raw paths as they might be stored differently
     let old_raw = old_full.to_string_lossy().to_string();
@@ -489,6 +569,12 @@ pub(super) fn execute_rename_note(
                 "UPDATE note_relations SET target_path = ?1 WHERE target_path = ?2",
                 rusqlite::params![new_norm, old_p],
             );
+            // note_snapshots: carry the version history to the new path, otherwise the
+            // pre-rename restore points become orphaned and the note looks brand-new.
+            let _ = conn.execute(
+                "UPDATE note_snapshots SET file_path = ?1 WHERE file_path = ?2",
+                rusqlite::params![new_norm, old_p],
+            );
         }
     }
 
@@ -510,7 +596,9 @@ pub(super) fn execute_rename_note(
             if let Ok(content) = std::fs::read_to_string(&ep) {
                 if content.contains(&old_link) {
                     let updated = content.replace(&old_link, &new_link);
-                    let _ = std::fs::write(&ep, updated);
+                    if let Err(e) = crate::file_lock::safe_write(&ep, &updated) {
+                        log::warn!("backlink update failed for {:?}: {}", ep, e);
+                    }
                     updated_files += 1;
                 }
             }
@@ -520,6 +608,46 @@ pub(super) fn execute_rename_note(
     Ok(format!("Successfully renamed '{}' to '{}'. Database records updated. {} files had wikilinks updated.", old_path, new_path, updated_files))
 }
 
+
+/// Move `file` (an existing file inside `vault`) into the vault-local recycle bin
+/// `<vault>/.zettelagent/trash/<YYYYMMDD-HHMMSS>/<relative-path>` and return the new
+/// absolute location.
+///
+/// Prefers a rename; falls back to copy+delete when the rename crosses a volume
+/// boundary (e.g. a symlinked vault). When the file's path cannot be expressed
+/// relative to the vault the original file name alone is used.
+pub(crate) fn move_to_trash(vault: &std::path::Path, file: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let vault_resolved = resolve_for_containment(vault);
+    let file_resolved = resolve_for_containment(file);
+
+    // Path of the note relative to the vault root; degrade to the bare file name.
+    let rel = file_resolved
+        .strip_prefix(&vault_resolved)
+        .ok()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                file.file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("untitled.md")),
+            )
+        });
+
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let dest = vault.join(".zettelagent").join("trash").join(&stamp).join(&rel);
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Fast path: same-volume rename. Cross-volume rename fails (Windows: os error
+    // 17 / Unix: EXDEV), so fall back to copy + remove.
+    if std::fs::rename(file, &dest).is_err() {
+        std::fs::copy(file, &dest)?;
+        std::fs::remove_file(file)?;
+    }
+
+    Ok(dest)
+}
 
 pub(super) fn execute_delete_note(
     arguments: &str,
@@ -539,9 +667,38 @@ pub(super) fn execute_delete_note(
         anyhow::bail!("File does not exist: {}", path);
     }
 
-    std::fs::remove_file(&canonical)?;
+    // 1. Preserve the note body in the DB, so even a later-emptied trash can restore text.
+    let snapshot_id = snapshot_before_write(db, &canonical)?;
 
-    // Clean up database records (match frontend delete_file behavior)
+    // 2. Move to the vault-local recycle bin instead of hard-deleting. Pick the vault
+    //    that actually contains this file so the relative path is meaningful.
+    let owning_vault = all_vault_paths
+        .iter()
+        .map(std::path::PathBuf::from)
+        .find(|vp| {
+            resolve_for_containment(&canonical).starts_with(resolve_for_containment(vp))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from(vault_path));
+
+    let trashed = move_to_trash(&owning_vault, &canonical)?;
+    let trash_rel = trashed
+        .strip_prefix(&owning_vault)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| trashed.to_string_lossy().replace('\\', "/"));
+
+    // Undo of a delete moves the file back out of the recycle bin, so the journal
+    // stores the absolute trash location (the relative form above is only for display).
+    journal_write(
+        db,
+        "delete_note",
+        "delete",
+        &strip_verbatim_prefix(&canonical.to_string_lossy()),
+        None,
+        snapshot_id,
+        Some(&trashed.to_string_lossy()),
+    );
+
+    // 3. Clean up database records (match frontend delete_file behavior).
     let canonical_str = canonical.to_string_lossy().to_string();
     if let Ok(conn) = db.lock() {
         for db_path in &[path, &canonical_str] {
@@ -554,7 +711,10 @@ pub(super) fn execute_delete_note(
         }
     }
 
-    Ok(format!("Successfully deleted note: {}. Database records cleaned.", path))
+    Ok(format!(
+        "Moved note to trash: {} (restore by moving it back). Database records cleaned.",
+        trash_rel
+    ))
 }
 
 // ── New Tools ──────────────────────────────────────────────────────
@@ -563,6 +723,7 @@ pub(super) fn execute_delete_note(
 pub(super) fn execute_append_to_note(
     arguments: &str,
     vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
     all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
@@ -585,7 +746,17 @@ pub(super) fn execute_append_to_note(
     let separator = if existing.ends_with('\n') { "\n" } else { "\n\n" };
     let new_content = format!("{}{}{}", existing, separator, content);
     let sanitized = crate::frontmatter::sanitize_frontmatter(&new_content);
-    std::fs::write(&canonical, sanitized)?;
+    let snapshot_id = snapshot_before_write(db, &canonical)?;
+    crate::file_lock::safe_write(&canonical, &sanitized)?;
+    journal_write(
+        db,
+        "append_to_note",
+        "write",
+        &snapshot_path_key(&canonical),
+        None,
+        snapshot_id,
+        None,
+    );
 
     Ok(format!("Successfully appended {} chars to: {}", content.len(), path))
 }
@@ -681,7 +852,21 @@ pub(super) fn execute_merge_notes(
     let mut target_content = std::fs::read_to_string(&target_canonical)?;
     target_content.push_str(&separator);
     target_content.push_str(&source_content);
-    std::fs::write(&target_canonical, &target_content)?;
+    // The target is about to grow by the whole source note — keep its pre-image.
+    let snapshot_id = snapshot_before_write(db, &target_canonical)?;
+    crate::file_lock::safe_write(&target_canonical, &target_content)?;
+    // Only the target write is journaled. The wikilink rewrite below can touch
+    // hundreds of files in one call, which would swamp both the journal and the
+    // snapshot table; see the note in `UndoReport::warnings`.
+    journal_write(
+        db,
+        "merge_notes",
+        "write",
+        &snapshot_path_key(&target_canonical),
+        None,
+        snapshot_id,
+        None,
+    );
 
     // Update wikilinks: [[source_title]] → [[target_title]]
     let mut updated_files = 0;
@@ -701,7 +886,9 @@ pub(super) fn execute_merge_notes(
                 if let Ok(content) = std::fs::read_to_string(&ep) {
                     if content.contains(&old_link) {
                         let updated = content.replace(&old_link, &new_link);
-                        let _ = std::fs::write(&ep, updated);
+                        if let Err(e) = crate::file_lock::safe_write(&ep, &updated) {
+                            log::warn!("backlink update failed for {:?}: {}", ep, e);
+                        }
                         updated_files += 1;
                     }
                 }
@@ -830,6 +1017,9 @@ pub(super) fn execute_resolve_wikilink(
 
 pub(super) fn execute_fix_broken_link(
     arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+    vault_path: &str,
+    all_vault_paths: &[String],
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
     let file_path = args["file_path"].as_str()
@@ -842,13 +1032,34 @@ pub(super) fn execute_fix_broken_link(
         .ok_or_else(|| anyhow::anyhow!("Missing 'action' (remove/replace)"))?;
     let replacement = args["replacement"].as_str().map(|s| s.to_string());
 
+    // Resolve through the vault guard like every other write tool. Without this the
+    // raw `file_path` reached `Path::new` inside lint, letting this tool rewrite any
+    // file on disk.
+    let canonical = resolve_path_multi_vault(file_path, vault_path, all_vault_paths)?;
+
+    // `fix_broken_link_in_file` rewrites the note in place, so record the pre-image
+    // first. All arguments are validated above; the remaining validation lives inside
+    // lint and can still reject the call, in which case the extra restore point is a
+    // faithful copy of the untouched file (and is de-duplicated on insert).
+    let snapshot_id = snapshot_before_write(db, &canonical)?;
+
     crate::lint::fix_broken_link_in_file(
-        file_path,
+        &canonical.to_string_lossy(),
         target_title,
         line_number,
         action,
         replacement.as_deref(),
     )?;
+
+    journal_write(
+        db,
+        "fix_broken_link",
+        "write",
+        &snapshot_path_key(&canonical),
+        None,
+        snapshot_id,
+        None,
+    );
 
     Ok(json!({
         "success": true,
@@ -1115,7 +1326,7 @@ pub(super) async fn execute_ocr_image(
                 title,
                 extracted_text,
             );
-            std::fs::write(&dest_path, note_content)?;
+            crate::file_lock::safe_write(&dest_path, &note_content)?;
             result["stored_as_note"] = serde_json::json!(normalize_db_path(&dest_path));
         }
     }
@@ -1209,7 +1420,7 @@ pub(super) fn execute_extract_pdf_text(
             normalize_db_path(&canonical), now, limited_pages.len(), total_pages, final_text
         );
 
-        std::fs::write(&dest_path, &note_content)?;
+        crate::file_lock::safe_write(&dest_path, &note_content)?;
         result["saved_to"] = json!(format!("_pdf_extracts/{}", filename));
         result["message"] = json!(format!("Content saved to vault: _pdf_extracts/{}", filename));
     }
@@ -1408,7 +1619,18 @@ pub(super) fn execute_revert_note(
 
     // Write the reverted content
     let sanitized = crate::frontmatter::sanitize_frontmatter(&new_content);
+    // A revert is itself an overwrite — snapshot so it can be un-reverted.
+    let snapshot_id = snapshot_before_write(db, &canonical)?;
     crate::file_lock::safe_write(&canonical, &sanitized)?;
+    journal_write(
+        db,
+        "revert_note",
+        "write",
+        &snapshot_path_key(&canonical),
+        None,
+        snapshot_id,
+        None,
+    );
 
     Ok(serde_json::to_string_pretty(&json!({
         "success": true,
@@ -1419,3 +1641,244 @@ pub(super) fn execute_revert_note(
         "message": format!("Successfully reverted note: {}. The previous version's metadata has been logged in history.", note_path),
     }))?)
 }
+
+#[cfg(test)]
+mod fuzzy_range_tests {
+    use super::find_fuzzy_match_range;
+
+    /// Replaces the matched range the same way `execute_edit_note` does, so a wrong
+    /// offset shows up as corrupted text rather than just a wrong number.
+    fn splice(content: &str, pattern: &str, replacement: &str) -> Option<String> {
+        let (start, end) = find_fuzzy_match_range(content, pattern)?;
+        Some(format!("{}{}{}", &content[..start], replacement, &content[end..]))
+    }
+
+    #[test]
+    fn lf_content_replaces_correct_line() {
+        let content = "alpha\nbravo\ncharlie\n";
+        assert_eq!(
+            splice(content, "bravo", "BRAVO").unwrap(),
+            "alpha\nBRAVO\ncharlie\n"
+        );
+    }
+
+    #[test]
+    fn crlf_content_replaces_correct_line() {
+        // Regression: the old `+1 for newline` advance drifted one byte per CRLF line,
+        // so matching the third line spliced starting two bytes early.
+        let content = "alpha\r\nbravo\r\ncharlie\r\n";
+        assert_eq!(
+            splice(content, "charlie", "CHARLIE").unwrap(),
+            "alpha\r\nbravo\r\nCHARLIE\r\n"
+        );
+    }
+
+    #[test]
+    fn crlf_preserves_carriage_return_of_replaced_line() {
+        let content = "alpha\r\nbravo\r\n";
+        assert_eq!(splice(content, "bravo", "X").unwrap(), "alpha\r\nX\r\n");
+    }
+
+    #[test]
+    fn matches_line_with_surrounding_whitespace() {
+        let content = "alpha\r\n   bravo   \r\ncharlie\r\n";
+        assert_eq!(
+            splice(content, "bravo", "B").unwrap(),
+            "alpha\r\nB\r\ncharlie\r\n"
+        );
+    }
+
+    #[test]
+    fn cjk_lines_do_not_shift_offsets() {
+        let content = "第一行\r\n第二行\r\n第三行\r\n";
+        assert_eq!(
+            splice(content, "第三行", "替换").unwrap(),
+            "第一行\r\n第二行\r\n替换\r\n"
+        );
+    }
+
+    #[test]
+    fn last_line_without_trailing_newline() {
+        let content = "alpha\r\nomega";
+        assert_eq!(splice(content, "omega", "END").unwrap(), "alpha\r\nEND");
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        assert!(find_fuzzy_match_range("alpha\r\nbravo\r\n", "zulu").is_none());
+        assert!(find_fuzzy_match_range("alpha\n", "   ").is_none());
+    }
+}
+
+#[cfg(test)]
+mod snapshot_and_trash_tests {
+    use super::{move_to_trash, snapshot_before_write};
+    use crate::commands::file_commands::insert_note_snapshot;
+    use crate::tools::internal_tools::helpers::snapshot_path_key;
+    use rusqlite::Connection;
+    use std::sync::{Arc, Mutex};
+
+    fn mem_db() -> Arc<Mutex<Connection>> {
+        // `setup_database_schema` creates a vec0 virtual table, so the extension has
+        // to be registered before the connection is opened.
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn row_count(db: &Arc<Mutex<Connection>>, key: &str) -> i64 {
+        db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM note_snapshots WHERE file_path = ?1",
+                rusqlite::params![key],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn latest_content(db: &Arc<Mutex<Connection>>, key: &str) -> String {
+        db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT content FROM note_snapshots WHERE file_path = ?1 ORDER BY created_at_ms DESC LIMIT 1",
+                rusqlite::params![key],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Unique scratch directory — tests run in parallel in the same process.
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir()
+            .join(format!("zettel_snap_{}_{}_{}", tag, std::process::id(), nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn insert_note_snapshot_deduplicates_identical_content() {
+        let db = mem_db();
+        let conn = db.lock().unwrap();
+
+        assert!(insert_note_snapshot(&conn, "K", "same body").unwrap());
+        // Second insert of unchanged content must be a no-op, not a new row.
+        assert!(!insert_note_snapshot(&conn, "K", "same body").unwrap());
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_snapshots WHERE file_path = 'K'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn insert_note_snapshot_prunes_to_100_per_file() {
+        let db = mem_db();
+        let conn = db.lock().unwrap();
+
+        for i in 0..105 {
+            assert!(insert_note_snapshot(&conn, "K", &format!("version {}", i)).unwrap());
+        }
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_snapshots WHERE file_path = 'K'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 100, "prune must cap the per-file history at 100");
+    }
+
+    #[test]
+    fn snapshot_before_write_is_a_noop_for_a_missing_file() {
+        let db = mem_db();
+        let dir = temp_dir("missing");
+        let absent = dir.join("not-created-yet.md");
+
+        snapshot_before_write(&db, &absent).expect("a new note has no pre-image to store");
+
+        let total: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM note_snapshots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_before_write_stores_the_current_body_verbatim() {
+        let db = mem_db();
+        let dir = temp_dir("preimage");
+        let note = dir.join("笔记.md");
+        let body = "# 标题\n\n这是中文正文，包含标点。\n";
+        std::fs::write(&note, body).unwrap();
+
+        snapshot_before_write(&db, &note).unwrap();
+
+        let key = snapshot_path_key(&note);
+        assert_eq!(row_count(&db, &key), 1);
+        assert_eq!(latest_content(&db, &key), body, "no re-encoding of CJK text");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_key_has_no_windows_verbatim_prefix() {
+        // The frontend keys snapshots by the raw path from `list_directory_tree`,
+        // which never carries `\\?\`. If this regresses, the version-history UI
+        // silently stops finding Agent snapshots.
+        let dir = temp_dir("key");
+        let note = dir.join("plain.md");
+        std::fs::write(&note, "x").unwrap();
+
+        let key = snapshot_path_key(&note);
+        assert!(!key.starts_with(r"\\?\"), "unexpected verbatim prefix in {}", key);
+        assert!(key.ends_with("plain.md"), "unexpected key shape: {}", key);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_moves_the_note_into_the_trash_and_keeps_a_snapshot() {
+        let db = mem_db();
+        let vault = temp_dir("trash");
+        let notes_dir = vault.join("notes");
+        std::fs::create_dir_all(&notes_dir).unwrap();
+        let note = notes_dir.join("foo.md");
+        let body = "# Foo\n\n要删除的中文内容\n";
+        std::fs::write(&note, body).unwrap();
+
+        // Same two steps `execute_delete_note` performs before touching the DB.
+        let key = snapshot_path_key(&note);
+        snapshot_before_write(&db, &note).unwrap();
+        let trashed = move_to_trash(&vault, &note).unwrap();
+
+        assert!(!note.exists(), "the original must be gone");
+        assert!(trashed.exists(), "the trashed copy must exist");
+        assert_eq!(std::fs::read_to_string(&trashed).unwrap(), body);
+
+        // Folder structure is preserved inside the timestamped trash directory.
+        let rel = trashed.strip_prefix(&vault).unwrap().to_string_lossy().replace('\\', "/");
+        assert!(rel.starts_with(".zettelagent/trash/"), "unexpected trash path: {}", rel);
+        assert!(rel.ends_with("notes/foo.md"), "unexpected trash path: {}", rel);
+
+        // And the body is still recoverable from the DB even if the trash is emptied.
+        assert_eq!(row_count(&db, &key), 1);
+        assert_eq!(latest_content(&db, &key), body);
+
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+}
+

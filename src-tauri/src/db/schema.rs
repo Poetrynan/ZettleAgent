@@ -328,6 +328,135 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Per-agent-run change journal — the backing store for "undo this whole turn".
+    //
+    // `note_snapshots` alone only supports one-note-at-a-time restores from the version
+    // history UI. One row here per file mutation an Agent turn performed, keyed by the
+    // run id, so the entire turn can be rolled back in reverse `seq` order.
+    //
+    // `file_path` / `new_path` use the same key shape as `note_snapshots.file_path`
+    // (see `tools::internal_tools::helpers::snapshot_path_key`).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_run_journal (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id        TEXT NOT NULL,
+            seq           INTEGER NOT NULL,
+            tool_name     TEXT NOT NULL,
+            op            TEXT NOT NULL,
+            file_path     TEXT NOT NULL,
+            new_path      TEXT,
+            snapshot_id   INTEGER,
+            trash_path    TEXT,
+            created_at_ms INTEGER NOT NULL,
+            undone        INTEGER NOT NULL DEFAULT 0
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_journal_run ON agent_run_journal(run_id, seq);",
+        [],
+    )?;
+
+    // User-authored approval allow rules — the "stop asking me about this" table.
+    //
+    // Matching (see `llm::approval::matching_rule`): tool_name equal (or the
+    // wildcard '*') AND the target's vault-relative path starts with path_prefix
+    // ('' = no restriction) AND the call's effective risk <= max_risk.
+    //
+    // `max_risk` is never 'critical': deletion always requires an explicit
+    // confirmation, so no rule may waive it (enforced in `add_approval_rule_db`).
+    // `scope='session'` rows are deleted at startup (`cleanup_session_rules`).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS approval_rules (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            tool_name     TEXT NOT NULL,
+            path_prefix   TEXT NOT NULL,
+            max_risk      TEXT NOT NULL,
+            scope         TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            note          TEXT
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_approval_rules_tool ON approval_rules(tool_name);",
+        [],
+    )?;
+
+    // ── Spaced repetition (FSRS-4.5) ──
+    //
+    // One row per note the user has put in the review deck. Keyed by
+    // `files(path)` with the same FK shape as `card_meta`, because `file_path`
+    // is the only stable note identity in this schema: ON UPDATE CASCADE makes a
+    // rename carry the schedule with it, ON DELETE CASCADE stops a deleted note
+    // from haunting the queue.
+    //
+    // `state`/`suspended` are separate concepts on purpose: suspending is a user
+    // action ("stop showing me this") and must not destroy the FSRS state it
+    // would take months to rebuild.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS review_cards (
+            file_path       TEXT PRIMARY KEY REFERENCES files(path) ON DELETE CASCADE ON UPDATE CASCADE,
+            stability       REAL NOT NULL DEFAULT 0,
+            difficulty      REAL NOT NULL DEFAULT 0,
+            due_at_ms       INTEGER NOT NULL,
+            last_review_ms  INTEGER,
+            reps            INTEGER NOT NULL DEFAULT 0,
+            lapses          INTEGER NOT NULL DEFAULT 0,
+            state           TEXT NOT NULL DEFAULT 'new',
+            suspended       INTEGER NOT NULL DEFAULT 0,
+            created_at_ms   INTEGER NOT NULL
+        );",
+        [],
+    )?;
+    // The due-queue query (`due_at_ms <= now ORDER BY due_at_ms`) runs on every
+    // session start and is the only hot path in this feature.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_cards_due ON review_cards(due_at_ms);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_cards_state ON review_cards(state);",
+        [],
+    )?;
+
+    // Append-only grade history. Two jobs: it powers the stats/forecast view, and
+    // it is exactly the dataset an FSRS parameter optimiser would need if one is
+    // ever added — which is why the before/after columns are stored rather than
+    // recomputed.
+    //
+    // Deliberately NO foreign key on `file_path`, unlike `review_cards`. Cascading
+    // would mean deleting a note silently rewrites the user's retention rate and
+    // streak for every past day, and those are aggregate facts about the user's
+    // study history, not about the note. Same call `note_snapshots` and
+    // `reconciliation_log` already make. The cost is that a rename leaves stale
+    // keys here, so per-note history is best-effort while the aggregates are exact.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS review_log (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path         TEXT NOT NULL,
+            grade             INTEGER NOT NULL,
+            reviewed_at_ms    INTEGER NOT NULL,
+            elapsed_days      REAL NOT NULL DEFAULT 0,
+            scheduled_days    REAL NOT NULL DEFAULT 0,
+            stability_before  REAL,
+            stability_after   REAL,
+            difficulty_before REAL,
+            difficulty_after  REAL,
+            state_before      TEXT,
+            state_after       TEXT
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_log_file ON review_log(file_path, reviewed_at_ms);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_log_time ON review_log(reviewed_at_ms);",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -629,10 +758,11 @@ pub fn find_file_path_for_title_prioritized(conn: &Connection, title: &str, curr
 fn common_directory_prefix_len(p1: &str, p2: &str) -> usize {
     let p1_clean = p1.replace('\\', "/");
     let p2_clean = p2.replace('\\', "/");
+    // Track a *byte* offset so the slice below never splits a multi-byte char.
     let mut len = 0;
-    for (c1, c2) in p1_clean.chars().zip(p2_clean.chars()) {
+    for ((byte_idx, c1), c2) in p1_clean.char_indices().zip(p2_clean.chars()) {
         if c1 == c2 {
-            len += 1;
+            len = byte_idx + c1.len_utf8();
         } else {
             break;
         }

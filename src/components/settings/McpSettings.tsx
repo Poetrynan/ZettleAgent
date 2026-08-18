@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { IconPlug, IconTrash } from '../icons';
 import { sectionTitle } from './settingsStyles';
+import { t } from '../../lib/i18n';
 import type { McpServerConfig } from '../../lib/tauri';
 import {
   listMcpServers, addMcpServer, removeMcpServer, testMcpConnection,
@@ -88,17 +89,16 @@ export function McpServersSection({ isZh }: { isZh: boolean }) {
   return (
     <div className="settings-section-card">
       <h2 style={sectionTitle}>
-        <IconPlug size={18} /> {isZh ? '扩展工具 (MCP)' : 'Extensions (MCP)'}
+        <IconPlug size={18} /> {t('settings.mcpClient.title')}
       </h2>
 
-      {/* Description + where to find MCP tools */}
+      {/* Description + where to find MCP tools. The arrow in the title carries the
+          direction; this paragraph only has to fill in the how. */}
       <p style={{
         fontSize: 'var(--text-xs)', color: 'var(--text-secondary)',
         marginBottom: 'var(--space-3)', lineHeight: 1.7,
       }}>
-        {isZh
-          ? '连接 MCP 服务，为 AI Agent 扩展更多工具能力。从 MCP 服务平台获取工具的 URL 和 API Key，填写后即可使用。'
-          : 'Connect MCP services to extend AI Agent capabilities. Get the tool URL and API Key from an MCP platform, fill in below to connect.'}
+        {t('settings.mcpClient.desc')}
       </p>
       <div style={{
         display: 'flex',

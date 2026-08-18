@@ -7,6 +7,8 @@ import { MilkdownEditor } from './MilkdownEditor';
 import { PropertiesEditor, parseFrontmatter, serializeFrontmatter } from './PropertiesEditor';
 import { KnowledgeTimeline } from '../temporal/KnowledgeTimeline';
 import { BacklinksPanel } from './BacklinksPanel';
+import { ReviewCardBadge } from './ReviewCardBadge';
+import { RelatedNotesPanel } from './RelatedNotesPanel';
 import { OutlinePanel } from './OutlinePanel';
 import { exportAsHtml, exportAsPdf } from '../../lib/exportNote';
 import { saveSnapshot, getSnapshots, FileSnapshot } from '../../lib/snapshots';
@@ -210,13 +212,23 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
   const panelContentRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic token identifying the most recent load. Reads resolve out of order when
+  // the user clicks quickly through the file tree, and a late-arriving read used to
+  // overwrite `editContent` for the file now on screen — which the 1.5s auto-save then
+  // persisted, writing the old file's body into the new file.
+  const loadTokenRef = useRef(0);
 
   const loadFile = useCallback(async () => {
+    const token = ++loadTokenRef.current;
     if (!activeFile) { setEditContent(''); return; }
     setIsLoading(true); setError(null);
-    try { const data = await readMarkdownFile(activeFile); setEditContent(data); }
-    catch (err) { setError(String(err)); }
-    finally { setIsLoading(false); }
+    try {
+      const data = await readMarkdownFile(activeFile);
+      if (token !== loadTokenRef.current) return; // superseded — drop this result
+      setEditContent(data);
+    }
+    catch (err) { if (token === loadTokenRef.current) setError(String(err)); }
+    finally { if (token === loadTokenRef.current) setIsLoading(false); }
   }, [activeFile]);
 
   // Load file when it changes
@@ -702,7 +714,11 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
               <PropertiesEditor content={editContent} onChange={handleChange} lang={state.lang} />
               <MilkdownEditorWithFrontmatter content={editContent} onChange={handleChange} />
               {!isLoading && !error && activeFile && (
-                <BacklinksPanel filePath={activeFile} />
+                <>
+                  <ReviewCardBadge filePath={activeFile} />
+                  <BacklinksPanel filePath={activeFile} />
+                  <RelatedNotesPanel filePath={activeFile} />
+                </>
               )}
             </div>
           </div>
@@ -722,9 +738,13 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
             />
             <MilkdownEditorWithFrontmatter content={editContent} onChange={handleChange} />
 
-            {/* Backlinks panel at bottom */}
+            {/* Review status first, then who links here, then what else is related */}
             {!isLoading && !error && activeFile && (
-              <BacklinksPanel filePath={activeFile} />
+              <>
+                <ReviewCardBadge filePath={activeFile} />
+                <BacklinksPanel filePath={activeFile} />
+                <RelatedNotesPanel filePath={activeFile} />
+              </>
             )}
           </div>
         )}

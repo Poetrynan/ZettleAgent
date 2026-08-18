@@ -1,6 +1,16 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
+/// Relevance rerank stage (Lexical / CrossEncoder / Llm). Lives in
+/// `db/search/rerank.rs` as a child of this module so it can reuse the
+/// segmentation helpers (`is_cjk_char`) that FTS query building already relies on,
+/// and so the rerank always sees the same tokenization the recall stage used.
+///
+/// Not to be confused with [`crate::db::rerank`], which is the *diversity/recency*
+/// reranker (time decay + MMR). This one answers "is this chunk about the query",
+/// that one answers "have I already shown the user this".
+pub mod rerank;
+
 /// A single search result returned from full-text or vector search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -90,10 +100,13 @@ pub struct GraphData {
 
 /// Perform full-text search using FTS5 on chunk content.
 pub fn full_text_search(conn: &Connection, query: &str, limit: usize) -> anyhow::Result<Vec<SearchResult>> {
-    // Sanitize query for FTS5: strip special characters that cause syntax errors
+    // Only control characters need stripping. Every other character is made safe by
+    // wrapping each term in an FTS5 string literal in `build_fts_query`, so we must NOT
+    // drop things like '.' or '-' here — that used to turn "nomic-embed-v1.5" into
+    // "nomicembedv15", which can never match the indexed tokens.
     let sanitized: String = query
         .chars()
-        .filter(|c| !matches!(c, '*' | '.' | ':' | '(' | ')' | '{' | '}' | '[' | ']' | '^' | '~' | '!' | '\\' | '/' | '&' | '|'))
+        .filter(|c| !c.is_control())
         .collect::<String>()
         .trim()
         .to_string();
@@ -138,13 +151,27 @@ pub fn full_text_search(conn: &Connection, query: &str, limit: usize) -> anyhow:
     Ok(results)
 }
 
+/// Wrap a term in an FTS5 string literal so operator characters (`-`, `+`, `"`, `*`,
+/// `:`, `(`, `NEAR`, …) are treated as text instead of syntax. Inner double quotes are
+/// doubled, which is FTS5's own escaping rule.
+fn fts_quote(term: &str) -> String {
+    format!("\"{}\"", term.replace('"', "\"\""))
+}
+
+/// A term is only usable if it still contains something the tokenizer will index.
+/// `"-"` or `"..."` would otherwise become an empty FTS5 literal.
+fn has_indexable_content(term: &str) -> bool {
+    term.chars().any(|c| c.is_alphanumeric() || is_cjk_char(c))
+}
+
 /// Build an FTS5 query from mixed Chinese+English input.
 /// Extracts English words (kept whole) and Chinese terms (grouped by consecutive CJK chars).
-/// Joins them with OR for broader matching.
+/// Joins them with OR for broader matching. Every term is quoted, so an input like
+/// "AI-Agent 是什么" or "C++ 编程" is a valid query instead of an FTS5 syntax error.
 /// Examples:
-///   "BERT是什么" → "BERT OR 是什么"
-///   "knowledge graph 知识图谱" → "knowledge OR graph OR 知识图谱"
-///   "Transformer" → "Transformer"
+///   "BERT是什么" → "\"BERT\" OR \"是什么\""
+///   "knowledge graph 知识图谱" → "\"knowledge\" OR \"graph\" OR \"知识图谱\""
+///   "Transformer" → "\"Transformer\""
 fn build_fts_query(input: &str) -> String {
     let mut terms: Vec<String> = Vec::new();
     let mut current_ascii = String::new();
@@ -194,6 +221,9 @@ fn build_fts_query(input: &str) -> String {
     // Deduplicate
     terms.dedup();
 
+    // Drop terms the tokenizer would index as nothing (e.g. a bare "-" or "...").
+    terms.retain(|t| has_indexable_content(t));
+
     // Filter out very short CJK stop-word-like terms (single chars like 是, 的, 了, 吗)
     let stop_chars = ['是', '的', '了', '吗', '呢', '吧', '啊', '在', '有', '和', '与', '或', '不', '也', '都', '就', '把', '被', '给', '让', '对', '从', '到', '为', '着', '过', '得', '地', '么'];
     let meaningful_terms: Vec<&String> = terms.iter().filter(|t| {
@@ -208,13 +238,12 @@ fn build_fts_query(input: &str) -> String {
         true
     }).collect();
 
+    // Every term is quoted so operator characters cannot break the query syntax.
     if meaningful_terms.is_empty() {
         // Fallback: use all terms
-        terms.join(" OR ")
-    } else if meaningful_terms.len() == 1 {
-        meaningful_terms[0].clone()
+        terms.iter().map(|t| fts_quote(t)).collect::<Vec<_>>().join(" OR ")
     } else {
-        meaningful_terms.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(" OR ")
+        meaningful_terms.iter().map(|t| fts_quote(t)).collect::<Vec<_>>().join(" OR ")
     }
 }
 
@@ -327,6 +356,63 @@ pub fn hybrid_search(
         .collect();
 
     Ok(results)
+}
+
+/// Hybrid search followed by the relevance rerank stage.
+///
+/// Deliberately a *new* function rather than a change to [`hybrid_search`]: every
+/// existing caller (`commands/chat_commands.rs`, `commands/search_commands.rs`,
+/// `tools/internal_tools/search_ops.rs`, `scheduler/reconcile_task.rs`) keeps its
+/// current signature and current behaviour, and opts in only when it is ready.
+///
+/// The recall/rerank split is the point of the whole stage: we fetch
+/// `max(limit, top_k)` fused candidates — wider than the caller asked for — rerank
+/// that window, then cut to `limit`. Reranking only the `limit` rows the old code
+/// returned could never promote anything the fusion under-ranked, which is exactly
+/// the failure a reranker exists to fix.
+///
+/// `RerankMode::Off` short-circuits to plain [`hybrid_search`] with the original
+/// `limit`, so the disabled path is not merely equivalent but literally the same
+/// call.
+pub fn hybrid_search_reranked(
+    conn: &Connection,
+    query: &str,
+    query_embedding: &[f32],
+    limit: usize,
+    config: &rerank::RerankConfig,
+    external: Option<&dyn rerank::ExternalReranker>,
+) -> anyhow::Result<Vec<SearchResult>> {
+    if config.mode == rerank::RerankMode::Off {
+        return hybrid_search(conn, query, query_embedding, limit);
+    }
+
+    let recall_limit = limit.max(config.effective_top_k());
+    let fused = hybrid_search(conn, query, query_embedding, recall_limit)?;
+    let mut reranked = rerank::rerank_results(query, fused, config, external);
+    reranked.truncate(limit);
+    Ok(reranked)
+}
+
+/// Same recall-wide/rerank-narrow wrapper for the FTS-only path, used when the
+/// vector index is empty (see `rag_effective_search_mode`). Lexical reranking is
+/// arguably *more* valuable here: without embeddings, FTS5's `OR`-joined match is
+/// the only recall signal, so ranking by feature quality is all we have.
+pub fn full_text_search_reranked(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    config: &rerank::RerankConfig,
+    external: Option<&dyn rerank::ExternalReranker>,
+) -> anyhow::Result<Vec<SearchResult>> {
+    if config.mode == rerank::RerankMode::Off {
+        return full_text_search(conn, query, limit);
+    }
+
+    let recall_limit = limit.max(config.effective_top_k());
+    let recalled = full_text_search(conn, query, recall_limit)?;
+    let mut reranked = rerank::rerank_results(query, recalled, config, external);
+    reranked.truncate(limit);
+    Ok(reranked)
 }
 
 /// Fetch knowledge graph data with caching.
@@ -1157,6 +1243,291 @@ fn get_precomputed_semantic_edges(conn: &Connection) -> anyhow::Result<Vec<Graph
     Ok(edges)
 }
 
+// ══════════════════════════════════════════════════════════════════════
+//  Related Notes — passive "serendipity" surface for the reading view
+// ══════════════════════════════════════════════════════════════════════
+
+/// One note surfaced as related to the note the user is reading.
+///
+/// The `reason` is deliberately *not* baked here: this is a pure-local, CJK-first
+/// app whose user-facing strings are all key-based i18n, so a Chinese (or English)
+/// sentence composed in Rust would be wrong for half the users. Instead we carry
+/// the structured pieces the UI needs — `relation`, `relation_type`, `score`,
+/// and the full `signals` set — and let the frontend render a bilingual reason.
+#[derive(Debug, Clone, Serialize)]
+pub struct RelatedNote {
+    pub file_path: String,
+    pub title: String,
+    /// First-chunk preview, char-truncated (never byte-sliced — CJK safety).
+    pub preview: String,
+    /// The strongest/most-specific signal: `"explicit"` | `"link"` | `"semantic"`.
+    pub relation: String,
+    /// For `explicit`, the `note_relations.relation_type` (e.g. `supports`); else `None`.
+    pub relation_type: Option<String>,
+    /// Semantic cosine similarity when the note carries a `semantic` signal, else the
+    /// synthetic rank weight of its strongest signal (explicit/link = 1.0).
+    pub score: f64,
+    /// Every signal this note matched. Length > 1 is the highest-value case — a note
+    /// related by both an explicit link *and* semantic proximity is the strongest
+    /// serendipity hit — so the UI flags it specially.
+    pub signals: Vec<String>,
+}
+
+/// Result wrapper so the UI can tell three states apart that a bare `Vec` conflates:
+/// notes found, "no related notes" (index ready, nothing matched), and "no semantic
+/// index yet" (embeddings/edges never built — a setup gap, not an absence of relations).
+#[derive(Debug, Clone, Serialize)]
+pub struct RelatedNotesResult {
+    pub notes: Vec<RelatedNote>,
+    /// False only when the vault has no semantic signal available *at all* for this
+    /// note: no `semantic_edges` rows anywhere and no first-chunk embedding to run the
+    /// live fallback against. The UI shows a "build the index" hint rather than "empty".
+    pub semantic_index_ready: bool,
+}
+
+/// Per-path accumulator while merging the three signals. One note can match several.
+#[derive(Default)]
+struct RelatedAgg {
+    semantic: Option<f64>,       // cosine similarity from semantic_edges or live search
+    link: bool,                  // an incoming [[wikilink]] points here
+    explicit_type: Option<String>, // note_relations.relation_type (either direction)
+}
+
+/// Gather notes related to `file_path`, merging three complementary signals:
+/// precomputed `semantic_edges` (bidirectional), incoming `[[wikilink]]` backlinks,
+/// and explicit `note_relations` (both directions). Deduped by path, self excluded,
+/// sorted so the most *meaningful* connections lead (multi-signal, then explicit,
+/// then link, then semantic by similarity), and bounded by `limit`.
+///
+/// Semantic sourcing has a deliberate fallback: `semantic_edges` only exists after the
+/// embedding index is *finalized* (it is built from file-level vectors in `files_vec`).
+/// A note that has just been embedded has chunk vectors in `chunks_vec` but no edge row
+/// yet, so when the edge table yields nothing for this note we fall back to a live
+/// `vector_search` on its first-chunk embedding — the same path `execute_find_similar_notes`
+/// uses. That makes the feature useful immediately after embedding rather than only after
+/// a finalize pass, at the cost of one KNN query on the cold path.
+pub fn get_related_notes(
+    conn: &Connection,
+    file_path: &str,
+    limit: usize,
+) -> anyhow::Result<RelatedNotesResult> {
+    use std::collections::HashMap;
+    let mut agg: HashMap<String, RelatedAgg> = HashMap::new();
+
+    // Per-signal fetch window. Wider than `limit` so the merge has candidates to
+    // dedupe across signals, but bounded so one hub note cannot pull the whole vault
+    // into memory on every note open.
+    let window = limit.saturating_mul(8).max(40) as i64;
+
+    // ── Signal 1: precomputed semantic edges (stored one row per unordered pair) ──
+    let mut had_edge_row = false;
+    {
+        let mut stmt = conn.prepare(
+            "SELECT source_path, target_path, similarity FROM semantic_edges
+             WHERE source_path = ?1 OR target_path = ?1
+             ORDER BY similarity DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![file_path, window], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?))
+        })?;
+        for row in rows {
+            let (src, tgt, sim) = row?;
+            had_edge_row = true;
+            // The related note is whichever end is not us.
+            let other = if src == file_path { tgt } else { src };
+            if other == file_path { continue; }
+            let e = agg.entry(other).or_default();
+            e.semantic = Some(e.semantic.map_or(sim, |s| s.max(sim)));
+        }
+    }
+
+    // Does this note have a first-chunk embedding? Needed for the live fallback and
+    // for deciding `semantic_index_ready`.
+    let self_embedding: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT v.embedding FROM chunks c JOIN chunks_vec v ON c.id = v.id
+             WHERE c.file_path = ?1 LIMIT 1",
+            params![file_path],
+            |row| row.get(0),
+        )
+        .ok();
+
+    // ── Signal 1b: live vector fallback, only when the edge table gave us nothing ──
+    // Once finalized, `semantic_edges` is complete above the 0.75 threshold (no K cap),
+    // so we only reach for the live path to cover the pre-finalization gap.
+    if !had_edge_row {
+        if let Some(ref emb_bytes) = self_embedding {
+            let embedding: Vec<f32> = emb_bytes
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .collect();
+            // Over-fetch a little; the threshold below does the real filtering.
+            let overfetch = (limit + 1).saturating_mul(3).max(10);
+            if let Ok(hits) = vector_search(conn, &embedding, overfetch) {
+                for h in hits {
+                    if h.file_path == file_path { continue; }
+                    let sim = 1.0 - h.score; // cosine distance → similarity
+                    // Match the edge-table threshold so "semantic" means the same thing
+                    // whether it came from the cache or the live path.
+                    if sim < 0.75 { continue; }
+                    let e = agg.entry(h.file_path).or_default();
+                    e.semantic = Some(e.semantic.map_or(sim, |s| s.max(sim)));
+                }
+            }
+        }
+    }
+
+    // ── Signal 2: explicit note_relations, both directions ──
+    {
+        let mut stmt = conn.prepare(
+            "SELECT source_path, target_path, relation_type FROM note_relations
+             WHERE source_path = ?1 OR target_path = ?1
+             ORDER BY confidence DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![file_path, window], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        for row in rows {
+            let (src, tgt, rel_type) = row?;
+            let other = if src == file_path { tgt } else { src };
+            if other == file_path { continue; }
+            let e = agg.entry(other).or_default();
+            // Keep the first relation type we see; a note rarely has two.
+            if e.explicit_type.is_none() {
+                e.explicit_type = Some(rel_type);
+            }
+        }
+    }
+
+    // ── Signal 3: incoming [[wikilink]] backlinks ──
+    // Same detection as `get_backlinks`' method 2: scan chunk content for the target's
+    // title or file stem wrapped in [[…]]. Cheap LIKE prefilter, then exact check.
+    let target_title: Option<String> = conn
+        .query_row(
+            "SELECT title FROM files WHERE path = ?1",
+            params![file_path],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(ref title) = target_title {
+        let title_lower = title.to_lowercase();
+        let file_stem = std::path::Path::new(file_path)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT c.file_path, c.content FROM chunks c
+             WHERE c.file_path != ?1 AND c.content LIKE '%[[%]]%'
+             ORDER BY c.file_path, c.chunk_index
+             LIMIT ?2",
+        )?;
+        // The LIKE prefilter already discards chunks with no wikilink at all; this cap
+        // keeps a very large vault from paying for a full scan on every note open.
+        let rows = stmt.query_map(params![file_path, 5_000_i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (src_path, content) = row?;
+            let cl = content.to_lowercase();
+            let hit = cl.contains(&format!("[[{}]]", title_lower))
+                || cl.contains(&format!("[[{}]]", file_stem));
+            if hit {
+                let e = agg.entry(src_path).or_default();
+                e.link = true;
+            }
+        }
+    }
+
+    // ── Materialize: pick the strongest relation per note, then rank ──
+    let mut notes: Vec<RelatedNote> = Vec::with_capacity(agg.len());
+    for (path, a) in agg {
+        let mut signals: Vec<String> = Vec::new();
+        if a.explicit_type.is_some() { signals.push("explicit".to_string()); }
+        if a.link { signals.push("link".to_string()); }
+        if a.semantic.is_some() { signals.push("semantic".to_string()); }
+        if signals.is_empty() { continue; }
+
+        // Strongest → most specific first: an explicit human/AI link outranks a wikilink,
+        // which outranks a bare cosine hit.
+        let relation = if a.explicit_type.is_some() {
+            "explicit"
+        } else if a.link {
+            "link"
+        } else {
+            "semantic"
+        }
+        .to_string();
+
+        // Score carries the semantic similarity when present (the UI shows it in the
+        // reason); explicit/link without a cosine get a synthetic 1.0 so they sort high.
+        let score = a.semantic.unwrap_or(1.0);
+
+        notes.push(RelatedNote {
+            file_path: path,
+            // Title and preview are filled in after the cut — see below.
+            title: String::new(),
+            preview: String::new(),
+            relation,
+            relation_type: a.explicit_type,
+            score,
+            signals,
+        });
+    }
+
+    // Rank: multi-signal notes first (the highest-value serendipity), then by relation
+    // specificity, then by score. Explicit links are more meaningful than a 0.76 cosine.
+    let rank_kind = |r: &str| match r {
+        "explicit" => 0,
+        "link" => 1,
+        _ => 2,
+    };
+    notes.sort_by(|a, b| {
+        let a_multi = a.signals.len() > 1;
+        let b_multi = b.signals.len() > 1;
+        b_multi
+            .cmp(&a_multi)
+            .then_with(|| rank_kind(&a.relation).cmp(&rank_kind(&b.relation)))
+            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    notes.truncate(limit);
+
+    // ── Hydrate only the survivors ──
+    // After the cut on purpose: a hub note can produce dozens of candidates, and
+    // reading a title + first chunk for rows nobody will see is pure waste.
+    for note in notes.iter_mut() {
+        note.title = conn
+            .query_row(
+                "SELECT COALESCE(title, '') FROM files WHERE path = ?1",
+                params![note.file_path],
+                |row| row.get(0),
+            )
+            .unwrap_or_default();
+        // Preview from the first chunk, cut with `chars().take` — NEVER byte-sliced,
+        // which is what makes it safe for CJK.
+        note.preview = conn
+            .query_row(
+                "SELECT content FROM chunks WHERE file_path = ?1 ORDER BY chunk_index LIMIT 1",
+                params![note.file_path],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|c| c.trim().chars().take(120).collect::<String>())
+            .unwrap_or_default();
+    }
+
+    // The vault has *some* semantic capability iff any edge exists anywhere, or this
+    // note has an embedding the live path could use. Only when neither holds do we tell
+    // the UI to show "no semantic index yet" instead of "no related notes".
+    let any_edges: i64 = conn
+        .query_row("SELECT COUNT(*) FROM semantic_edges", [], |row| row.get(0))
+        .unwrap_or(0);
+    let semantic_index_ready = any_edges > 0 || self_embedding.is_some();
+
+    Ok(RelatedNotesResult { notes, semantic_index_ready })
+}
+
 /// Precompute semantic similarity edges and persist to the semantic_edges table.
 /// Uses file-level mean-pooled embeddings in files_vec for threshold-based edge discovery.
 /// `changed_paths`: if Some, only recompute edges involving these paths.
@@ -1397,3 +1768,428 @@ pub fn get_all_relation_edges(conn: &Connection) -> anyhow::Result<Vec<GraphEdge
 
     Ok(edges)
 }
+
+#[cfg(test)]
+mod fts_query_tests {
+    use super::build_fts_query;
+
+    // Every term must be wrapped in a quoted FTS5 literal so operator characters can never
+    // reach the parser. These inputs used to produce `fts5: syntax error` and surface as a
+    // failed search to the user.
+    #[test]
+    fn quotes_terms_with_operator_chars() {
+        assert_eq!(build_fts_query("AI-Agent"), "\"AI-Agent\"");
+        assert_eq!(build_fts_query("C++"), "\"C++\"");
+    }
+
+    #[test]
+    fn mixed_cjk_and_ascii_joined_with_or() {
+        assert_eq!(build_fts_query("知识 graph"), "\"知识\" OR \"graph\"");
+    }
+
+    #[test]
+    fn embeds_inner_quote_by_doubling() {
+        // A stray double quote must be escaped, not left to unbalance the literal.
+        assert_eq!(build_fts_query("say\"hi"), "\"say\"\"hi\"");
+    }
+
+    #[test]
+    fn punctuation_only_input_does_not_panic_or_break() {
+        // "---" has nothing indexable; result must stay a syntactically valid (possibly empty) query.
+        let q = build_fts_query("---");
+        assert!(q.is_empty() || q.starts_with('"'));
+    }
+}
+
+/// Shared fixture for rerank wiring tests, here rather than duplicated in each
+/// call site's test module: two notes crafted so FTS rank order and lexical
+/// relevance order disagree, which is the only way a test can tell "went through
+/// the rerank" from "happened to already be sorted".
+///
+/// `a.md` is a two-word stub. bm25 loves it — both query terms, essentially zero
+/// document length — so FTS puts it first. `b.md` is a real paragraph whose
+/// *heading* is the query and which contains the exact phrase; `chunks_fts`
+/// indexes `content` only, so bm25 cannot see the heading at all. That blind spot
+/// is precisely the one the rerank exists to cover, so Tier 1 must reverse them.
+#[cfg(test)]
+pub fn test_db_with_ranking_disagreement() -> Connection {
+    crate::db::register_sqlite_vec();
+    let conn = Connection::open_in_memory().unwrap();
+    crate::db::schema::setup_database_schema(&conn).unwrap();
+    // The live app follows setup with the column migrations (db/mod.rs:35).
+    crate::db::schema::migrate_schema_columns(&conn).unwrap();
+
+    let insert = |path: &str, idx: i64, heading: &str, content: &str| {
+        conn.execute(
+            "INSERT INTO files (path, hash, title) VALUES (?1, 'h', ?1)",
+            params![path],
+        )
+        .ok(); // a second chunk for the same note is fine; ignore the dup
+        conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, content, heading_hierarchy, marker_type)
+             VALUES (?1, ?2, ?3, ?4, 'user')",
+            params![path, idx, content, heading],
+        )
+        .unwrap();
+    };
+
+    // Shortest possible both-terms match: unbeatable bm25, thin on actual meaning.
+    insert("a.md", 0, "Misc", "graph knowledge");
+    // Under 400 chars so the length norm does not discount it; heading + exact
+    // phrase are the two signals bm25 has no access to.
+    insert(
+        "b.md",
+        1,
+        "Knowledge graph",
+        "A knowledge graph stores entities and the relations between them, which is \
+         what lets a note vault answer questions instead of merely storing text.",
+    );
+
+    conn
+}
+
+/// Integration tests for the *reranked* search wrappers. These are the tests the
+/// wiring work needs: proving that the `*_reranked` variants actually reorder
+/// under Tier 1 and are byte-identical to the plain functions under `Off`.
+#[cfg(test)]
+mod reranked_wrapper_tests {
+    use super::*;
+    use crate::db::search::rerank::{RerankConfig, RerankMode};
+
+    #[test]
+    fn lexical_reranks_full_text_search() {
+        let conn = test_db_with_ranking_disagreement();
+        let cfg = RerankConfig::lexical();
+
+        // Guard against a vacuous test: if bm25 already returned b.md first there
+        // would be nothing for the rerank to prove. This asserts the fixture still
+        // encodes a genuine disagreement.
+        let plain = full_text_search(&conn, "knowledge graph", 5).unwrap();
+        assert_eq!(
+            plain[0].file_path, "a.md",
+            "fixture no longer discriminates — FTS already ranks b.md first"
+        );
+
+        let reranked = full_text_search_reranked(&conn, "knowledge graph", 5, &cfg, None).unwrap();
+        assert!(reranked.len() >= 2, "fixture should match both notes");
+        // The phrase-in-heading note must be promoted to the top by Tier 1.
+        assert_eq!(
+            reranked[0].file_path, "b.md",
+            "lexical rerank should float the exact-phrase heading note to #1"
+        );
+        // Rerank overwrites score with the blended 0..1 value (documented side
+        // effect); prove the magnitude changed away from the ~0.016 RRF band.
+        assert!(
+            reranked[0].score > 0.1,
+            "expected a rerank-scale score, got {}",
+            reranked[0].score
+        );
+    }
+
+    #[test]
+    fn off_is_byte_identical_to_plain_full_text_search() {
+        let conn = test_db_with_ranking_disagreement();
+        let plain = full_text_search(&conn, "knowledge graph", 5).unwrap();
+        let off = full_text_search_reranked(
+            &conn,
+            "knowledge graph",
+            5,
+            &RerankConfig::off(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(plain.len(), off.len());
+        for (p, o) in plain.iter().zip(off.iter()) {
+            assert_eq!(p.chunk_id, o.chunk_id);
+            assert_eq!(p.file_path, o.file_path);
+            assert_eq!(p.content, o.content);
+            assert_eq!(p.heading_hierarchy, o.heading_hierarchy);
+            // score identity is the strict part: Off must not touch it at all.
+            assert_eq!(p.score.to_bits(), o.score.to_bits(), "Off changed the score");
+        }
+    }
+
+    #[test]
+    fn chinese_query_runs_full_path_without_panic() {
+        let conn = test_db_with_ranking_disagreement();
+        // No CJK content in the fixture; the point is that the CJK-bigram path in
+        // tokenize_query and scoring survives an all-Chinese query end to end.
+        let out = full_text_search_reranked(&conn, "知识图谱", 5, &RerankConfig::lexical(), None)
+            .unwrap();
+        // Result may be empty (no CJK docs) — the assertion is simply "no panic".
+        let _ = out.len();
+    }
+
+    #[test]
+    fn mode_off_short_circuit_matches_hybrid() {
+        // hybrid_search_reranked(Off) must equal hybrid_search. With an empty
+        // vector index hybrid degrades to the FTS branch, which is enough to
+        // exercise the short-circuit path deterministically.
+        let conn = test_db_with_ranking_disagreement();
+        let emb = vec![0.0_f32; 768];
+        let plain = hybrid_search(&conn, "knowledge graph", &emb, 5).unwrap();
+        let off = hybrid_search_reranked(
+            &conn,
+            "knowledge graph",
+            &emb,
+            5,
+            &RerankConfig { mode: RerankMode::Off, ..Default::default() },
+            None,
+        )
+        .unwrap();
+        assert_eq!(plain.len(), off.len());
+        for (p, o) in plain.iter().zip(off.iter()) {
+            assert_eq!(p.chunk_id, o.chunk_id);
+            assert_eq!(p.score.to_bits(), o.score.to_bits());
+        }
+    }
+
+    /// Tier 2/3 with no external reranker attached is the state every wired call
+    /// site is in today. It must behave exactly like Tier 1, never error.
+    #[test]
+    fn external_tiers_degrade_to_lexical_when_unavailable() {
+        let conn = test_db_with_ranking_disagreement();
+        let lexical =
+            full_text_search_reranked(&conn, "knowledge graph", 5, &RerankConfig::lexical(), None)
+                .unwrap();
+        for mode in [RerankMode::CrossEncoder, RerankMode::Llm] {
+            let degraded = full_text_search_reranked(
+                &conn,
+                "knowledge graph",
+                5,
+                &RerankConfig { mode, ..Default::default() },
+                None,
+            )
+            .unwrap();
+            let want: Vec<i64> = lexical.iter().map(|r| r.chunk_id).collect();
+            let got: Vec<i64> = degraded.iter().map(|r| r.chunk_id).collect();
+            assert_eq!(want, got, "{:?} without an external reranker must equal Tier 1", mode);
+        }
+    }
+}
+
+/// Related Notes panel — the merge/dedupe/rank contract the UI depends on.
+#[cfg(test)]
+mod related_notes_tests {
+    use super::*;
+
+    /// Production runs `setup_database_schema` *and* `migrate_schema_columns`
+    /// (db/mod.rs:32-35). Skipping the second one drifts the fixture from the
+    /// real schema, which has bitten this repo before.
+    fn test_db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        conn
+    }
+
+    fn add_note(conn: &Connection, path: &str, title: &str, body: &str) {
+        conn.execute(
+            "INSERT OR IGNORE INTO files (path, hash, title) VALUES (?1, 'h', ?2)",
+            params![path, title],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, content, heading_hierarchy, marker_type)
+             VALUES (?1, 0, ?2, '', 'user')",
+            params![path, body],
+        )
+        .unwrap();
+    }
+
+    fn add_semantic_edge(conn: &Connection, source: &str, target: &str, similarity: f64) {
+        conn.execute(
+            "INSERT INTO semantic_edges (source_path, target_path, similarity) VALUES (?1, ?2, ?3)",
+            params![source, target, similarity],
+        )
+        .unwrap();
+    }
+
+    fn add_relation(conn: &Connection, source: &str, target: &str, rel_type: &str) {
+        conn.execute(
+            "INSERT INTO note_relations (source_path, target_path, relation_type, confidence)
+             VALUES (?1, ?2, ?3, 0.9)",
+            params![source, target, rel_type],
+        )
+        .unwrap();
+    }
+
+    /// `semantic_edges` stores one row per unordered pair, so a query that only
+    /// matched `source_path` would silently hide half the neighbours.
+    #[test]
+    fn semantic_edges_are_read_from_both_ends() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        add_note(&conn, "left.md", "Left", "body");
+        add_note(&conn, "right.md", "Right", "body");
+        add_semantic_edge(&conn, "left.md", "me.md", 0.81); // we are the target
+        add_semantic_edge(&conn, "me.md", "right.md", 0.90); // we are the source
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        let paths: Vec<&str> = out.notes.iter().map(|n| n.file_path.as_str()).collect();
+        assert!(paths.contains(&"left.md"), "missing target-side neighbour: {:?}", paths);
+        assert!(paths.contains(&"right.md"), "missing source-side neighbour: {:?}", paths);
+        // Higher similarity leads within the semantic group.
+        assert_eq!(out.notes[0].file_path, "right.md");
+        assert!(out.semantic_index_ready);
+    }
+
+    /// A note is never related to itself, no matter which table says so.
+    #[test]
+    fn the_note_itself_is_excluded() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "links to [[Me]] in its own text");
+        add_semantic_edge(&conn, "me.md", "me.md", 0.99);
+        add_relation(&conn, "me.md", "me.md", "supports");
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        assert!(out.notes.is_empty(), "self leaked into the list: {:?}", out.notes);
+    }
+
+    /// Two independent signals agreeing is the panel's most valuable result, so it
+    /// must be both flagged (`signals.len() > 1`) and ranked first — ahead of a
+    /// higher-similarity note that only has one signal.
+    #[test]
+    fn multi_signal_note_is_flagged_and_ranked_first() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Zettelkasten", "body");
+        add_note(&conn, "both.md", "Both", "see [[Zettelkasten]] for context");
+        add_note(&conn, "semantic_only.md", "Only", "body");
+        add_semantic_edge(&conn, "both.md", "me.md", 0.78);
+        add_semantic_edge(&conn, "me.md", "semantic_only.md", 0.97);
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        assert_eq!(out.notes[0].file_path, "both.md");
+        assert_eq!(out.notes[0].signals.len(), 2);
+        assert!(out.notes[0].signals.contains(&"link".to_string()));
+        assert!(out.notes[0].signals.contains(&"semantic".to_string()));
+        // The single-signal note still shows up, just behind.
+        assert_eq!(out.notes[1].signals, vec!["semantic".to_string()]);
+    }
+
+    /// An explicit relation is an assertion someone made; a cosine score is a guess.
+    /// Ranking must reflect that even when the guess scores higher.
+    #[test]
+    fn explicit_relations_outrank_semantic_and_are_found_in_both_directions() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        add_note(&conn, "outgoing.md", "Outgoing", "body");
+        add_note(&conn, "incoming.md", "Incoming", "body");
+        add_note(&conn, "similar.md", "Similar", "body");
+        add_relation(&conn, "me.md", "outgoing.md", "supplementary");
+        add_relation(&conn, "incoming.md", "me.md", "supports");
+        add_semantic_edge(&conn, "me.md", "similar.md", 0.99);
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        let explicit: Vec<&RelatedNote> =
+            out.notes.iter().filter(|n| n.relation == "explicit").collect();
+        assert_eq!(explicit.len(), 2, "both directions must be picked up");
+        // Relation type travels with the note so the UI can name the reason.
+        let types: Vec<Option<&str>> =
+            explicit.iter().map(|n| n.relation_type.as_deref()).collect();
+        assert!(types.contains(&Some("supplementary")));
+        assert!(types.contains(&Some("supports")));
+        // The 0.99 cosine note sorts last, behind both explicit relations.
+        assert_eq!(out.notes.last().unwrap().file_path, "similar.md");
+    }
+
+    /// Empty-because-nothing-matched and empty-because-nothing-was-indexed are
+    /// different problems with different fixes, so the payload must distinguish them.
+    #[test]
+    fn missing_semantic_index_is_reported_distinctly_from_an_empty_result() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        let no_index = get_related_notes(&conn, "me.md", 10).unwrap();
+        assert!(no_index.notes.is_empty());
+        assert!(!no_index.semantic_index_ready, "no edges and no embedding ⇒ not ready");
+
+        // One edge anywhere in the vault proves the index has been built; this note
+        // simply has no neighbours.
+        add_note(&conn, "a.md", "A", "body");
+        add_note(&conn, "b.md", "B", "body");
+        add_semantic_edge(&conn, "a.md", "b.md", 0.80);
+        let indexed = get_related_notes(&conn, "me.md", 10).unwrap();
+        assert!(indexed.notes.is_empty());
+        assert!(indexed.semantic_index_ready, "edges exist ⇒ genuinely no related notes");
+    }
+
+    /// The UTF-8 iron rule. A byte cut at 120 lands mid-codepoint on CJK and panics;
+    /// this note is 400 CJK chars = 1200 bytes, so a byte-slicing regression fails here.
+    #[test]
+    fn cjk_preview_is_truncated_on_char_boundaries() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        let long_cjk: String = "知识图谱与卡片盒笔记法".chars().cycle().take(400).collect();
+        add_note(&conn, "cjk.md", "中文笔记", &long_cjk);
+        add_semantic_edge(&conn, "me.md", "cjk.md", 0.88);
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        let preview = &out.notes[0].preview;
+        assert_eq!(preview.chars().count(), 120, "preview must be 120 *chars*");
+        assert!(long_cjk.starts_with(preview.as_str()));
+        assert_eq!(out.notes[0].title, "中文笔记");
+    }
+
+    /// `limit` bounds the list after ranking, so the strongest results survive.
+    #[test]
+    fn limit_bounds_the_result_after_ranking() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        for i in 0..10 {
+            let path = format!("n{}.md", i);
+            add_note(&conn, &path, &format!("N{}", i), "body");
+            add_semantic_edge(&conn, "me.md", &path, 0.75 + (i as f64) * 0.02);
+        }
+
+        let out = get_related_notes(&conn, "me.md", 3).unwrap();
+        assert_eq!(out.notes.len(), 3);
+        // Highest similarity first: n9 (0.93), n8, n7.
+        assert_eq!(out.notes[0].file_path, "n9.md");
+        assert_eq!(out.notes[2].file_path, "n7.md");
+    }
+
+    /// Before `finalize_embedding_index` runs there are no `semantic_edges` rows, but
+    /// `chunks_vec` is already populated. The live KNN fallback is what makes the panel
+    /// useful in that window instead of showing an empty box.
+    #[test]
+    fn live_vector_fallback_covers_the_pre_finalize_window() {
+        let conn = test_db();
+        add_note(&conn, "me.md", "Me", "body");
+        add_note(&conn, "twin.md", "Twin", "near-identical body");
+        add_note(&conn, "unrelated.md", "Unrelated", "orthogonal body");
+
+        // Identical unit vectors ⇒ cosine 1.0; an orthogonal one ⇒ 0.0, below the 0.75
+        // floor the edge table uses, so it must be filtered out rather than shown.
+        let mut same = vec![0.0f32; 768];
+        same[0] = 1.0;
+        let mut orthogonal = vec![0.0f32; 768];
+        orthogonal[5] = 1.0;
+        let embed = |path: &str, v: &[f32]| {
+            let id: i64 = conn
+                .query_row(
+                    "SELECT id FROM chunks WHERE file_path = ?1 ORDER BY chunk_index LIMIT 1",
+                    params![path],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            conn.execute(
+                "INSERT OR REPLACE INTO chunks_vec (id, embedding) VALUES (?1, ?2)",
+                params![id, blob],
+            )
+            .unwrap();
+        };
+        embed("me.md", &same);
+        embed("twin.md", &same);
+        embed("unrelated.md", &orthogonal);
+
+        let out = get_related_notes(&conn, "me.md", 10).unwrap();
+        assert!(out.semantic_index_ready, "an embedded note can always be compared");
+        let paths: Vec<&str> = out.notes.iter().map(|n| n.file_path.as_str()).collect();
+        assert_eq!(paths, vec!["twin.md"], "only above-threshold neighbours: {:?}", paths);
+        assert_eq!(out.notes[0].relation, "semantic");
+    }
+}
+

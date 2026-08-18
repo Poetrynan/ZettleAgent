@@ -74,6 +74,30 @@ pub fn tool_limit_nudge(zh: bool) -> String {
     )
 }
 
+/// Thinking-stream text for the iteration-cap exit.
+///
+/// Separate copy from `tool_limit_thinking` on purpose: "you used 200 tool
+/// calls" and "you took 50 model round-trips" are different facts, and telling
+/// the user the wrong one makes the limit look like a bug.
+pub fn iteration_limit_thinking(zh: bool, max: usize) -> String {
+    if zh {
+        format!("已达迭代上限（{max} 轮），正在综合最终回答…")
+    } else {
+        format!("Reached the iteration limit ({max} rounds). Synthesizing final answer.")
+    }
+}
+
+pub fn iteration_limit_nudge(zh: bool) -> String {
+    pick_lang(
+        zh,
+        "已达到本轮的迭代上限。请基于目前已收集的信息给出最终回答，请勿再调用任何工具。\
+         如果信息不足，请说明还缺什么，让用户决定下一步。",
+        "You have reached this turn's iteration limit. Give your final answer from the \
+         information gathered so far and do NOT call any more tools. If it is not enough, \
+         say what is still missing so the user can decide the next step.",
+    )
+}
+
 pub fn empty_plan_thinking_ui(zh: bool) -> String {
     pick_lang(zh, "计划已更新，正在执行下一步工具…", "Plan updated — executing next tool…")
 }
@@ -118,28 +142,6 @@ pub fn truncation_nudge(zh: bool) -> String {
     )
 }
 
-pub fn tool_error_recovery(zh: bool, tool_name: &str, error_snippet: &str) -> String {
-    if zh {
-        format!(
-            "⚠️ 工具 `{tool_name}` 执行失败。错误：{error_snippet}\n\n\
-             恢复选项：\n\
-             1. 修正参数后重试（如文件路径、查询条件）\n\
-             2. 换用其他工具达成相同目标\n\
-             3. 若无法恢复，告知用户并基于已有数据继续\n\
-             请勿用完全相同的参数重复调用。"
-        )
-    } else {
-        format!(
-            "⚠️ Tool '{tool_name}' failed. Error: {error_snippet}\n\n\
-             Recovery options:\n\
-             1. Retry with corrected arguments (e.g., fix file path, adjust query)\n\
-             2. Use an alternative tool to achieve the same goal\n\
-             3. If the error is unrecoverable, inform the user and continue with available data\n\
-             Do NOT repeat the exact same call that just failed."
-        )
-    }
-}
-
 pub fn stagnation_thinking_ui(zh: bool) -> String {
     pick_lang(zh, "检测到搜索循环，正在切换策略…", "Detected search loop — switching strategy…")
 }
@@ -164,26 +166,32 @@ pub fn stagnation_system(zh: bool) -> String {
     )
 }
 
-pub fn tool_observation(zh: bool, tool_names: &str) -> String {
-    if zh {
-        format!("观察：工具执行已完成 [{tool_names}]。请继续下一步。")
-    } else {
-        format!(
-            "Observation: Tool execution completed [{tool_names}]. Proceed with the next step."
-        )
-    }
-}
-
-pub fn recovery_adjust_thinking(zh: bool) -> String {
-    pick_lang(zh, "检测到停滞，正在调整策略…", "Detected a stall — adjusting approach.")
-}
-
+/// Thinking-stream text for the error-escalation exit (3 consecutive tool
+/// errors) in the agent loop.
+///
+/// This copy used to exist twice: here, and hardcoded inline at the escalation
+/// branch in `mod.rs`. Two verbatim copies of a bilingual string is how zh/en
+/// pairs silently desync — one gets reworded, the other does not. The call site
+/// now goes through this function, so there is a single source of truth.
 pub fn recovery_escalate_thinking(zh: bool) -> String {
     pick_lang(
         zh,
         "多次工具错误，需要你的指引…",
         "Encountered repeated errors — handing back to the user for guidance.",
     )
+}
+
+/// Detail line for the `Retrying` phase during provider HTTP retry.
+///
+/// `attempt` is the 1-based number of the attempt about to run, so "重试
+/// (2/3)" reads as "second of three tries", which is what a user watching the
+/// spinner expects.
+pub fn llm_retry_detail(zh: bool, attempt: u32, max: u32) -> String {
+    if zh {
+        format!("模型请求失败，正在重试（{attempt}/{max}）…")
+    } else {
+        format!("Model request failed — retrying ({attempt}/{max})…")
+    }
 }
 
 /// True when the answer looks like a meta stub rather than a real report.

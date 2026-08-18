@@ -62,17 +62,21 @@ pub(crate) async fn send_and_parse_openai_tools(
         },
     };
 
-    let mut builder = client.post(&config.api_url).json(&request);
-    if let Some(key) = &config.api_key {
-        builder = builder.header("Authorization", format!("Bearer {}", key));
-    }
-
-    let response = builder.send().await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("LLM API error ({}): {}", status, body);
-    }
+    // Provider calls used to be `builder.send().await?` — a single 429 or a
+    // dropped connection aborted the whole turn and discarded every tool result
+    // already gathered. Retry now lives in `llm::send_llm_request_with_retry`
+    // (one implementation, shared by all three adapters) and covers only the
+    // pre-stream window, since retrying after tokens have been emitted would
+    // replay text the user already saw.
+    let zh = super::zh_from_messages(messages);
+    let response = super::send_llm_request_with_retry("LLM", zh, app_handle, || {
+        let mut builder = client.post(&config.api_url).json(&request);
+        if let Some(key) = &config.api_key {
+            builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+        builder
+    })
+    .await?;
 
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();

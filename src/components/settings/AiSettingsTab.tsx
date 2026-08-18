@@ -1,8 +1,11 @@
 /**
  * AiSettingsTab — AI 设置（LLM 提供商、API 配置、模型选择、嵌入配置）
  */
+import { useEffect, useState } from 'react';
 import { t } from '../../lib/i18n';
 import { LLM_PROVIDERS, getProvider } from '../../lib/llm-providers';
+import { getSecretStatus } from '../../lib/storage';
+import type { SecretStatus } from '../../lib/secrets';
 import { sectionTitle, labelStyle } from './settingsStyles';
 import { IconBrain, IconKey } from '../icons';
 
@@ -34,6 +37,18 @@ export function AiSettingsTab({
   saved, hasChanges, handleProviderChange, handleModelChange, handleSaveConfig, onConfigDirty,
 }: AiSettingsTabProps) {
   const currentProvider = getProvider(llmConfig.providerId);
+
+  // Where the key physically lives, so we can warn when the OS credential store
+  // isn't protecting it. Re-probed after each save (the `saved` flip) because a
+  // save is exactly when the backend may have fallen back to the plaintext file.
+  const [secretStatus, setSecretStatus] = useState<SecretStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getSecretStatus(true).then(s => { if (alive) setSecretStatus(s); });
+    return () => { alive = false; };
+  }, [saved]);
+
+  const keyUnprotected = secretStatus?.has_key === true && secretStatus.protected === false;
 
   return (
     <div className="settings-tab-content">
@@ -79,6 +94,47 @@ export function AiSettingsTab({
             <div>
               <label style={labelStyle}><IconKey size={12} /> API Key</label>
               <input type="password" className="input" value={localApiKey} onChange={e => { setLocalApiKey(e.target.value); onConfigDirty(); }} placeholder="sk-..." />
+
+              {/* Storage-protection status.
+                  Silence would be dishonest here: after the move to the OS
+                  credential store, users will reasonably assume the key is
+                  protected. When the store is unreachable (headless Linux, no
+                  D-Bus session, locked keyring) the key sits in a plaintext
+                  file, and that has to be said out loud. */}
+              {keyUnprotected && (
+                <div
+                  role="alert"
+                  data-testid="api-key-unprotected-warning"
+                  style={{
+                    marginTop: 'var(--space-2)',
+                    padding: 'var(--space-2) var(--space-3)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--warning-bg, rgba(255,180,0,0.12))',
+                    color: 'var(--warning, #b26a00)',
+                    fontSize: 'var(--text-xs)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {isZh
+                    ? '当前密钥未受系统凭据库保护，正以明文保存在本地文件中。请安装/解锁系统钥匙串（Linux 需 Secret Service）后重新保存密钥。'
+                    : 'This key is NOT protected by the system credential store — it is kept in a plaintext local file. Install/unlock your system keyring (Secret Service on Linux) and save the key again.'}
+                  {secretStatus?.fallback_reason && (
+                    <div style={{ marginTop: '4px', opacity: 0.85 }}>
+                      {secretStatus.fallback_reason}
+                    </div>
+                  )}
+                </div>
+              )}
+              {secretStatus?.protected && (
+                <div
+                  data-testid="api-key-protected-note"
+                  style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}
+                >
+                  {isZh
+                    ? '密钥已存入操作系统凭据库，不再保存在浏览器存储或 settings.json 中。'
+                    : 'Key stored in the OS credential store — no longer kept in WebView storage or settings.json.'}
+                </div>
+              )}
             </div>
           )}
 

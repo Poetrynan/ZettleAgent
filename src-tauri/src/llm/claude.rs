@@ -191,22 +191,21 @@ pub(crate) async fn send_and_parse_claude_tools(
         request["tools"] = serde_json::json!(claude_tools);
     }
 
-    let mut builder = client
-        .post(&config.api_url)
-        .header("Content-Type", "application/json")
-        .header("anthropic-version", "2023-06-01")
-        .json(&request);
-
-    if let Some(key) = &config.api_key {
-        builder = builder.header("x-api-key", key);
-    }
-
-    let response = builder.send().await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Claude API error ({}): {}", status, body);
-    }
+    // Shared pre-stream retry (see `llm::send_llm_request_with_retry`): 429/5xx and
+    // transient transport failures get bounded backoff instead of aborting the turn.
+    let zh = super::zh_from_messages(messages);
+    let response = super::send_llm_request_with_retry("Claude", zh, app_handle, || {
+        let mut builder = client
+            .post(&config.api_url)
+            .header("Content-Type", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .json(&request);
+        if let Some(key) = &config.api_key {
+            builder = builder.header("x-api-key", key);
+        }
+        builder
+    })
+    .await?;
 
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();

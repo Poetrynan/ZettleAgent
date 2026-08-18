@@ -9,6 +9,9 @@ pub mod scheduler;
 mod canvas;
 pub mod lint;
 pub mod temporal;
+/// FSRS-4.5 spaced-repetition arithmetic. Pure functions; the store and the
+/// commands that wrap it live in `db::review_store` / `commands::review_commands`.
+pub mod fsrs;
 pub mod error;
 pub mod tools;
 pub mod agents;
@@ -19,6 +22,9 @@ mod app_paths;
 mod chat_file_log;
 mod pipeline_log;
 mod gpu;
+/// OS credential-store backed API-key storage. Deliberately exposes no command
+/// that hands the secret back to the webview — only Rust reads the bytes.
+pub mod secrets;
 
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
@@ -116,6 +122,23 @@ pipeline_log::init(&app_data_dir);
                 }
             }
 
+            // Approval policy startup housekeeping:
+            // - session-scoped allow rules must not survive a restart;
+            // - the persisted permission mode is restored into process state.
+            match llm::approval::cleanup_session_rules(&conn) {
+                Ok(n) if n > 0 => log::info!("Dropped {} session-scoped approval rule(s)", n),
+                Ok(_) => {}
+                Err(e) => log::warn!("Failed to clear session approval rules: {}", e),
+            }
+            llm::approval::restore_permission_mode(&conn);
+            // Same shape for the retrieval rerank stage: the persisted mode/knobs
+            // become process state so every search path can read them without a
+            // per-query settings lookup.
+            db::search::rerank::restore_config(&conn);
+            // Same shape again for the FSRS scheduler: the queue and every grade
+            // read the process copy, so it must be populated before any command runs.
+            db::review_store::restore_config(&conn);
+
             // Store connection in managed state
             let db_arc = Arc::new(Mutex::new(conn));
             app.manage(AppState {
@@ -123,6 +146,8 @@ pipeline_log::init(&app_data_dir);
                 scheduler: SchedulerState::new(&db_arc),
                 watcher: Arc::new(Mutex::new(std::collections::HashMap::new())),
             });
+            // Let the approval gate reach `approval_rules` from the agent loop.
+            llm::approval::set_active_db(db_arc.clone());
 
 
 
@@ -155,6 +180,10 @@ pipeline_log::init(&app_data_dir);
             commands::sync_vault,
             commands::chunk_document,
             commands::search_chunks,
+            // Retrieval relevance rerank: config + Tier 2/3 transport
+            commands::get_rerank_config,
+            commands::set_rerank_config,
+            commands::rerank_search_window,
             commands::read_markdown_file,
             commands::read_binary_file,
             commands::write_markdown_file,
@@ -185,6 +214,9 @@ pipeline_log::init(&app_data_dir);
             commands::save_chunk_embeddings,
             commands::finalize_embedding_index,
             commands::get_embedding_stats,
+            // Custom-endpoint embeddings are proxied here so the API key stays
+            // in Rust; the WebView never sees it (see `secrets`).
+            commands::fetch_custom_embeddings,
             commands::clear_data,
             commands::clear_data_selective,
             commands::resolve_wikilink,
@@ -209,6 +241,8 @@ pipeline_log::init(&app_data_dir);
             commands::agent_chat,
             commands::cancel_agent_turn,
             commands::get_edges_by_relation,
+            // Related Notes panel (passive discovery while reading)
+            commands::get_related_notes,
             // MCP + Skill management (Phase 3.3)
             commands::list_mcp_servers,
             commands::add_mcp_server,
@@ -250,11 +284,43 @@ pipeline_log::init(&app_data_dir);
             // Agent approval gate
             llm::approval::approve_tool_call,
             llm::approval::reject_tool_call,
+            // Permission tiers + allow rules
+            llm::approval::get_permission_mode,
+            llm::approval::set_permission_mode,
+            llm::approval::list_approval_rules,
+            llm::approval::add_approval_rule,
+            llm::approval::delete_approval_rule,
             // Demo vault
             commands::init_demo_vault,
+            // Whole-turn undo (Checkpoint / Rewind) + recycle bin
+            commands::list_agent_runs,
+            commands::undo_agent_run,
+            commands::list_trash,
+            commands::restore_from_trash,
+            commands::empty_trash,
+            commands::get_trash_retention_days,
+            commands::set_trash_retention_days,
+            // API key storage (OS credential store; no getter by design)
+            secrets::set_api_key,
+            secrets::get_api_key_status,
+            secrets::delete_api_key,
+            secrets::migrate_api_key,
+            // MCP Server side — expose this vault to external agents (read-only, stdio)
+            tools::mcp_server::mcp_server_client_config,
+            tools::mcp_server::mcp_server_capabilities,
             // GPU hardware detection
             gpu::get_gpu_info,
             gpu::get_gpu_info_async,
+            // ── Spaced repetition (FSRS) ──
+            commands::get_review_queue,
+            commands::grade_card,
+            commands::add_cards_to_review,
+            commands::remove_card_from_review,
+            commands::suspend_card,
+            commands::get_review_card,
+            commands::get_review_stats,
+            commands::get_fsrs_config,
+            commands::set_fsrs_config,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

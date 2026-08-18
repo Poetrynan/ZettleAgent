@@ -8,18 +8,22 @@ import { clearData, clearDataSelective } from '../../lib/tauri';
 import {
   IconSettings, IconGlobe,
   IconTrash, IconSliders, IconKeyboard, IconBrain, IconDatabase,
-  IconNote, IconSearch, IconFile, IconSync,
+  IconNote, IconSearch, IconFile, IconSync, IconPlug,
 } from '../icons';
 import { loadDailyNotePath, loadNewFolderDefaultPath } from '../../lib/storage';
 
 import { sectionTitle } from './settingsStyles';
 import { McpServersSection } from './McpSettings';
+import { McpServerExposeSection } from './McpServerExposeSection';
+import { RerankSettingsSection } from './RerankSettings';
+import { ReviewSettingsSection } from './ReviewSettings';
 import { SkillDirectoriesSection } from './SkillSettings';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { AiSettingsTab } from './AiSettingsTab';
 import { AiMemorySection } from './MemorySettings';
 import { CoreMemorySection } from './CoreMemorySettings';
 import { EmbeddingConfigSection } from './EmbeddingSettings';
+import { SecuritySettingsSection } from './SecuritySettings';
 
 
 export function Settings() {
@@ -225,8 +229,35 @@ export function Settings() {
 
           {activeTab === 'ext' && (
             <div className="settings-tab-content">
-              {/* ── MCP Servers ──────────────────────────────────────────── */}
-              <McpServersSection isZh={isZh} />
+              {/* ── Agent Permissions + Recycle Bin ──────────────────────── */}
+              <SecuritySettingsSection isZh={isZh} vaultPath={state.vaultPath} />
+
+              {/* ── MCP ───────────────────────────────────────────────────────
+                  One heading over two cards that point opposite ways. They used
+                  to sit here as peers both labelled "MCP", which is the one
+                  arrangement guaranteed to be misread: the outbound card is
+                  harmless, the inbound one hands your notes to another process.
+                  The group header states the split once so each card's arrow is
+                  read as a direction rather than as decoration. */}
+              <div className="settings-mcp-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                <div>
+                  <h2 style={sectionTitle}>
+                    <IconPlug size={18} /> {t('settings.mcp.groupTitle')}
+                  </h2>
+                  <p style={{
+                    fontSize: 'var(--text-xs)', color: 'var(--text-secondary)',
+                    margin: '4px 0 0 0', lineHeight: 1.7,
+                  }}>
+                    {t('settings.mcp.groupDesc')}
+                  </p>
+                </div>
+
+                {/* Outbound: this app → external MCP servers. */}
+                <McpServersSection isZh={isZh} />
+
+                {/* Inbound: external agents → this vault, read-only. */}
+                <McpServerExposeSection />
+              </div>
 
               {/* ── Skill Directories ────────────────────────────────────── */}
               <SkillDirectoriesSection />
@@ -246,7 +277,14 @@ export function Settings() {
           {activeTab === 'organize' && (
             <div className="settings-tab-content">
               {/* Embedding Engine Section */}
-              <EmbeddingConfigSection isZh={isZh} apiKey={llmConfig.apiKey} />
+              <EmbeddingConfigSection isZh={isZh} />
+              {/* Retrieval / Rerank — the stage after retrieval, so it sits with
+                  the embedding engine rather than under Extensions. */}
+              <RerankSettingsSection />
+              {/* Spaced repetition — the other thing that decides which notes
+                  reach the user, so it belongs beside retrieval rather than
+                  hidden under Extensions. */}
+              <ReviewSettingsSection />
               {/* Smart Organize Section */}
               <OrganizeSettingsTab isZh={isZh} />
             </div>

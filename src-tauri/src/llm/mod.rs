@@ -10,7 +10,6 @@ pub mod context;
 pub mod planning;
 pub mod plan_guard;
 pub mod adaptive_prompt;
-pub mod agent_recovery;
 pub mod tool_hooks;
 pub mod token_usage;
 
@@ -19,18 +18,27 @@ pub use tool_hooks::{
     HookOutcome, HookStage, run_pre_hooks, run_post_hooks, run_abort_hook,
     set_active_vault_path, active_vault_path, flush_memory_before_fold,
     set_active_app_handle, active_app_handle,
+    clear_turn_taint, mark_turn_tainted, turn_taint,
 };
 
 // Re-export approval gate items
 pub use approval::{
-    approve_tool_call, reject_tool_call, is_write_tool,
+    approve_tool_call, reject_tool_call, requires_approval,
     build_approval_diff_data, get_pending_approvals, ApprovalDiffData,
+    ApprovalDecision, ApprovalRule, PermissionMode, RiskLevel,
+    base_risk_level, effective_risk_level, decide, decide_ambient,
+    permission_mode, store_permission_mode,
 };
 
 // Re-export context window management items
 pub use context::{
     estimate_tokens, compress_context_window, get_max_context_tokens,
     compress_tool_result,
+    // Budget accounting: the estimate now includes tool_calls, tool schemas and
+    // per-message role overhead, and compaction is gated on it.
+    estimate_message_tokens, estimate_messages_tokens, estimate_tool_schema_tokens,
+    estimate_request_tokens, compression_trigger_threshold, should_compress,
+    COMPRESSION_TRIGGER_RATIO, DEFAULT_CONTEXT_WINDOW_TOKENS,
 };
 
 // Re-export adaptive planning items
@@ -41,10 +49,6 @@ pub use adaptive_prompt::{
     TaskComplexity, assess_complexity, build_prompt,
     tool_quick_ref, tool_coordination_guide,
 };
-
-// agent_recovery module kept for potential future use, but no longer wired
-// into the main loop — the "Less Control" philosophy lets the model decide
-// when to stop rather than injecting stagnation/recovery prompts.
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -527,6 +531,12 @@ pub fn begin_agent_run() -> String {
     }
     reset_agent_stop();
     token_usage::reset_turn_usage();
+    // Untrusted-content provenance is per-turn: a web page read three turns ago
+    // must not keep decorating today's approval cards.
+    tool_hooks::clear_turn_taint();
+    // Publish the id to the tool layer so every file mutation this turn performs
+    // lands in `agent_run_journal` under it, enabling "undo this whole turn".
+    tool_hooks::set_current_run_id(&id);
     crate::chat_file_log::log_agent(&format!("run_started id={}", id));
     id
 }
@@ -711,8 +721,32 @@ pub fn format_llm_user_error(raw: &str) -> String {
             .to_string();
     }
     if lower.contains("timed out") || lower.contains("timeout") {
-        return "LLM 请求超时。请检查网络，或换用更快/更小的模型。\n\n\
-                LLM request timed out. Check your network or try a faster/smaller model."
+        return "LLM 请求超时。若使用本地模型（Ollama / LM Studio），首次加载模型可能需要数十秒，请稍后重试；\
+                否则请检查网络，或换用更快/更小的模型。\n\n\
+                LLM request timed out. If you are running a local model (Ollama / LM Studio), the first \
+                load can take tens of seconds — try again shortly. Otherwise check your network or try a \
+                faster/smaller model."
+            .to_string();
+    }
+    // Connection refused must be matched BEFORE the generic "error sending request"
+    // branch below: reqwest's Display text contains both, and refused is the far
+    // more actionable diagnosis. For this project it almost always means a local
+    // Ollama / LM Studio that is not running (or is on a different port) — telling
+    // that user "check API URL, proxy, and connectivity" sends them hunting for a
+    // network problem that does not exist.
+    if lower.contains("connection refused")
+        || lower.contains("actively refused")
+        || lower.contains("os error 10061")
+    {
+        return "无法连接到模型服务（连接被拒绝）。\
+                若使用本地部署（Ollama / LM Studio），请确认：\
+                1) 服务已启动；2) 端口与设置中的 API 地址一致（Ollama 默认 http://localhost:11434）；\
+                3) 模型已下载。若使用云端 API，请检查 API 地址是否正确。\n\n\
+                Could not connect to the model service (connection refused). \
+                If you are self-hosting (Ollama / LM Studio), check that: \
+                1) the server is running; 2) the port matches the API URL in Settings \
+                (Ollama defaults to http://localhost:11434); 3) the model is pulled. \
+                If you are using a cloud API, verify the API URL."
             .to_string();
     }
     if lower.contains("error sending request")
@@ -1225,6 +1259,103 @@ fn is_transient_tool_error(content: &str) -> bool {
 /// perceive a stall, long enough that a transient blip has cleared.
 const RETRY_GRACE_MS: u64 = 1200;
 
+// ── Empty-result stagnation ────────────────────────────────────────
+// Salvaged from the deleted `agent_recovery::StagnationDetector`. Everything
+// else that module tracked already has a stronger equivalent in this loop
+// (repeated calls → duplicate detection + force-break; search volume → the
+// per-tool budget filter; wall clock → the per-tool 30s timeout and
+// `max_total_tool_calls`; consecutive errors → `consecutive_errors` >= 3).
+//
+// The one failure mode nothing covered: the tool *succeeded* and returned
+// nothing. `Error:`-prefixed results drive the escalation counter, but an
+// empty result is not an error, so it resets that counter (see below) and the
+// turn keeps spending calls on a search that will never land.
+//
+// Note the old detector could not have worked here even if it had been wired:
+// it compared the raw string against `"[]"`, but by the time a result reaches
+// the loop's bookkeeping it has been pretty-printed and wrapped in a ```json
+// fence (see the JSON normalization in the result loop). The fence has to come
+// off first — that is what `strip_json_fence` is for.
+
+/// Consecutive empty results before the loop asks the model to change approach.
+const EMPTY_RESULT_STAGNATION_THRESHOLD: u32 = 3;
+
+/// Hard cap on stagnation nudges per turn. Recovery must be bounded: a vault
+/// that genuinely holds nothing relevant would otherwise earn a nudge every
+/// third tool call and burn API quota until `max_total_tool_calls` fires.
+const MAX_STAGNATION_NUDGES: u32 = 2;
+
+/// Object keys whose empty array means "the tool found nothing".
+///
+/// Deliberately a closed list rather than "any empty array in the object".
+/// A note payload legitimately carries `"tags": []`, and treating that as an
+/// empty result would misfire on a perfectly successful read.
+const EMPTY_PAYLOAD_KEYS: &[&str] = &["results", "notes", "matches", "items", "data", "hits"];
+
+/// Unwrap the fenced-JSON block (opening fence, optional language tag, closing
+/// fence) that the result loop wraps around JSON tool output.
+fn strip_json_fence(content: &str) -> &str {
+    let t = content.trim();
+    let Some(rest) = t.strip_prefix("```") else {
+        return t;
+    };
+    // Drop the language tag on the opening fence, then the closing fence.
+    let rest = rest.split_once('\n').map(|(_lang, body)| body).unwrap_or("");
+    rest.trim_end().strip_suffix("```").unwrap_or(rest).trim()
+}
+
+/// True when a tool call succeeded but produced nothing the model can use.
+///
+/// Errors are explicitly *not* empty: they belong to the escalation path, which
+/// keeps the original message. Counting them here would let the stagnation
+/// nudge swallow a real failure.
+fn is_empty_tool_result(content: &str) -> bool {
+    let body = strip_json_fence(content);
+    if body.is_empty() {
+        return true;
+    }
+    if body.starts_with("Error:") || body.starts_with("error:") {
+        return false;
+    }
+    if matches!(body, "{}" | "[]" | "null") {
+        return true;
+    }
+    match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(serde_json::Value::Array(items)) => items.is_empty(),
+        Ok(serde_json::Value::Object(map)) => {
+            // Wrapper shape, e.g. `{"results": [], "message": "No results found."}`.
+            // The prose field only explains the emptiness, so it does not count
+            // as content — but at least one known payload key must be present.
+            let payloads: Vec<_> = EMPTY_PAYLOAD_KEYS
+                .iter()
+                .filter_map(|k| map.get(*k))
+                .collect();
+            !payloads.is_empty()
+                && payloads.iter().all(|v| match v {
+                    serde_json::Value::Array(items) => items.is_empty(),
+                    serde_json::Value::Object(o) => o.is_empty(),
+                    serde_json::Value::Null => true,
+                    _ => false,
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Fold one tool result into the empty-result streak; returns the new streak.
+fn track_empty_result(streak: u32, content: &str) -> u32 {
+    if is_empty_tool_result(content) {
+        streak.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// Whether the loop should inject one stagnation nudge right now.
+fn should_nudge_stagnation(streak: u32, nudges_used: u32) -> bool {
+    streak >= EMPTY_RESULT_STAGNATION_THRESHOLD && nudges_used < MAX_STAGNATION_NUDGES
+}
+
 // ── Tool Result Summarization ──────────────────────────────────────
 
 /// Tools whose output is already compact and should NOT be summarized.
@@ -1545,6 +1676,299 @@ async fn synthesize_or_fallback(
     (fallback, AnswerSource::Loop)
 }
 
+// ── Turn budgets ───────────────────────────────────────────────────
+
+/// Which per-turn budget ran out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TurnLimit {
+    /// Model round-trips (`AgentExecutionConfig::max_iterations`).
+    Iterations,
+    /// Total tool calls (`AgentExecutionConfig::max_total_tool_calls`).
+    ToolCalls,
+}
+
+/// Decide whether the current turn has exhausted a budget.
+///
+/// Pure on purpose: the cap arithmetic is the part that is easy to get off by
+/// one, and a pure function can be tested without driving a live agent turn or
+/// a real provider. `iteration` is 1-based (already incremented for the round
+/// about to run), so the comparison is `>`, not `>=`: with `max_iterations = 1`
+/// the first round must still be allowed to happen.
+///
+/// Iterations are reported first when both are exhausted. That ordering is
+/// cosmetic — both land in the same synthesis exit — but it keeps the message
+/// the user sees deterministic instead of depending on arrival order.
+pub(crate) fn exhausted_budget(
+    iteration: usize,
+    max_iterations: usize,
+    tool_calls: usize,
+    max_tool_calls: usize,
+) -> Option<TurnLimit> {
+    if iteration > max_iterations {
+        return Some(TurnLimit::Iterations);
+    }
+    if tool_calls >= max_tool_calls {
+        return Some(TurnLimit::ToolCalls);
+    }
+    None
+}
+
+// ── Provider HTTP retry ────────────────────────────────────────────
+// The tool layer has had transient-error retry for a while
+// (`is_transient_tool_error` + `AgentPhase::Retrying`), but the model calls
+// themselves did not: every `send_and_parse_*` propagated the first error with
+// `?` and killed the whole turn. A single 429 or a dropped connection threw away
+// all the tool work already done in that turn. This is that gap closed, in one
+// place, for all three adapters.
+//
+// Scope note — why this wraps only the *request*, not the stream: all three
+// adapters stream tokens to the UI as they arrive. Once a byte has been emitted,
+// retrying would replay text the user already saw. So the retry boundary is
+// deliberately "before the first byte": connect, send, response status. That
+// covers 429/5xx/refused/timeout, which is where these failures actually live.
+
+/// Total attempts (1 initial + 2 retries). Bounded because every attempt on a
+/// paid endpoint may still be billed, and a user staring at a spinner would
+/// rather see a clear error than an indefinite retry storm.
+pub(crate) const LLM_MAX_ATTEMPTS: u32 = 3;
+
+/// First backoff step. Long enough for a load-balancer blip to clear, short
+/// enough that a successful retry still feels like a hiccup rather than a hang.
+pub(crate) const LLM_RETRY_BASE_MS: u64 = 500;
+
+/// Ceiling for a single backoff step, so an honoured `Retry-After: 300` cannot
+/// silently park the turn for five minutes.
+pub(crate) const LLM_RETRY_MAX_DELAY_MS: u64 = 8_000;
+
+/// Ceiling on *cumulative* sleeping across all retries in one call. Without
+/// this, three capped steps could add ~24s of dead air on top of the request
+/// timeouts themselves.
+pub(crate) const LLM_RETRY_TOTAL_BUDGET_MS: u64 = 20_000;
+
+/// Retry only what a retry can actually fix.
+///
+/// 429 and 5xx are the server saying "not now". 408/425 are explicit
+/// retry-me signals. Everything else in 4xx (400 bad request, 401/403 bad or
+/// missing key, 404 wrong endpoint, 422 bad schema) is a *configuration* error:
+/// the identical request will fail identically, so retrying only wastes the
+/// user's quota and spams three copies of the same error into the log.
+pub(crate) fn should_retry_http_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429) || (500..600).contains(&status)
+}
+
+/// Retry only transport failures that are plausibly transient.
+///
+/// Deliberately conservative on "connection refused": for a cloud endpoint it is
+/// worth one more try, and for a local Ollama/LM Studio that is still binding its
+/// port a retry is exactly right — but see `format_llm_user_error`, which turns
+/// the *final* refusal into an actionable "is the server running?" message rather
+/// than a bare `connection refused`.
+pub(crate) fn should_retry_transport_error(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    // Body/decode errors are excluded: by then bytes have already been streamed.
+    const TRANSIENT: &[&str] = &[
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection closed",
+        "connection refused",
+        "connection aborted",
+        "actively refused",
+        "error sending request",
+        "broken pipe",
+        "os error 10054", // WSAECONNRESET — Windows spells this numerically
+        "os error 10061", // WSAECONNREFUSED
+        "dns error",
+        "temporarily unavailable",
+    ];
+    TRANSIENT.iter().any(|p| lower.contains(p))
+}
+
+/// Deterministic exponential backoff for `attempt` (1-based), before jitter.
+///
+/// Kept separate from the jitter step so it stays pure and monotonic — a test
+/// can assert "step 2 waits longer than step 1" without fighting randomness.
+pub(crate) fn backoff_base_delay(attempt: u32) -> std::time::Duration {
+    let exp = attempt.saturating_sub(1).min(16);
+    let ms = LLM_RETRY_BASE_MS
+        .saturating_mul(1u64 << exp)
+        .min(LLM_RETRY_MAX_DELAY_MS);
+    std::time::Duration::from_millis(ms)
+}
+
+/// Apply proportional jitter, `factor` in `[0.0, 1.0)` mapping to `[75%, 125%]`.
+///
+/// Jitter matters even for a single-user desktop app: without it, a vault-wide
+/// batch (reconcile over N notes) retries in lockstep and re-hammers the same
+/// rate limit at the same instant.
+pub(crate) fn apply_jitter(base: std::time::Duration, factor: f64) -> std::time::Duration {
+    let f = factor.clamp(0.0, 1.0);
+    let scaled = base.as_millis() as f64 * (0.75 + 0.5 * f);
+    std::time::Duration::from_millis(scaled.round() as u64)
+}
+
+/// Parse a `Retry-After` header value (delay-seconds form only).
+///
+/// The HTTP-date form is intentionally unsupported: it needs a trusted local
+/// clock, and every provider that actually sends this header sends seconds.
+/// Values above the per-step ceiling are clamped rather than rejected, so a
+/// `Retry-After: 120` still slows us down without stalling the turn.
+pub(crate) fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
+    let secs: f64 = value.trim().parse().ok()?;
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
+    }
+    let ms = (secs * 1000.0).round() as u64;
+    Some(std::time::Duration::from_millis(ms.min(LLM_RETRY_MAX_DELAY_MS)))
+}
+
+/// Truncate a provider error body for display.
+///
+/// `chars().take()`, never a byte slice: provider errors routinely come back in
+/// Chinese, and byte-slicing a multi-byte boundary panics. This repo has already
+/// been bitten by that class of bug more than once.
+fn truncate_error_body(body: &str, max_chars: usize) -> String {
+    if body.chars().count() <= max_chars {
+        return body.to_string();
+    }
+    let head: String = body.chars().take(max_chars).collect();
+    format!("{}…", head)
+}
+
+/// Pick the retry-message language from the transcript.
+///
+/// The adapters do not receive the orchestrator's `user_zh` flag, and threading it
+/// through three public signatures for one label is not worth it — the last user
+/// message is the same signal `chat_completion_with_tools` uses.
+pub(crate) fn zh_from_messages(messages: &[ChatMessage]) -> bool {
+    messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .last()
+        .map(|m| plan_guard::user_prefers_zh(&m.content))
+        .unwrap_or(false)
+}
+
+/// Pseudo-random `[0.0, 1.0)` jitter source.
+///
+/// Wall-clock nanoseconds rather than the `rand` crate: jitter here only needs to
+/// decorrelate retries, not to be cryptographic or statistically clean, and this
+/// avoids adding a dependency to a project that deliberately ships a small,
+/// auditable, offline-capable dependency tree.
+fn jitter_seed() -> f64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (nanos % 1_000) as f64 / 1_000.0
+}
+
+/// Send one provider request with bounded exponential backoff + jitter.
+///
+/// `build` is a closure rather than a pre-built `RequestBuilder` because a
+/// builder is consumed by `send()`; rebuilding per attempt also avoids relying
+/// on `try_clone()`, which returns `None` for streaming bodies.
+///
+/// Returns the successful response, or the *last* error encountered — never a
+/// synthesized "retries exhausted" string, so the provider's own diagnostics
+/// (invalid key, quota exceeded, model not found) reach the user intact.
+pub(crate) async fn send_llm_request_with_retry<F>(
+    provider_label: &str,
+    zh: bool,
+    app_handle: &tauri::AppHandle,
+    build: F,
+) -> anyhow::Result<reqwest::Response>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+{
+    let mut slept = std::time::Duration::ZERO;
+
+    for attempt in 1..=LLM_MAX_ATTEMPTS {
+        // A user who pressed stop does not want two more attempts.
+        if is_agent_cancelled() {
+            anyhow::bail!("Agent turn cancelled by user");
+        }
+
+        let (last_err, retry_ok, retry_after) = match build().send().await {
+            Ok(response) if response.status().is_success() => return Ok(response),
+            Ok(response) => {
+                let status = response.status();
+                // Read the header before consuming the body.
+                let retry_after = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(parse_retry_after);
+                let body = response.text().await.unwrap_or_default();
+                (
+                    anyhow::anyhow!(
+                        "{} API error ({}): {}",
+                        provider_label,
+                        status,
+                        truncate_error_body(&body, 2000)
+                    ),
+                    should_retry_http_status(status.as_u16()),
+                    retry_after,
+                )
+            }
+            Err(e) => {
+                let raw = e.to_string();
+                let retry_ok = should_retry_transport_error(&raw);
+                (
+                    anyhow::anyhow!(format_llm_user_error(&raw)),
+                    retry_ok,
+                    None,
+                )
+            }
+        };
+
+        if attempt >= LLM_MAX_ATTEMPTS || !retry_ok {
+            return Err(last_err);
+        }
+
+        // A provider-supplied `Retry-After` is honoured verbatim — jittering it
+        // could land us *below* what the server asked for and earn a second 429.
+        // Our own backoff is jittered so a batch job (reconcile over N notes)
+        // does not retry in lockstep against the same rate limit.
+        let delay = match retry_after {
+            Some(d) => d,
+            None => apply_jitter(backoff_base_delay(attempt), jitter_seed()),
+        };
+
+        // Total-time guard: if waiting would blow the budget, surface the real
+        // error now instead of holding the turn open for a retry we cannot afford.
+        if slept + delay > std::time::Duration::from_millis(LLM_RETRY_TOTAL_BUDGET_MS) {
+            crate::chat_file_log::log_agent(&format!(
+                "llm_retry_budget_exhausted: {} — {}",
+                provider_label, last_err
+            ));
+            return Err(last_err);
+        }
+
+        crate::chat_file_log::log_agent(&format!(
+            "llm_retry: {} attempt {}/{} failed ({}) — retrying in {}ms",
+            provider_label, attempt, LLM_MAX_ATTEMPTS, last_err, delay.as_millis()
+        ));
+        // Visible, with the count: "retrying (2/3)" beats a frozen spinner.
+        emit_agent_event(app_handle, AgentEvent::Phase {
+            phase: AgentPhase::Retrying,
+            label: AgentPhase::Retrying.label(zh).to_string(),
+            detail: Some(plan_guard::llm_retry_detail(zh, attempt + 1, LLM_MAX_ATTEMPTS)),
+        });
+
+        tokio::time::sleep(delay).await;
+        slept += delay;
+        // Put the UI back into "waiting for the model" rather than leaving it
+        // parked on "retrying" for the whole of the next attempt.
+        emit_phase(app_handle, AgentPhase::CallingModel, zh);
+    }
+
+    // Unreachable: the loop either returns a response or returns the last error
+    // on its final attempt. Kept as a real error rather than unreachable!() so a
+    // future edit to the bounds cannot turn into a panic in the user's face.
+    anyhow::bail!("{} API error: retry loop ended without a result", provider_label)
+}
+
 // ── Tool Calling Loop ──────────────────────────────────────────────
 
 /// Chat completion with Tool Calling loop.
@@ -1562,7 +1986,17 @@ pub async fn chat_completion_with_tools<F>(
 where
     F: for<'a> Fn(&'a str, &'a str) -> futures_util::future::BoxFuture<'a, anyhow::Result<String>>,
 {
-    let _max_iterations = exec_config.max_iterations; // Kept for reference; true loop uses no iteration cap
+    // ── Two independent turn caps, deliberately not redundant ────────
+    // `max_iterations` bounds *model round-trips* (loop safety / latency): a
+    // model that keeps calling one tool per turn forever is bounded by this and
+    // nothing else. `max_total_tool_calls` bounds *cost* (a single iteration can
+    // fan out to many parallel tool calls, so round-trips alone cannot cap spend).
+    //
+    // They do not fight because neither is a hard break: whichever trips first
+    // routes into the same synthesis-and-finish exit below, so the user gets an
+    // answer from the work already done either way. `.max(1)` because a
+    // misconfigured 0 would otherwise end the turn before the first model call.
+    let max_iterations: usize = exec_config.max_iterations.max(1);
     let max_total_tool_calls: usize = exec_config.max_total_tool_calls; // configurable per-agent
     let mut total_tool_calls = 0;
     let provider = detect_provider(config);
@@ -1606,19 +2040,25 @@ where
     // when to stop. We keep only essential safety state here.
     let mut last_plan_steps: Option<Vec<PlanStep>> = None;
     let mut consecutive_errors = 0u32;
+    // Streak of "succeeded but returned nothing" tool results, and how many
+    // change-approach nudges this turn has already spent. Both are per-turn so
+    // the budget cannot leak across turns.
+    let mut consecutive_empty_results = 0u32;
+    let mut stagnation_nudges = 0u32;
 
     let max_context = get_max_context_tokens(config);
 
-    // ── Loop Engineering: True Loop ─────────────────────────────
-    // No fixed iteration cap. Agent decides when to stop.
-    // Only max_total_tool_calls remains as a cost safety net.
-    let mut _iteration = 0usize;
+    // ── Loop Engineering: model-driven loop, two bounded exits ──────
+    // The model decides when it is done (no tool_calls → final answer). The two
+    // caps declared at the top of this function only bound the pathological
+    // cases, and both funnel into the single wrap-up block below.
+    let mut iteration = 0usize;
     loop {
         // ── User cancellation check ───────────────────────────────
         // Checked every iteration so the stop button takes effect
         // between tool calls (the natural granularity for an agent loop).
         if is_agent_cancelled() {
-            crate::chat_file_log::log_agent(&format!("turn_cancelled: Agent turn cancelled by user at iteration {}", _iteration));
+            crate::chat_file_log::log_agent(&format!("turn_cancelled: Agent turn cancelled by user at iteration {}", iteration));
             flush_pending_tool_results(&mut pending_tool_results, app_handle, "Tool call cancelled");
             return Ok(AgentTurnResult::finish(
                 String::new(),
@@ -1628,23 +2068,47 @@ where
             ));
         }
 
-        _iteration += 1;
-        // ── Hard limit on total tool calls — cost safety net ──
-        if total_tool_calls >= max_total_tool_calls {
+        iteration += 1;
+
+        // ── Turn exhaustion — iteration cap or tool-call cap ─────────
+        // `max_iterations` was previously read into `_max_iterations` and thrown
+        // away, which made a user-visible, per-agent configurable knob do exactly
+        // nothing. It is now a real cap. Round-trips and tool calls are different
+        // resources, so both checks exist; whichever trips first wraps the turn up
+        // *through synthesis*, never a hard break, so the user still gets an answer
+        // built from the work already done.
+        let exhausted: Option<(&str, String, String)> = match exhausted_budget(
+            iteration, max_iterations, total_tool_calls, max_total_tool_calls,
+        ) {
+            Some(TurnLimit::Iterations) => Some((
+                "iteration",
+                plan_guard::iteration_limit_thinking(user_zh, max_iterations),
+                plan_guard::iteration_limit_nudge(user_zh),
+            )),
+            Some(TurnLimit::ToolCalls) => Some((
+                "tool_calls",
+                plan_guard::tool_limit_thinking(user_zh, max_total_tool_calls),
+                plan_guard::tool_limit_nudge(user_zh),
+            )),
+            None => None,
+        };
+
+        if let Some((reason, thinking, nudge)) = exhausted {
             crate::chat_file_log::log_agent(&format!(
-                "hard_limit_tool_calls: Agent hit hard limit of {} total tool calls — forcing completion",
-                max_total_tool_calls
+                "turn_limit_{}: hit cap (iteration {}/{}, tool_calls {}/{}) — forcing completion",
+                reason, iteration, max_iterations, total_tool_calls, max_total_tool_calls
             ));
-            emit_agent_event(app_handle, AgentEvent::Thinking {
-                message: plan_guard::tool_limit_thinking(user_zh, max_total_tool_calls),
-            });
+            // Visible, not silent: the phase event puts the turn in a named state
+            // and the Thinking event says which budget ran out.
+            emit_phase(app_handle, AgentPhase::Synthesizing, user_zh);
+            emit_agent_event(app_handle, AgentEvent::Thinking { message: thinking });
             flush_pending_tool_results(&mut pending_tool_results, app_handle, "Tool call skipped (turn ending)");
 
             let substantive = plan_guard::substantive_tool_count(&executed_calls);
             if substantive > 0 {
                 if let Some(synth) = run_synthesis_with_retry(
                     config, messages, &user_query, task_kind,
-                    app_handle, total_tool_calls, "hard_limit",
+                    app_handle, total_tool_calls, reason,
                 ).await {
                     return Ok(AgentTurnResult::finish(
                         synth, AnswerSource::Mandatory, total_tool_calls, app_handle));
@@ -1659,7 +2123,7 @@ where
             let mut final_messages = messages.clone();
             final_messages.push(ChatMessage {
                 role: "user".to_string(),
-                content: plan_guard::tool_limit_nudge(user_zh),
+                content: nudge,
                 ..Default::default()
             });
             if !prompted_thinking::is_native_reasoning(config) {
@@ -1678,9 +2142,17 @@ where
             ));
         }
 
-        // ── Context Window Compression ──────────────────────────────
-        emit_phase(app_handle, AgentPhase::CompressingContext, user_zh);
-        compress_context_window(config, messages, &user_query, max_context).await;
+        // ── Context Window Compression (threshold-gated) ─────────────
+        // This used to run unconditionally every iteration. Two problems with
+        // that: it burned CPU/latency on transcripts nowhere near the limit,
+        // and compaction rewrites the head of the message list, which
+        // invalidates the provider's prompt-cache prefix every single turn.
+        // Now the gate consults the full budget (messages + tool_calls + tool
+        // schemas) and stays out of the way until we actually approach it.
+        if should_compress(messages, tools, &user_query, max_context) {
+            emit_phase(app_handle, AgentPhase::CompressingContext, user_zh);
+            compress_context_window(config, messages, tools, &user_query, max_context).await;
+        }
         // Enforce tool budget (State Graph constraints)
         // Greetings/small-talk: no tools at all — the model physically cannot
         // call one, no matter how it interprets the prompt.
@@ -1708,7 +2180,7 @@ where
             let unique_tools: std::collections::HashSet<&str> = executed_calls.iter().map(|(n,_)| n.as_str()).collect();
             crate::chat_file_log::log_agent(&format!(
                 "loop_status: Loop Status - Iteration: {} | Tools called: {} | Unique tools used: {} | Sources gathered: {}",
-                _iteration,
+                iteration,
                 total_tool_calls,
                 unique_tools.len(),
                 executed_calls.len()
@@ -1958,8 +2430,38 @@ where
             } else {
                 executed_calls.push((tc_name.clone(), tc_args.clone()));
 
-                // Approval gate: check if this is a write tool
-                let needs_approval = is_write_tool(tc_name);
+                // Approval gate: permission mode + risk level + allow rules.
+                // `decide_ambient` folds the three (see approval::decide) into
+                // Allow / Ask / Deny. Critical risk always lands on Ask.
+                let (decision, risk, decision_reason) =
+                    approval::decide_ambient(tc_name, tc_args);
+                crate::chat_file_log::log_agent(&format!(
+                    "approval_decision: tool={} decision={:?} risk={} reason={}",
+                    tc_name,
+                    decision,
+                    risk.as_str(),
+                    decision_reason.clone().unwrap_or_else(|| "-".to_string())
+                ));
+
+                // Deny (ReadOnly mode): never execute, never emit an approval
+                // event — feed the reason back so the model stops retrying.
+                if decision == approval::ApprovalDecision::Deny {
+                    let tc_id_clone = tc_id.clone();
+                    let tc_name_clone = tc_name.clone();
+                    let reason = decision_reason
+                        .unwrap_or_else(|| "Tool denied by the current permission mode.".to_string());
+                    emit_agent_event(app_handle, AgentEvent::ToolBlocked {
+                        tool_call_id: tc_id.clone(),
+                        name: tc_name.clone(),
+                        reason: reason.clone(),
+                    });
+                    tool_futures.push(Box::pin(async move {
+                        (tc_id_clone, tc_name_clone, format!("Error: {}", reason), 0u64)
+                    }));
+                    continue;
+                }
+
+                let needs_approval = decision == approval::ApprovalDecision::Ask;
                 let approval_id = if needs_approval {
                     format!("approval-{}-{}", tc_name, std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -2248,6 +2750,15 @@ where
                 consecutive_errors = 0;
             }
 
+            // ── Empty-result streak ─────────────────────────────────
+            // Before: a tool that returned `[]` looked like a success here, so
+            // it reset `consecutive_errors` and the turn kept searching until
+            // the tool budget or `max_total_tool_calls` cut it off — silently.
+            // Now: an empty result advances its own streak, which trips the
+            // change-approach nudge below. The error path is untouched; errors
+            // are never counted as empty (see `is_empty_tool_result`).
+            consecutive_empty_results = track_empty_result(consecutive_empty_results, &final_content);
+
             messages.push(ChatMessage {
                 role: "tool".to_string(),
                 content: final_content.clone(),
@@ -2256,7 +2767,7 @@ where
             });
 
             if is_error {
-                crate::chat_file_log::log_agent(&format!("tool_returned_error: Tool '{}' returned error: {}", tc_name, &final_content[..final_content.len().min(200)]));
+                crate::chat_file_log::log_agent(&format!("tool_returned_error: Tool '{}' returned error: {}", tc_name, final_content.chars().take(200).collect::<String>()));
             }
         }
 
@@ -2264,16 +2775,50 @@ where
         // pending tracker so early exits in subsequent iterations don't double-flush.
         pending_tool_results.clear();
 
+        // ── Stagnation nudge: tools work, but find nothing ───────────
+        // Salvaged from the old `agent_recovery` module, with three constraints
+        // the original did not have:
+        //
+        // 1. Bounded — at most `MAX_STAGNATION_NUDGES` per turn, and the streak
+        //    resets after each one, so this can never become its own loop.
+        // 2. Visible — a Thinking event tells the user why the agent changed
+        //    course instead of silently rewriting its own context.
+        // 3. Cache-safe — appended at the *tail*. The old design injected into
+        //    the system prompt, which would invalidate the provider's
+        //    prompt-cache prefix on every fire (the same trap the compression
+        //    gate above was reworked to avoid).
+        //
+        // Guidance only: nothing here re-executes a tool, so a write that was
+        // denied or rejected still has to pass `approval::decide_ambient` again
+        // on the next model turn. The nudge cannot route around the gate.
+        if should_nudge_stagnation(consecutive_empty_results, stagnation_nudges) {
+            stagnation_nudges += 1;
+            crate::chat_file_log::log_agent(&format!(
+                "stagnation_nudge: {} consecutive empty tool results — injecting change-approach guidance ({}/{})",
+                consecutive_empty_results, stagnation_nudges, MAX_STAGNATION_NUDGES
+            ));
+            emit_agent_event(app_handle, AgentEvent::Thinking {
+                message: plan_guard::stagnation_thinking_ui(user_zh),
+            });
+            // "user" role rather than "system": mid-conversation system messages
+            // are not portable across the three adapters, and this matches how
+            // `tool_limit_nudge` is already delivered above.
+            messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: plan_guard::stagnation_system(user_zh),
+                ..Default::default()
+            });
+            // Clear the streak so the same stall does not re-fire on the very
+            // next iteration, before the model has had a chance to react.
+            consecutive_empty_results = 0;
+        }
+
         // ── Error escalation: stop after 3 consecutive errors ──
         if consecutive_errors >= 3 {
             crate::chat_file_log::log_agent(&format!(
                 "error_escalation: {} consecutive tool errors — stopping", consecutive_errors));
             emit_agent_event(app_handle, AgentEvent::Thinking {
-                message: if user_zh {
-                    "多次工具错误，需要你的指引…".to_string()
-                } else {
-                    "Encountered repeated errors — handing back to the user for guidance.".to_string()
-                },
+                message: plan_guard::recovery_escalate_thinking(user_zh),
             });
             flush_pending_tool_results(&mut pending_tool_results, app_handle, "Tool call skipped (turn ending)");
             let fallback = if user_zh {
@@ -2287,5 +2832,349 @@ where
             ).await;
             return Ok(AgentTurnResult::finish(content, source, total_tool_calls, app_handle));
         }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────
+// These cover the loop's *live* recovery path. It had no coverage before:
+// the only tests that existed were in `agent_recovery`, a module with zero
+// call sites, so they asserted the behaviour of code that never ran.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Retry-grace classifier ─────────────────────────────────────
+
+    #[test]
+    fn transient_network_shapes_are_worth_one_retry() {
+        for c in [
+            "Error: error sending request for url",
+            "Error: connection reset by peer",
+            "Error: database is locked",
+            "Error: 503 Service Unavailable",
+            "error: Tool 'fetch_web_content' timed out after 30 seconds.",
+        ] {
+            assert!(is_transient_tool_error(c), "should retry: {c}");
+        }
+    }
+
+    #[test]
+    fn deterministic_failures_are_never_retried() {
+        for c in [
+            "Error: note not found",
+            "Error: invalid argument 'path'",
+            "Error: unknown tool",
+            "Error: User rejected this edit.",
+            "Error: invalid json in arguments",
+        ] {
+            assert!(!is_transient_tool_error(c), "should not retry: {c}");
+        }
+    }
+
+    #[test]
+    fn a_permanent_marker_wins_over_a_transient_one() {
+        // Both vocabularies present: the deterministic cause decides, otherwise
+        // we would burn a round-trip re-fetching a note that does not exist.
+        assert!(!is_transient_tool_error(
+            "Error: note not found (connection reset while probing)"
+        ));
+    }
+
+    // ── Empty-result stagnation ─────────────────────────────────────
+
+    #[test]
+    fn json_fence_is_stripped_before_emptiness_check() {
+        // The result loop wraps JSON in a ```json fence; the raw "[]" the old
+        // detector looked for never actually arrives.
+        assert_eq!(strip_json_fence("```json\n[]\n```"), "[]");
+        assert_eq!(strip_json_fence("```\n{}\n```"), "{}");
+        assert_eq!(strip_json_fence("plain text"), "plain text");
+    }
+
+    #[test]
+    fn empty_shapes_are_detected_through_the_fence() {
+        assert!(is_empty_tool_result("```json\n[]\n```"));
+        assert!(is_empty_tool_result("[]"));
+        assert!(is_empty_tool_result("{}"));
+        assert!(is_empty_tool_result("null"));
+        assert!(is_empty_tool_result(""));
+        // Wrapper shape from web_search when nothing matched.
+        assert!(is_empty_tool_result(
+            r#"{"results": [], "message": "No results found. Try different keywords."}"#
+        ));
+    }
+
+    #[test]
+    fn non_empty_and_error_results_do_not_count_as_empty() {
+        // Real content.
+        assert!(!is_empty_tool_result(r#"{"results": [{"id": 1}]}"#));
+        assert!(!is_empty_tool_result("```json\n[\n  {\n    \"id\": 1\n  }\n]\n```"));
+        // A successful read that merely has no tags must not look empty.
+        assert!(!is_empty_tool_result(r#"{"title": "n", "tags": []}"#));
+        // Errors belong to the escalation path, never the empty streak.
+        assert!(!is_empty_tool_result("Error: something broke"));
+        assert!(!is_empty_tool_result("Error: []"));
+    }
+
+    #[test]
+    fn empty_streak_advances_and_resets() {
+        let mut streak = 0u32;
+        streak = track_empty_result(streak, "[]");
+        streak = track_empty_result(streak, "```json\n[]\n```");
+        assert_eq!(streak, 2);
+        // A non-empty result breaks the streak.
+        streak = track_empty_result(streak, r#"{"results":[{"id":1}]}"#);
+        assert_eq!(streak, 0);
+    }
+
+    #[test]
+    fn stagnation_nudge_is_bounded() {
+        // Fires only at/after the threshold.
+        assert!(!should_nudge_stagnation(EMPTY_RESULT_STAGNATION_THRESHOLD - 1, 0));
+        assert!(should_nudge_stagnation(EMPTY_RESULT_STAGNATION_THRESHOLD, 0));
+        // Never exceeds the per-turn cap, no matter how long the stall runs.
+        assert!(!should_nudge_stagnation(99, MAX_STAGNATION_NUDGES));
+    }
+
+    #[test]
+    fn cjk_tool_results_are_handled_without_panicking() {
+        // This repo has shipped several CJK-triggered panics from byte slicing.
+        // The emptiness check must be slice-free and must not misread CJK prose.
+        assert!(!is_empty_tool_result("这是一条中文笔记内容，不应被判定为空。"));
+        assert!(!is_empty_tool_result("```json\n{\n  \"results\": [\n    \"机器学习\"\n  ]\n}\n```"));
+        assert!(is_empty_tool_result("```json\n{\n  \"results\": [],\n  \"message\": \"未找到结果\"\n}\n```"));
+    }
+
+    #[test]
+    fn stagnation_guidance_is_localized_and_non_empty() {
+        // The nudge reuses the prompt text already in plan_guard rather than
+        // reintroducing a second copy of it.
+        let zh = plan_guard::stagnation_system(true);
+        let en = plan_guard::stagnation_system(false);
+        assert!(!zh.trim().is_empty() && !en.trim().is_empty());
+        assert_ne!(zh, en);
+        assert!(!plan_guard::stagnation_thinking_ui(true).trim().is_empty());
+    }
+
+    // ── Turn budgets ────────────────────────────────────────────────
+
+    #[test]
+    fn iteration_cap_is_enforced_and_not_off_by_one() {
+        // `iteration` is 1-based and already incremented for the round about to
+        // run, so the Nth round must still be allowed with max = N.
+        assert_eq!(exhausted_budget(1, 1, 0, 100), None);
+        assert_eq!(exhausted_budget(2, 1, 0, 100), Some(TurnLimit::Iterations));
+        assert_eq!(exhausted_budget(50, 50, 0, 200), None);
+        assert_eq!(exhausted_budget(51, 50, 0, 200), Some(TurnLimit::Iterations));
+    }
+
+    #[test]
+    fn tool_call_cap_still_applies_independently() {
+        // Round-trips fine, spend exhausted: the cost net must still fire, which
+        // is why wiring max_iterations did not replace it.
+        assert_eq!(exhausted_budget(3, 50, 200, 200), Some(TurnLimit::ToolCalls));
+        assert_eq!(exhausted_budget(3, 50, 199, 200), None);
+    }
+
+    #[test]
+    fn iterations_are_reported_first_when_both_are_exhausted() {
+        // Deterministic message rather than "whichever check ran first".
+        assert_eq!(exhausted_budget(99, 10, 500, 200), Some(TurnLimit::Iterations));
+    }
+
+    #[test]
+    fn iteration_limit_copy_is_bilingual_and_distinct_from_the_tool_cap_copy() {
+        let zh = plan_guard::iteration_limit_thinking(true, 50);
+        let en = plan_guard::iteration_limit_thinking(false, 50);
+        assert!(zh.contains("50") && en.contains("50"));
+        assert_ne!(zh, en);
+        // Telling the user "tool call limit" when they hit the round-trip limit
+        // makes a working cap look like a bug.
+        assert_ne!(zh, plan_guard::tool_limit_thinking(true, 50));
+        assert!(!plan_guard::iteration_limit_nudge(true).trim().is_empty());
+        assert_ne!(
+            plan_guard::iteration_limit_nudge(true),
+            plan_guard::iteration_limit_nudge(false)
+        );
+    }
+
+    // ── Provider HTTP retry ─────────────────────────────────────────
+    // Decision logic only — deliberately no network. The retry executor's
+    // interesting behaviour (what to retry, how long to wait) lives in pure
+    // functions precisely so it can be tested without a live provider.
+
+    #[test]
+    fn server_side_and_rate_limit_statuses_are_retried() {
+        for s in [408, 425, 429, 500, 502, 503, 504, 529] {
+            assert!(should_retry_http_status(s), "should retry: {s}");
+        }
+    }
+
+    #[test]
+    fn client_errors_are_never_retried() {
+        // 401/403/400 are configuration mistakes: retrying burns quota and
+        // prints the same error three times.
+        for s in [400, 401, 402, 403, 404, 405, 409, 413, 422] {
+            assert!(!should_retry_http_status(s), "should not retry: {s}");
+        }
+        // Success codes are not the retry path's business either.
+        assert!(!should_retry_http_status(200));
+        assert!(!should_retry_http_status(304));
+    }
+
+    #[test]
+    fn transient_transport_failures_are_retried() {
+        for e in [
+            "error sending request for url (https://api.example.com/v1/chat)",
+            "operation timed out",
+            "connection reset by peer",
+            "tcp connect error: Connection refused (os error 111)",
+            "No connection could be made because the target machine actively refused it. (os error 10061)",
+            "dns error: failed to lookup address information",
+        ] {
+            assert!(should_retry_transport_error(e), "should retry: {e}");
+        }
+    }
+
+    #[test]
+    fn non_transport_failures_are_not_retried() {
+        for e in [
+            "invalid api key",
+            "builder error: relative URL without a base",
+            "error decoding response body",
+        ] {
+            assert!(!should_retry_transport_error(e), "should not retry: {e}");
+        }
+    }
+
+    #[test]
+    fn backoff_increases_and_is_capped() {
+        let d1 = backoff_base_delay(1);
+        let d2 = backoff_base_delay(2);
+        let d3 = backoff_base_delay(3);
+        assert_eq!(d1.as_millis() as u64, LLM_RETRY_BASE_MS);
+        assert!(d2 > d1, "backoff must grow: {d1:?} -> {d2:?}");
+        assert!(d3 > d2, "backoff must grow: {d2:?} -> {d3:?}");
+        // Never unbounded, no matter how the attempt counter is fed.
+        assert_eq!(
+            backoff_base_delay(30).as_millis() as u64,
+            LLM_RETRY_MAX_DELAY_MS
+        );
+        // No overflow panic on an absurd attempt number.
+        assert!(backoff_base_delay(u32::MAX) <= std::time::Duration::from_millis(LLM_RETRY_MAX_DELAY_MS));
+    }
+
+    #[test]
+    fn jitter_stays_within_a_quarter_of_the_base() {
+        let base = std::time::Duration::from_millis(1000);
+        assert_eq!(apply_jitter(base, 0.0).as_millis(), 750);
+        assert_eq!(apply_jitter(base, 0.5).as_millis(), 1000);
+        assert_eq!(apply_jitter(base, 1.0).as_millis(), 1250);
+        // Out-of-range factors are clamped, not wrapped into nonsense.
+        assert_eq!(apply_jitter(base, -5.0).as_millis(), 750);
+        assert_eq!(apply_jitter(base, 5.0).as_millis(), 1250);
+        // The real seed always lands inside the same window.
+        let j = apply_jitter(base, jitter_seed());
+        assert!(j.as_millis() >= 750 && j.as_millis() <= 1250, "{j:?}");
+    }
+
+    #[test]
+    fn retry_after_is_honoured_but_clamped() {
+        assert_eq!(
+            parse_retry_after("2"),
+            Some(std::time::Duration::from_millis(2000))
+        );
+        assert_eq!(
+            parse_retry_after(" 1.5 "),
+            Some(std::time::Duration::from_millis(1500))
+        );
+        // A provider asking for 5 minutes must not park the turn for 5 minutes.
+        assert_eq!(
+            parse_retry_after("300"),
+            Some(std::time::Duration::from_millis(LLM_RETRY_MAX_DELAY_MS))
+        );
+        // HTTP-date form is unsupported by design (needs a trusted clock).
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("-3"), None);
+        assert_eq!(parse_retry_after(""), None);
+    }
+
+    #[test]
+    fn attempt_budget_is_bounded() {
+        // A regression guard on the constants themselves: "at most 3 attempts"
+        // and "total wait has a ceiling" are the two promises made to the user.
+        assert_eq!(LLM_MAX_ATTEMPTS, 3);
+        let worst: u64 = (1..LLM_MAX_ATTEMPTS)
+            .map(|a| (backoff_base_delay(a).as_millis() as f64 * 1.25) as u64)
+            .sum();
+        assert!(
+            worst <= LLM_RETRY_TOTAL_BUDGET_MS,
+            "worst-case backoff {worst}ms must fit the {LLM_RETRY_TOTAL_BUDGET_MS}ms budget",
+        );
+    }
+
+    #[test]
+    fn error_bodies_are_truncated_on_char_boundaries() {
+        // UTF-8 rule: byte slicing a CJK provider error is a panic, and provider
+        // errors in this project are frequently Chinese.
+        let cjk = "错误：模型服务返回了一个很长的中文错误信息".repeat(200);
+        let out = truncate_error_body(&cjk, 50);
+        assert_eq!(out.chars().count(), 51, "50 chars plus the ellipsis");
+        assert!(out.ends_with('…'));
+        // Short bodies pass through untouched — no gratuitous ellipsis.
+        assert_eq!(truncate_error_body("短", 50), "短");
+    }
+
+    #[test]
+    fn retry_progress_is_visible_and_counted() {
+        // "retrying (2/3)" rather than a spinner that looks frozen.
+        let zh = plan_guard::llm_retry_detail(true, 2, 3);
+        let en = plan_guard::llm_retry_detail(false, 2, 3);
+        assert!(zh.contains("2") && zh.contains("3"));
+        assert!(en.contains("2") && en.contains("3"));
+        assert_ne!(zh, en);
+    }
+
+    #[test]
+    fn connection_refused_gets_actionable_local_deployment_guidance() {
+        // Many users point this app at a local Ollama / LM Studio. A bare
+        // "connection refused" sends them looking for a network fault that does
+        // not exist; the real cause is almost always "the server isn't running".
+        let msg = format_llm_user_error(
+            "error sending request for url: tcp connect error: Connection refused (os error 111)",
+        );
+        assert!(msg.contains("Ollama"), "{msg}");
+        assert!(msg.contains("11434"), "port hint must be present: {msg}");
+        // Bilingual, per project convention.
+        assert!(msg.contains("连接被拒绝"));
+        assert!(msg.contains("connection refused"));
+    }
+
+    #[test]
+    fn timeout_guidance_mentions_slow_local_model_loads() {
+        // A local model's first load can take tens of seconds; "check your
+        // network" is the wrong advice for that case.
+        let msg = format_llm_user_error("operation timed out");
+        assert!(msg.contains("Ollama"), "{msg}");
+        assert!(msg.contains("数十秒") || msg.contains("tens of seconds"), "{msg}");
+    }
+
+    #[test]
+    fn retry_message_language_follows_the_last_user_message() {
+        let en = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "summarize my notes".to_string(),
+            ..Default::default()
+        }];
+        let zh = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "帮我整理笔记".to_string(),
+            ..Default::default()
+        }];
+        assert!(!zh_from_messages(&en));
+        assert!(zh_from_messages(&zh));
+        // No user turn yet (system-only) must not panic; English is the default.
+        assert!(!zh_from_messages(&[]));
     }
 }

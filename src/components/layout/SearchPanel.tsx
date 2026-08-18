@@ -11,7 +11,13 @@
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { searchChunks, getEmbeddingStats, type SearchResult } from '../../lib/tauri';
+import { getEmbeddingStats, type SearchResult } from '../../lib/tauri';
+import {
+  createRerankedSearcher,
+  type RerankTier,
+  type RerankDegradeReason,
+} from '../../lib/rerankSearch';
+import { t } from '../../lib/i18n';
 import { IconSearch, IconFile, IconChevronRight, IconClose } from '../icons';
 
 interface SearchPanelProps {
@@ -25,6 +31,20 @@ interface GroupedResult {
   matches: Array<SearchResult & { snippetHtml: string }>;
 }
 
+/** Tier → label key. Keyed maps rather than inline ternaries so adding a tier is a
+ *  compile error here instead of a silently missing badge. */
+const TIER_KEYS: Record<RerankTier, Parameters<typeof t>[0]> = {
+  off: 'search.rerank.tier.off',
+  lexical: 'search.rerank.tier.lexical',
+  crossEncoder: 'search.rerank.tier.crossEncoder',
+};
+
+const TIER_REASON_KEYS: Record<RerankDegradeReason, Parameters<typeof t>[0]> = {
+  modelMissing: 'search.rerank.degraded.modelMissing',
+  modelUnavailable: 'search.rerank.degraded.modelUnavailable',
+  tierNotBridged: 'search.rerank.degraded.tierNotBridged',
+};
+
 export function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
   const { state, setCurrentFile, setView } = useApp();
   const isZh = state.lang === 'zh';
@@ -36,8 +56,18 @@ export function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
   const [matchCase, setMatchCase] = useState(false);
   const [hasEmbeddingIndex, setHasEmbeddingIndex] = useState(false);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+  // Which rerank tier ordered what is currently on screen, and — when it is not
+  // the tier the user picked — why. Never derived from the setting: derived from
+  // the answer, so the panel cannot claim a tier that did not run.
+  const [tier, setTier] = useState<RerankTier | null>(null);
+  const [tierReason, setTierReason] = useState<RerankDegradeReason | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One searcher for this panel. It carries the request token that lets a slow
+  // cross-encoder answer be dropped instead of overwriting a newer result set —
+  // the `streamSessionIdRef` idiom, kept per-surface so other panels' searches
+  // cannot invalidate ours.
+  const searcherRef = useRef(createRerankedSearcher());
 
   // Check embedding index
   useEffect(() => {
@@ -59,6 +89,8 @@ export function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
       setQuery('');
       setResults([]);
       setSearched(false);
+      setTier(null);
+      setTierReason(null);
       setCollapsedFiles(new Set());
     }
   }, [isOpen]);
@@ -102,17 +134,25 @@ export function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await searchChunks({
+        const res = await searcherRef.current({
           query: trimmed,
           limit: 50,
           mode: hasEmbeddingIndex ? 'hybrid' : 'fts',
         });
-        setResults(res);
+        // A cross-encoder pass over 32 candidates easily outlives two more
+        // keystrokes. Dropping a superseded answer here is the whole point of the
+        // token: without it the panel would flicker back to an older query's hits.
+        if (res.stale) return;
+        setResults(res.results);
+        setTier(res.tier);
+        setTierReason(res.reason ?? null);
         setSearched(true);
         setCollapsedFiles(new Set());
       } catch (err) {
         console.error('Search panel failed:', err);
         setResults([]);
+        setTier(null);
+        setTierReason(null);
         setSearched(true);
       } finally {
         setIsSearching(false);
@@ -250,7 +290,35 @@ export function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
                 {isZh
                   ? `${totalMatches} 个结果 · ${totalFiles} 个文件`
                   : `${totalMatches} results in ${totalFiles} files`}
+                {tier && (
+                  <span
+                    data-testid="search-rerank-tier"
+                    data-tier={tier}
+                    title={tierReason ? t(TIER_REASON_KEYS[tierReason]) : undefined}
+                    style={{
+                      marginLeft: 8,
+                      opacity: 0.75,
+                      fontSize: 'var(--text-xs)',
+                    }}
+                  >
+                    · {t('search.rerank.tierLabel')}: {t(TIER_KEYS[tier])}
+                    {tierReason ? ' ⚠' : ''}
+                  </span>
+                )}
               </div>
+              {/* The degrade notice is spelled out, not just hinted by the badge:
+                  a mode that silently reports itself as active while a lower tier
+                  does the work is the bug this whole path exists to fix. */}
+              {tierReason && (
+                <div
+                  role="status"
+                  data-testid="search-rerank-degraded"
+                  className="search-panel-stats"
+                  style={{ opacity: 0.7 }}
+                >
+                  {t(TIER_REASON_KEYS[tierReason])}
+                </div>
+              )}
 
               {/* Grouped results */}
               <div className="search-panel-groups">

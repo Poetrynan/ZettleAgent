@@ -174,7 +174,7 @@ pub(super) async fn execute_fetch_web_content(
             title, url, now, title, url, url, now, markdown
         );
 
-        std::fs::write(&file_path, &note_content)?;
+        crate::file_lock::safe_write(&file_path, &note_content)?;
         let relative = format!("_web_clips/{}", filename);
         Some(relative)
     } else {

@@ -137,18 +137,16 @@ pub(crate) async fn send_and_parse_gemini_tools(
         request["tools"] = gemini_tools;
     }
 
-    let response = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&request)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Gemini API error ({}): {}", status, body);
-    }
+    // Shared pre-stream retry (see `llm::send_llm_request_with_retry`): 429/5xx and
+    // transient transport failures get bounded backoff instead of aborting the turn.
+    let zh = super::zh_from_messages(messages);
+    let response = super::send_llm_request_with_retry("Gemini", zh, app_handle, || {
+        client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&request)
+    })
+    .await?;
 
     use futures_util::StreamExt;
     let mut stream = response.bytes_stream();

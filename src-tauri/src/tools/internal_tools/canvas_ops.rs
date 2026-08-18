@@ -454,7 +454,7 @@ pub(super) fn execute_modify_canvas(
     if let Some(parent) = canonical.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&canonical, canvas_json)?;
+    crate::file_lock::safe_write(&canonical, &canvas_json)?;
 
     Ok(json!({
         "success": true,
@@ -529,7 +529,7 @@ pub(super) fn execute_create_canvas(
     }
 
     let content = serde_json::to_string_pretty(&canvas)?;
-    std::fs::write(&full_path, &content)?;
+    crate::file_lock::safe_write(&full_path, &content)?;
 
     Ok(json!({
         "success": true,
@@ -627,7 +627,7 @@ pub(super) fn execute_group_canvas_nodes(
     canvas.nodes.push(group_node);
 
     let canvas_json = serde_json::to_string_pretty(&canvas)?;
-    std::fs::write(&canonical, canvas_json)?;
+    crate::file_lock::safe_write(&canonical, &canvas_json)?;
 
     Ok(json!({
         "success": true,
@@ -939,7 +939,7 @@ pub(super) fn execute_arrange_canvas_by(
     }
 
     let canvas_json = serde_json::to_string_pretty(&canvas)?;
-    std::fs::write(&canonical, canvas_json)?;
+    crate::file_lock::safe_write(&canonical, &canvas_json)?;
 
     Ok(json!({
         "success": true,

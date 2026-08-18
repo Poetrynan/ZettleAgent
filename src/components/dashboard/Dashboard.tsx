@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getUnindexedChunks, saveChunkEmbeddings, finalizeEmbeddingIndex, getKnowledgeGraph } from '../../lib/tauri';
+import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getUnindexedChunks, saveChunkEmbeddings, finalizeEmbeddingIndex, getKnowledgeGraph, fetchCustomEmbeddings } from '../../lib/tauri';
 import { getEmbeddingsBatch } from '../../lib/embeddings';
 import { getSmartOrganizeConfig, setBackgroundOrganizeEnabled } from '../settings/Settings';
 import { isLlmConfigured, startBackgroundOrganize } from '../../lib/backgroundOrganize';
@@ -50,16 +50,9 @@ export function Dashboard() {
         if (raw) embedConfig = JSON.parse(raw);
       } catch {}
 
-      let apiKey = '';
-      try {
-        const llmRaw = localStorage.getItem('zettelagent-llm');
-        if (llmRaw) {
-          const llmCfg = JSON.parse(llmRaw);
-          if (llmCfg && llmCfg.apiKey) {
-            apiKey = llmCfg.apiKey;
-          }
-        }
-      } catch {}
+      // No API key is read here on purpose: it lives in the OS credential store
+      // and only Rust can read it. `fetchCustomEmbeddings` attaches the
+      // Authorization header backend-side (see src-tauri/.../search_commands.rs).
 
       // Yield to the event loop so the UI stays responsive
       const yieldToUI = () => new Promise<void>(r => setTimeout(r, 50));
@@ -98,27 +91,10 @@ export function Dashboard() {
           if (!embedConfig.apiUrl || !embedConfig.model) {
             throw new Error(state.lang === 'zh' ? 'Embedding API 配置不完整' : 'Incomplete Embedding API configuration');
           }
-          const response = await fetch(embedConfig.apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              input: contents,
-              model: embedConfig.model,
-            }),
-          });
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`API Error (${response.status}): ${errText}`);
-          }
-          const data = await response.json();
-          if (!data.data || !Array.isArray(data.data)) {
-            throw new Error(state.lang === 'zh' ? 'API 返回格式不正确' : 'Invalid API response format');
-          }
-          const sorted = data.data.sort((a: any, b: any) => a.index - b.index);
-          embeddings = sorted.map((item: any) => item.embedding);
+          // Rust performs the call and owns the credential. Its error strings are
+          // already bilingual and actionable (a 401 says "re-enter your API Key"),
+          // so they are surfaced to the user verbatim by the catch below.
+          embeddings = await fetchCustomEmbeddings(embedConfig.apiUrl, embedConfig.model, contents);
         }
 
         if (cancelRef.current) {

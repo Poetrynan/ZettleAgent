@@ -1,9 +1,7 @@
 import { useState, useRef, useCallback, useMemo, memo } from 'react';
 import { Handle, Position, NodeResizer, useReactFlow } from '@xyflow/react';
 import { t } from '../../lib/i18n';
-import { marked } from 'marked';
-
-marked.setOptions({ breaks: true, gfm: true, async: false });
+import { renderMarkdownSafe } from '../../lib/sanitizeHtml';
 
 // 亮柔色牌 — 两种模式下统一使用。
 // Obsidian 风格：便利签始终为亮色背景 + 深色文字，
@@ -42,7 +40,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }: any) {
 
   const renderedHtml = useMemo(() => {
     if (!text || !hasMarkdown) return '';
-    try { return marked.parse(text) as string; } catch { return ''; }
+    return renderMarkdownSafe(text);
   }, [text, hasMarkdown]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {

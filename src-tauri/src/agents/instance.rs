@@ -41,7 +41,21 @@ pub struct AgentInstance {
     /// Role-specific complete system prompt.
     pub system_prompt: String,
     /// Allowed tool names — only these tools are passed to the LLM.
+    ///
+    /// Empty means "all tools" (see `filter_tools`). That convention is correct
+    /// *here* because an `AgentInstance` is a fixed role whose author decides its
+    /// whole tool surface up front — an empty list is a deliberate "no
+    /// restriction". This differs from `agents::strategy`, where an empty scope
+    /// arrived by accident (a router path that set no tools) and got silently
+    /// promoted to "everything", inverting the intended Chitchat lockdown; that
+    /// layer now uses an explicit `ToolScope` enum instead.
     pub allowed_tools: Vec<String>,
+    /// When `true`, runtime-registered extension tools (MCP `mcp_*`, skill
+    /// `skill_*`, `read_skill`) bypass the `allowed_tools` filter. The unified
+    /// agent sets this so a curated `CORE_TOOLS` list does not accidentally hide
+    /// the user's installed integrations, which no compiled list can enumerate.
+    /// Preset expert agents leave it `false`: they publish an exact tool surface.
+    pub allow_extension_tools: bool,
     /// Execution limits.
     pub exec_config: AgentExecutionConfig,
 }
@@ -136,14 +150,26 @@ impl AgentInstance {
     }
 
     /// Filter tools to only those in `allowed_tools`.
-    /// An empty `allowed_tools` means "all tools allowed" (the unified agent).
-    fn filter_tools(&self, all_tools: &[ToolDef]) -> Vec<ToolDef> {
+    ///
+    /// An empty `allowed_tools` still means "all tools allowed" — see the field
+    /// doc for why that is safe at this layer (a role's tool surface is authored,
+    /// not derived from a router decision).
+    ///
+    /// `allow_extension_tools` adds MCP / skill tools back on top of a non-empty
+    /// list. Without it, the moment an agent names its tools it would also
+    /// uninstall every MCP server and skill tool the user configured, because
+    /// those names only exist at runtime.
+    pub(crate) fn filter_tools(&self, all_tools: &[ToolDef]) -> Vec<ToolDef> {
         if self.allowed_tools.is_empty() {
             return all_tools.to_vec();
         }
         all_tools
             .iter()
-            .filter(|t| self.allowed_tools.contains(&t.function.name))
+            .filter(|t| {
+                self.allowed_tools.contains(&t.function.name)
+                    || (self.allow_extension_tools
+                        && crate::tools::is_extension_tool(&t.function.name))
+            })
             .cloned()
             .collect()
     }
@@ -163,4 +189,74 @@ fn parse_next_action(content: &str) -> Option<super::router::AgentIntent> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::ToolFunction;
+
+    fn tool(name: &str) -> ToolDef {
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: name.to_string(),
+                description: format!("{name} description"),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
+            },
+        }
+    }
+
+    fn agent(allowed: &[&str], allow_extension_tools: bool) -> AgentInstance {
+        AgentInstance {
+            id: "t".to_string(),
+            display_name: "T".to_string(),
+            icon: "🧪".to_string(),
+            config: LlmConfig::default(),
+            system_prompt: String::new(),
+            allowed_tools: allowed.iter().map(|s| s.to_string()).collect(),
+            allow_extension_tools,
+            exec_config: AgentExecutionConfig::default(),
+        }
+    }
+
+    fn names(tools: &[ToolDef]) -> Vec<String> {
+        tools.iter().map(|t| t.function.name.clone()).collect()
+    }
+
+    #[test]
+    fn empty_allowed_tools_still_means_all_tools() {
+        // Preserved on purpose: a role with no list has authored no restriction.
+        let all = vec![tool("search_notes"), tool("delete_note")];
+        assert_eq!(names(&agent(&[], false).filter_tools(&all)), names(&all));
+    }
+
+    #[test]
+    fn a_named_list_hides_everything_else() {
+        let all = vec![tool("search_notes"), tool("delete_note")];
+        let kept = agent(&["search_notes"], false).filter_tools(&all);
+        assert_eq!(names(&kept), vec!["search_notes".to_string()]);
+    }
+
+    #[test]
+    fn extension_tools_survive_a_named_list_only_when_opted_in() {
+        let all = vec![
+            tool("search_notes"),
+            tool("delete_note"),
+            tool("mcp_github_create_issue"),
+            tool("skill_writer_outline"),
+            tool("read_skill"),
+        ];
+
+        // Unified-agent shape: curated core + whatever the user installed.
+        let opted_in = names(&agent(&["search_notes"], true).filter_tools(&all));
+        assert!(opted_in.contains(&"mcp_github_create_issue".to_string()));
+        assert!(opted_in.contains(&"skill_writer_outline".to_string()));
+        assert!(opted_in.contains(&"read_skill".to_string()));
+        assert!(!opted_in.contains(&"delete_note".to_string()));
+
+        // Role-agent shape: the published list is exactly the surface.
+        let closed = names(&agent(&["search_notes"], false).filter_tools(&all));
+        assert_eq!(closed, vec!["search_notes".to_string()]);
+    }
 }

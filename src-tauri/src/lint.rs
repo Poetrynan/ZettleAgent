@@ -204,7 +204,7 @@ pub fn create_note_stub(
         content.push('\n');
     }
 
-    std::fs::write(&file_path, &content)?;
+    crate::file_lock::safe_write(&file_path, &content)?;
 
     let created_path = file_path.to_string_lossy().to_string();
     log::info!("Created stub note: {} (referenced by {} notes)", created_path, referencing.len());
@@ -460,7 +460,7 @@ pub fn fix_broken_link_in_file(
     }
 
     let new_content = lines.join("\n");
-    fs::write(path, new_content)?;
+    crate::file_lock::safe_write(path, &new_content)?;
 
     Ok(())
 }

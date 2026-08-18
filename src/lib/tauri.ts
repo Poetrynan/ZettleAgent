@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getEmbedding } from './embeddings';
+import { getLang } from './i18n';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -92,6 +93,25 @@ async function withPromiseTimeout<T>(promise: Promise<T>, ms: number, label: str
 
 const EMBEDDING_QUERY_TIMEOUT_MS = 20_000;
 const EMBEDDING_STATS_TTL_MS = 5000;
+
+/**
+ * Call a custom (self-hosted / OpenAI-compatible) embedding endpoint through
+ * Rust so the API key never enters the WebView.
+ *
+ * The key was moved into the OS credential store (`lib/secrets.ts`), which by
+ * design has no getter — so the header can only be attached backend-side. This
+ * is the custom-endpoint path only; the built-in model embeds locally in a
+ * worker and does not come through here. A rejected credential surfaces as an
+ * actionable bilingual 401 message from the backend rather than a bare code.
+ */
+export async function fetchCustomEmbeddings(
+  apiUrl: string,
+  model: string,
+  inputs: string[],
+): Promise<number[][]> {
+  return invoke('fetch_custom_embeddings', { apiUrl, model, inputs, zh: getLang() === 'zh' });
+}
+
 let embeddingStatsCache: { stats: EmbeddingStats; at: number } | null = null;
 
 async function getEmbeddingStatsCached(): Promise<EmbeddingStats | null> {
@@ -146,41 +166,19 @@ async function getEmbeddingForSearch(queryText: string, searchMode?: SearchMode 
       );
     } else if (config.mode === 'custom') {
       if (!config.apiUrl || !config.model) return undefined;
-      
-      let apiKey = '';
-      try {
-        const llmRaw = localStorage.getItem('zettelagent-llm');
-        if (llmRaw) {
-          const llmCfg = JSON.parse(llmRaw);
-          if (llmCfg && llmCfg.apiKey) {
-            apiKey = llmCfg.apiKey;
-          }
-        }
-      } catch {}
 
-      const response = await withPromiseTimeout(
-        fetch(config.apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            input: [queryText],
-            model: config.model,
-          }),
-        }),
+      // Routed through Rust on purpose. The API key lives in the OS credential
+      // store and `lib/secrets.ts` exposes no getter, so the WebView cannot
+      // build an `Authorization` header any more — it used to read the plaintext
+      // `zettelagent-llm.apiKey`, which migration deletes, and the request then
+      // 401'd with nothing the user could act on. `fetchCustomEmbeddings` reads
+      // the key inside Rust and attaches the header there.
+      const vectors = await withPromiseTimeout(
+        fetchCustomEmbeddings(config.apiUrl, config.model, [queryText]),
         EMBEDDING_QUERY_TIMEOUT_MS,
         'Custom embedding API',
       );
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Custom embedding API error (${response.status}): ${errText}`);
-      }
-      const data = await response.json();
-      if (data && data.data && Array.isArray(data.data) && data.data[0]) {
-        return data.data[0].embedding;
-      }
+      return vectors[0];
     }
   } catch (e) {
     console.error('Failed to generate search embedding:', e);
@@ -203,6 +201,17 @@ async function prepareRagSearchRequest(request: RagChatRequest): Promise<RagChat
 }
 
 export async function searchChunks(query: SearchQuery): Promise<SearchResult[]> {
+  const enrichedQuery = await enrichSearchQuery(query);
+  return invoke('search_chunks', { query: enrichedQuery });
+}
+
+/**
+ * Resolve the effective search mode and attach a query embedding when the mode
+ * needs one, downgrading to `fts` if no embedding can be produced. Shared by
+ * `searchChunks` and `rerankSearchWindow` so the Tier-2 window is retrieved over
+ * the exact same recall the plain search would have used.
+ */
+async function enrichSearchQuery(query: SearchQuery): Promise<SearchQuery> {
   const effectiveMode = await resolveRagSearchMode(query.mode);
   const queryEmbedding = ragNeedsQueryEmbedding(effectiveMode)
     ? await getEmbeddingForSearch(query.query, effectiveMode)
@@ -211,12 +220,50 @@ export async function searchChunks(query: SearchQuery): Promise<SearchResult[]> 
     ragNeedsQueryEmbedding(effectiveMode) && !queryEmbedding && !query.queryEmbedding
       ? 'fts'
       : effectiveMode;
-  const enrichedQuery = {
+  return {
     ...query,
     mode: finalMode,
     queryEmbedding: queryEmbedding || query.queryEmbedding,
   };
-  return invoke('search_chunks', { query: enrichedQuery });
+}
+
+/**
+ * One candidate in a Tier-2 rerank window. Mirrors `rerank::RerankCandidate` in
+ * `src-tauri/src/db/search/rerank.rs`. `index` — not `chunkId` — is the identity
+ * used to express the reordered order (the regex branch of `search_notes` emits
+ * `chunkId: 0` for every row, so chunk ids are not unique inside a result set).
+ */
+export interface RerankWindowCandidate {
+  index: number;
+  chunkId: number;
+  filePath: string;
+  heading: string;
+  snippet: string;
+}
+
+/**
+ * The recall window plus its scoring payload, as returned by `rerank_search_window`.
+ * `results` is already Tier-1 reranked (fts/hybrid) or in raw vector order
+ * (vector), and `candidates[i].index === i`, so a cross-encoder that declines is
+ * a structural no-op: the caller keeps `results`.
+ */
+export interface RerankWindow {
+  results: SearchResult[];
+  candidates: RerankWindowCandidate[];
+  limit: number;
+}
+
+/**
+ * Tier-2 transport. Fetch a recall window wide enough to rerank, together with
+ * the candidate snippets a webview cross-encoder needs to score it. Enrichment
+ * is identical to `searchChunks`, so the window is drawn from the same recall.
+ *
+ * This never runs the model and never downloads anything: it only hands out
+ * candidates. Scoring, ordering and truncation happen in `lib/rerankSearch.ts`.
+ */
+export async function rerankSearchWindow(query: SearchQuery): Promise<RerankWindow> {
+  const enrichedQuery = await enrichSearchQuery(query);
+  return invoke('rerank_search_window', { query: enrichedQuery });
 }
 
 export async function readMarkdownFile(path: string): Promise<string> {
@@ -285,6 +332,40 @@ export interface BacklinkEntry {
 
 export async function getBacklinks(filePath: string): Promise<BacklinkEntry[]> {
   return invoke('get_backlinks', { filePath });
+}
+
+// ── Related Notes (passive discovery while reading) ────────────────
+
+/** Which signal surfaced a related note. `explicit` > `link` > `semantic` in specificity. */
+export type RelationSignal = 'explicit' | 'link' | 'semantic';
+
+export interface RelatedNote {
+  file_path: string;
+  title: string;
+  /** Char-truncated first-chunk preview (backend cuts on char boundaries, never bytes). */
+  preview: string;
+  /** The strongest signal — what the panel groups this note under. */
+  relation: RelationSignal;
+  /** `note_relations.relation_type` when `relation === 'explicit'`. */
+  relation_type: string | null;
+  /** Cosine similarity when a semantic signal is present, else 1.0. */
+  score: number;
+  /** Every signal that matched. Length > 1 means two independent methods agreed. */
+  signals: RelationSignal[];
+}
+
+export interface RelatedNotesResult {
+  notes: RelatedNote[];
+  /**
+   * False ⇒ the vault has no semantic signal available at all (no `semantic_edges`
+   * rows and no embedding for this note), so an empty list means "index not built
+   * yet" rather than "nothing is related". The panel renders a different state.
+   */
+  semantic_index_ready: boolean;
+}
+
+export async function getRelatedNotes(filePath: string, limit?: number): Promise<RelatedNotesResult> {
+  return invoke('get_related_notes', { filePath, limit });
 }
 
 export async function listDirectoryTree(vaultPath: string): Promise<DirTreeNode> {
@@ -762,6 +843,10 @@ export interface ApprovalDiffData {
   diff_type: string;
   tool_args_json: string;
   title: string;
+  /** Effective risk of this call — always present. Backend: `RiskLevel::as_str()`. */
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  /** Why the risk was raised, multiple reasons joined with ` · `. Omitted when none. */
+  risk_reason?: string;
 }
 
 export interface PlanStep {
@@ -1157,6 +1242,478 @@ export async function approveToolCall(approvalId: string): Promise<boolean> {
 /** Reject a pending Agent write operation. */
 export async function rejectToolCall(approvalId: string): Promise<boolean> {
   return invoke('reject_tool_call', { approvalId });
+}
+
+// ── Permission Tiers & Allow Rules ───────────────────────────────
+
+/**
+ * Permission tiers. Deliberately three, not ten — a local-first app has no
+ * remote blast radius to model, only "can it touch my vault at all".
+ *   readOnly — every mutating tool is denied outright
+ *   standard — mutating tools ask, unless an allow rule matches
+ *   trusted  — low/medium risk auto-allowed; high still asks
+ * There is no YOLO tier: deletion (critical) always asks, in every mode.
+ */
+export type PermissionMode = 'readOnly' | 'standard' | 'trusted';
+
+export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/** Rule scope: `session` rules are dropped on app restart, `persistent` ones survive. */
+export type ApprovalRuleScope = 'session' | 'persistent';
+
+export interface ApprovalRule {
+  id: number;
+  tool_name: string;
+  /** Vault-relative prefix the rule is limited to; `''` means the whole vault. */
+  path_prefix: string;
+  /** Never `'critical'` — the backend rejects that. */
+  max_risk: RiskLevel;
+  scope: ApprovalRuleScope;
+  created_at_ms: number;
+  note?: string;
+}
+
+export async function getPermissionMode(): Promise<PermissionMode> {
+  return invoke('get_permission_mode');
+}
+
+export async function setPermissionMode(mode: PermissionMode): Promise<void> {
+  return invoke('set_permission_mode', { mode });
+}
+
+export async function listApprovalRules(): Promise<ApprovalRule[]> {
+  return invoke('list_approval_rules');
+}
+
+/** Create an allow rule. `maxRisk` must not be `'critical'`. */
+export async function addApprovalRule(
+  toolName: string,
+  pathPrefix: string,
+  maxRisk: Exclude<RiskLevel, 'critical'>,
+  scope: ApprovalRuleScope,
+  note?: string,
+): Promise<number> {
+  return invoke('add_approval_rule', { toolName, pathPrefix, maxRisk, scope, note });
+}
+
+export async function deleteApprovalRule(id: number): Promise<void> {
+  return invoke('delete_approval_rule', { id });
+}
+
+// ── Whole-Turn Undo (Checkpoint / Rewind) ────────────────────────
+
+export interface AgentRunSummary {
+  run_id: string;
+  started_at_ms: number;
+  change_count: number;
+  /** True only when every journal entry of the run is already rolled back. */
+  undone: boolean;
+  /** Distinct paths touched, capped at 10 by the backend. */
+  affected_paths: string[];
+}
+
+export interface UndoReport {
+  run_id: string;
+  restored: number;
+  failed: string[];
+  /** Files moved into the recycle bin (undo of a `create`). */
+  trashed: string[];
+  skipped_already_undone: number;
+  reindexed: number;
+  warnings: string[];
+}
+
+/** Agent turns that changed files, newest first. `limit` defaults to 20. */
+export async function listAgentRuns(limit?: number): Promise<AgentRunSummary[]> {
+  return invoke('list_agent_runs', { limit });
+}
+
+/** Roll back every file change of one agent turn. Partial success is reported, not hidden. */
+export async function undoAgentRun(runId: string): Promise<UndoReport> {
+  return invoke('undo_agent_run', { runId });
+}
+
+// ── Recycle Bin ──────────────────────────────────────────────────
+
+export interface TrashEntry {
+  /** Location inside `<vault>/.zettelagent/trash/`, forward slashes. */
+  trash_path: string;
+  original_relative_path: string;
+  /** `YYYYMMDD-HHMMSS` batch stamp. */
+  deleted_at: string;
+  size: number;
+}
+
+export async function listTrash(vaultPath: string): Promise<TrashEntry[]> {
+  return invoke('list_trash', { vaultPath });
+}
+
+/** Move a trashed file back. Refuses to overwrite an existing file at the original path. */
+export async function restoreFromTrash(vaultPath: string, trashPath: string): Promise<string> {
+  return invoke('restore_from_trash', { vaultPath, trashPath });
+}
+
+/** Permanently delete trashed files. `olderThanDays` omitted = clear everything. */
+export async function emptyTrash(vaultPath: string, olderThanDays?: number): Promise<number> {
+  return invoke('empty_trash', { vaultPath, olderThanDays });
+}
+
+/** Backend default, mirrored here so the UI can mark "modified" without a round-trip. */
+export const DEFAULT_TRASH_RETENTION_DAYS = 30;
+
+/**
+ * How long trashed batches survive the automatic sweep, in whole days.
+ *
+ * `0` means "never sweep", NOT "purge now" — `sweep_expired_trash_impl` returns
+ * early on 0 precisely so a mis-set value can't wipe the recycle bin.
+ */
+export async function getTrashRetentionDays(): Promise<number> {
+  return invoke('get_trash_retention_days');
+}
+
+export async function setTrashRetentionDays(days: number): Promise<void> {
+  await invoke('set_trash_retention_days', { days });
+}
+
+// ── MCP Server (expose this vault to external agents) ─────────────
+//
+// The inbound direction, opposite to `McpServersSection` above: instead of this
+// app calling out to other MCP services, these two commands describe the server
+// *we* expose over stdio when launched with `--mcp-server`.
+//
+// Read-only by construction — `EXPOSED_TOOLS` in
+// `src-tauri/src/tools/mcp_server/mod.rs` contains no writer, and the SQLite
+// connection is opened `SQLITE_OPEN_READ_ONLY`. There is no listener, no port
+// and no token to configure, because stdio has none of those things.
+
+/** Shape of `mcp_server_capabilities()`'s JSON payload. */
+export interface McpServerCapabilities {
+  protocolVersion: string;
+  /** Always `true`. Kept as a field rather than assumed so the UI reflects the
+   *  backend instead of a hard-coded claim. */
+  readOnly: boolean;
+  tools: string[];
+  resources: { scheme: string; mimeType: string };
+  prompts: string[];
+}
+
+/**
+ * Ready-to-paste `mcpServers` JSON for Claude Desktop / Cursor. The backend
+ * fills in the current executable path; we supply the db path the user's vault
+ * actually resolves to (`getDbPath()`).
+ */
+export async function mcpServerClientConfig(dbPath: string): Promise<string> {
+  return invoke('mcp_server_client_config', { dbPath });
+}
+
+/** Raw JSON string; use `parseMcpServerCapabilities` unless you want the text. */
+export async function mcpServerCapabilities(): Promise<string> {
+  return invoke('mcp_server_capabilities');
+}
+
+/**
+ * Parse the capabilities payload, returning `null` on anything unexpected.
+ *
+ * Both failure modes — command missing on an older build, or JSON we don't
+ * recognise — are the same to the UI: show nothing rather than a half-rendered
+ * or invented capability list.
+ */
+export async function parseMcpServerCapabilities(): Promise<McpServerCapabilities | null> {
+  try {
+    const parsed = JSON.parse(await mcpServerCapabilities());
+    if (!parsed || !Array.isArray(parsed.tools)) return null;
+    return parsed as McpServerCapabilities;
+  } catch (e) {
+    console.warn('[mcp-server] capabilities unavailable:', e);
+    return null;
+  }
+}
+
+// ── Retrieval Rerank ─────────────────────────────────────────────
+//
+// Mirrors `RerankConfig` / `RerankMode` in `src-tauri/src/db/search/rerank.rs`,
+// which is `#[serde(default, rename_all = "camelCase")]` — hence camelCase field
+// names here rather than the snake_case used by older commands in this file.
+
+/**
+ * The four rerank tiers.
+ *
+ * * `off` — genuine no-op, the fused order is returned untouched.
+ * * `lexical` — Tier 1, pure Rust, no download, no network. The default.
+ * * `crossEncoder` — Tier 2, the ~288 MB ONNX model in `reranker.ts`.
+ * * `llm` — Tier 3, one listwise call to the configured LLM.
+ */
+export type RerankMode = 'off' | 'lexical' | 'crossEncoder' | 'llm';
+
+export interface RerankConfig {
+  mode: RerankMode;
+  /** Size of the rerank window. Rust clamps to [2, 200] in `effective_top_k`. */
+  topK: number;
+  /** Tier 3 cost guard: max candidates handed to the LLM. */
+  llmMaxCandidates: number;
+  /** Tier 3 cost guard: chars (not bytes) per snippet. */
+  llmMaxSnippetChars: number;
+  /** Tier 3 cost guard: fall back to Tier 1 after this long. */
+  llmTimeoutMs: number;
+}
+
+/**
+ * Same values as `RerankConfig::default()` in Rust. Duplicated deliberately: the
+ * settings UI has to render *something* before the first successful load, and
+ * showing the real defaults beats showing zeros.
+ */
+export const DEFAULT_RERANK_CONFIG: RerankConfig = {
+  mode: 'lexical',
+  topK: 32,
+  llmMaxCandidates: 12,
+  llmMaxSnippetChars: 320,
+  llmTimeoutMs: 8_000,
+};
+
+/**
+ * Raised when the rerank commands are not registered in this build.
+ *
+ * A distinct type rather than a string match, so the UI can say "backend not
+ * ready yet" instead of dumping a Tauri internal error at the user. The two
+ * commands are landing in a parallel change; until then every call ends here.
+ */
+export class RerankBackendUnavailable extends Error {
+  constructor(cause: unknown) {
+    super(String(cause));
+    this.name = 'RerankBackendUnavailable';
+  }
+}
+
+/**
+ * Tauri answers an unregistered command with a message containing
+ * "not allowed"/"not found"/"unknown". Sniffing the text is unlovely but it is
+ * the only signal available — and the fallback (treat any failure as
+ * "unavailable") is the safe direction: rerank is optional everywhere.
+ */
+function looksUnregistered(e: unknown): boolean {
+  const msg = String(e).toLowerCase();
+  return msg.includes('not allowed')
+    || msg.includes('not found')
+    || msg.includes('unknown')
+    || msg.includes('does not exist');
+}
+
+/**
+ * Load the persisted rerank config.
+ *
+ * Throws `RerankBackendUnavailable` when the command is missing so the caller
+ * can distinguish "no backend yet" (show a notice, keep the defaults on screen)
+ * from a real error worth surfacing verbatim.
+ */
+export async function getRerankConfig(): Promise<RerankConfig> {
+  try {
+    const raw = await invoke<Partial<RerankConfig>>('get_rerank_config');
+    // Spread over the defaults: `#[serde(default)]` on the Rust side means a
+    // future added field may simply be absent from an older stored value.
+    return { ...DEFAULT_RERANK_CONFIG, ...(raw ?? {}) };
+  } catch (e) {
+    if (looksUnregistered(e)) throw new RerankBackendUnavailable(e);
+    throw e;
+  }
+}
+
+/**
+ * Persist the rerank config. Same unavailability contract as the getter.
+ *
+ * The command is PATCH-shaped — every knob is an independent `Option<_>` arg
+ * (`search_commands.rs:230`), not a single `config` struct — so the fields are
+ * spread out here. Tauri maps these camelCase keys onto the snake_case Rust
+ * params. Passing a partial patch leaves the other knobs at their stored value.
+ *
+ * Returns the config the backend actually stored: it clamps out-of-range knobs
+ * rather than only rejecting them, so the echo can differ from what was sent
+ * and is what the UI should render.
+ */
+export async function setRerankConfig(patch: Partial<RerankConfig>): Promise<RerankConfig> {
+  try {
+    const raw = await invoke<Partial<RerankConfig>>('set_rerank_config', {
+      mode: patch.mode,
+      topK: patch.topK,
+      llmMaxCandidates: patch.llmMaxCandidates,
+      llmMaxSnippetChars: patch.llmMaxSnippetChars,
+      llmTimeoutMs: patch.llmTimeoutMs,
+    });
+    return { ...DEFAULT_RERANK_CONFIG, ...(raw ?? {}) };
+  } catch (e) {
+    if (looksUnregistered(e)) throw new RerankBackendUnavailable(e);
+    throw e;
+  }
+}
+
+// ── Spaced repetition (FSRS-4.5) ─────────────────────────────────
+//
+// Mirrors `src-tauri/src/fsrs.rs` + `src-tauri/src/db/review_store.rs`, both of
+// which are `#[serde(rename_all = "camelCase")]`.
+
+/** FSRS grades. The numbers are the storage format — do not renumber. */
+export const GRADE_AGAIN = 1;
+export const GRADE_HARD = 2;
+export const GRADE_GOOD = 3;
+export const GRADE_EASY = 4;
+export type ReviewGrade = 1 | 2 | 3 | 4;
+
+/** Card lifecycle, matching `fsrs::State`. */
+export type ReviewCardState = 'new' | 'learning' | 'review' | 'relearning';
+
+/** What one grade button would do, precomputed by Rust so the two sides cannot
+ *  disagree about the interval a click will produce. */
+export interface GradePreview {
+  grade: ReviewGrade;
+  /** Whole days. `0` means the card stays in (re)learning — read `intervalMinutes`. */
+  intervalDays: number;
+  intervalMinutes: number;
+  state: ReviewCardState;
+}
+
+export interface ReviewQueueEntry {
+  filePath: string;
+  title: string;
+  /** Char-truncated note preview from the indexed chunks, not the file on disk. */
+  preview: string;
+  dueAtMs: number;
+  state: ReviewCardState;
+  overdueDays: number;
+  reps: number;
+  lapses: number;
+  /** In `Again, Hard, Good, Easy` order. */
+  gradePreviews: GradePreview[];
+}
+
+export interface ReviewQueue {
+  due: ReviewQueueEntry[];
+  newCards: ReviewQueueEntry[];
+  /** Totals ignore the daily caps, so the UI can show "20 of 743 due". */
+  dueTotal: number;
+  newTotal: number;
+  reviewsDoneToday: number;
+  newDoneToday: number;
+  reviewsRemainingToday: number;
+  newRemainingToday: number;
+}
+
+export interface ReviewCardView {
+  filePath: string;
+  state: ReviewCardState;
+  dueAtMs: number;
+  stability: number;
+  difficulty: number;
+  reps: number;
+  lapses: number;
+  suspended: boolean;
+  intervalDays: number;
+  intervalMinutes: number;
+}
+
+export interface ReviewForecastDay {
+  /** 0 = today. */
+  dayOffset: number;
+  count: number;
+}
+
+export interface ReviewStats {
+  totalCards: number;
+  newCount: number;
+  learningCount: number;
+  reviewCount: number;
+  relearningCount: number;
+  suspendedCount: number;
+  dueToday: number;
+  forecast: ReviewForecastDay[];
+  /** True retention over mature reviews. `null` until there is one to measure. */
+  retentionRate: number | null;
+  reviewsToday: number;
+  totalReviews: number;
+  streakDays: number;
+}
+
+export interface FsrsConfig {
+  desiredRetention: number;
+  maximumIntervalDays: number;
+  /** Intra-day delays in minutes for cards that have not graduated. */
+  learningSteps: number[];
+  enableFuzz: boolean;
+  newPerDay: number;
+  reviewsPerDay: number;
+}
+
+/**
+ * Same values as `FsrsConfig::default()` in Rust. Duplicated deliberately: the
+ * settings card has to render something honest before the first load resolves.
+ */
+export const DEFAULT_FSRS_CONFIG: FsrsConfig = {
+  desiredRetention: 0.9,
+  maximumIntervalDays: 36_500,
+  learningSteps: [1, 10],
+  enableFuzz: true,
+  newPerDay: 20,
+  reviewsPerDay: 200,
+};
+
+/** Cards to study now. `limit` bounds the due and new lists independently. */
+export async function getReviewQueue(limit?: number): Promise<ReviewQueue> {
+  return invoke('get_review_queue', { limit });
+}
+
+/** Apply a grade and get back the rescheduled card, including its new interval. */
+export async function gradeCard(filePath: string, grade: ReviewGrade): Promise<ReviewCardView> {
+  return invoke('grade_card', { filePath, grade });
+}
+
+/** Returns how many notes were newly added; already-studied notes are untouched. */
+export async function addCardsToReview(filePaths: string[]): Promise<number> {
+  return invoke('add_cards_to_review', { filePaths });
+}
+
+export async function removeCardFromReview(filePath: string): Promise<boolean> {
+  return invoke('remove_card_from_review', { filePath });
+}
+
+export async function suspendCard(filePath: string, suspended: boolean): Promise<boolean> {
+  return invoke('suspend_card', { filePath, suspended });
+}
+
+/** `null` when the note is not in the deck. */
+export async function getReviewCard(filePath: string): Promise<ReviewCardView | null> {
+  return invoke('get_review_card', { filePath });
+}
+
+export async function getReviewStats(): Promise<ReviewStats> {
+  return invoke('get_review_stats');
+}
+
+export async function getFsrsConfig(): Promise<FsrsConfig> {
+  const raw = await invoke<Partial<FsrsConfig>>('get_fsrs_config');
+  // Spread over the defaults: `#[serde(default)]` on the Rust side means a
+  // future added field may simply be absent from an older stored value.
+  return { ...DEFAULT_FSRS_CONFIG, ...(raw ?? {}) };
+}
+
+/**
+ * Persist the scheduling config.
+ *
+ * The command is PATCH-shaped — every knob is an independent `Option<_>` arg
+ * (`review_commands.rs`), not a single `config` struct — so the fields must be
+ * spread as individual args here. Nesting them under one object makes every
+ * param arrive as `None` and the command then saves nothing at all, silently:
+ * exactly the bug `setRerankConfig` above was fixed for.
+ *
+ * Returns the config the backend actually stored.
+ */
+export async function setFsrsConfig(patch: Partial<FsrsConfig>): Promise<FsrsConfig> {
+  const raw = await invoke<Partial<FsrsConfig>>('set_fsrs_config', {
+    desiredRetention: patch.desiredRetention,
+    maximumIntervalDays: patch.maximumIntervalDays,
+    learningSteps: patch.learningSteps,
+    enableFuzz: patch.enableFuzz,
+    newPerDay: patch.newPerDay,
+    reviewsPerDay: patch.reviewsPerDay,
+  });
+  return { ...DEFAULT_FSRS_CONFIG, ...(raw ?? {}) };
 }
 
 

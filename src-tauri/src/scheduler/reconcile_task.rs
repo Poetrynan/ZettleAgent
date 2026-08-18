@@ -688,42 +688,46 @@ impl SchedulerTask for ReconcileTask {
                                 pipeline_log::log_organize_error(&format!("Failed to write {}: {}", path, e));
                                 let _ = update_reconciliation_log(db, path, "write_error", &e.to_string());
                             } else {
-                                // BUG FIX (v2): After writing AI-modified content, the file's hash changes.
-                                // We must update both files.hash and card_meta.last_reconciled_hash
-                                // to the NEW hash. Use UPSERT (not UPDATE) because update_card_meta_from_response
-                                // may not have been called if JSON parsing failed — in that case no card_meta
-                                // row exists, and a plain UPDATE would silently affect 0 rows, leaving the
-                                // note to be re-selected on every subsequent incremental run.
-                                let mut hasher = Sha256::new();
-                                hasher.update(final_content.as_bytes());
-                                let new_hash = format!("{:x}", hasher.finalize());
-
-                                if let Ok(conn) = db.lock() {
-                                    // Update files.hash so syncVault won't re-chunk this file
-                                    let _ = conn.execute(
-                                        "UPDATE files SET hash = ?1 WHERE path = ?2",
-                                        rusqlite::params![&new_hash, path],
-                                    );
-                                    // UPSERT card_meta: always create/update the row with new hash + methodology
-                                    let _ = conn.execute(
-                                        "INSERT INTO card_meta (file_path, last_reconciled, last_reconciled_hash, last_reconciled_methodology)
-                                         VALUES (?1, datetime('now'), ?2, ?3)
-                                         ON CONFLICT(file_path) DO UPDATE SET
-                                            last_reconciled = datetime('now'),
-                                            last_reconciled_hash = ?2,
-                                            last_reconciled_methodology = ?3",
-                                        rusqlite::params![path, &new_hash, &methodology],
-                                    );
+                                // After writing AI-modified content the file's hash changes, so
+                                // the DB has to be brought back in sync. This used to be a bare
+                                // `UPDATE files SET hash = ...`, which was the *shape* of a bug:
+                                // it advertised "this file is indexed at this hash" while `chunks`
+                                // still held the pre-reconcile text. Because `sync_file` skips any
+                                // file whose stored hash already matches, the stale chunks were
+                                // then frozen in place — everything the agent wrote (backlinks,
+                                // summaries, extracted facts) was invisible to FTS5 and to vector
+                                // search. The user could not find content the agent had just
+                                // written into their own vault.
+                                //
+                                // Fix: reuse `db::sync::sync_file` instead of hand-rolling the
+                                // hash update. It is the same read → chunk → write-chunks path
+                                // vault sync uses, so the FTS5 triggers fire and there is exactly
+                                // one chunking implementation to keep correct.
+                                match reindex_reconciled_note(db, path, &methodology) {
+                                    Ok(new_hash) => {
+                                        pipeline_log::log_organize_info(&format!(
+                                            "Reconciled: {} ({} blocks, old_hash={}... new_hash={}...)",
+                                            path, all_generated_blocks.len(),
+                                            &task.file_hash[..8.min(task.file_hash.len())],
+                                            &new_hash[..8.min(new_hash.len())],
+                                        ));
+                                        let _ = update_reconciliation_log(db, path, "reconciled", &format!("{} generated blocks written", all_generated_blocks.len()));
+                                        reconciled += 1;
+                                    }
+                                    Err(e) => {
+                                        // The file on disk is already the new version, but the
+                                        // index is not. Deliberately leave `files.hash` at the OLD
+                                        // value: that is what makes the next incremental run
+                                        // re-select this note and repair the index. Bumping the
+                                        // hash here would strand the note forever — precisely the
+                                        // failure this whole block exists to prevent.
+                                        pipeline_log::log_organize_error(&format!(
+                                            "Reconcile reindex failed for {} (file written, index left stale for retry): {}",
+                                            path, e,
+                                        ));
+                                        let _ = update_reconciliation_log(db, path, "reindex_error", &e.to_string());
+                                    }
                                 }
-
-                                pipeline_log::log_organize_info(&format!(
-                                    "Reconciled: {} ({} blocks, old_hash={}... new_hash={}...)",
-                                    path, all_generated_blocks.len(),
-                                    &task.file_hash[..8.min(task.file_hash.len())],
-                                    &new_hash[..8.min(new_hash.len())],
-                                ));
-                                let _ = update_reconciliation_log(db, path, "reconciled", &format!("{} generated blocks written", all_generated_blocks.len()));
-                                reconciled += 1;
                             }
                         }
                         Err(e) => {
@@ -991,6 +995,57 @@ fn extract_json(response: &str) -> Option<&str> {
     }
 }
 
+/// Re-index a note after reconciliation rewrote it on disk, returning the new
+/// content hash.
+///
+/// This funnels through `db::sync::sync_file` on purpose: it is the exact same
+/// read → chunk → write-chunks path that vault sync uses, so the FTS5 triggers
+/// fire and there is only ever one chunking implementation to keep correct. The
+/// reconcile loop must never grow a second, drifting copy of that logic.
+///
+/// Atomicity: `sync_file` wraps its `files.hash` + `chunks` rewrite in a
+/// SAVEPOINT, so either both land or neither does. `card_meta` is only touched
+/// *after* that returns `Ok`, which preserves the invariant the old hand-rolled
+/// `UPDATE files SET hash` violated — `files.hash` must never advance ahead of
+/// the chunks it claims to describe, or the note becomes invisible to search
+/// while looking "already indexed" to the next incremental run.
+fn reindex_reconciled_note(
+    db: &Arc<Mutex<Connection>>,
+    path: &str,
+    methodology: &str,
+) -> anyhow::Result<String> {
+    let conn = db.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+
+    // Rebuild chunks + FTS/vector index from the freshly-written file. safe_write
+    // already flushed the new content to disk, and because `files.hash` still holds
+    // the pre-reconcile value, sync_file will NOT early-return on a hash match — it
+    // rechunks and advances files.hash atomically.
+    crate::db::sync::sync_file(&conn, std::path::Path::new(path))?;
+
+    // Recompute the hash so card_meta records the exact version we just indexed.
+    // sync_file computes this internally but does not return it; reading the file
+    // back is equivalent to hashing the content we wrote (single-threaded per note).
+    let content = std::fs::read_to_string(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let new_hash = format!("{:x}", hasher.finalize());
+
+    // UPSERT (not UPDATE) card_meta: if JSON parsing failed upstream, no card_meta
+    // row exists yet and a plain UPDATE would silently affect 0 rows, leaving the
+    // reconciliation bookkeeping (last_reconciled_hash) permanently stale.
+    conn.execute(
+        "INSERT INTO card_meta (file_path, last_reconciled, last_reconciled_hash, last_reconciled_methodology)
+         VALUES (?1, datetime('now'), ?2, ?3)
+         ON CONFLICT(file_path) DO UPDATE SET
+            last_reconciled = datetime('now'),
+            last_reconciled_hash = ?2,
+            last_reconciled_methodology = ?3",
+        rusqlite::params![path, &new_hash, methodology],
+    )?;
+
+    Ok(new_hash)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,6 +1069,106 @@ mod tests {
             let created_at: String = row.get(3).unwrap();
             println!("[{}] Path: {}, Action: {}, Summary: {}", created_at, path, action, summary);
         }
+    }
+
+    // ── Reconcile reindex ───────────────────────────────────────────
+    // Regression cover for the "hash advanced, chunks did not" bug: the AI
+    // rewrote a note, `files.hash` was bumped by hand, and the new text was
+    // never chunked — so it was unreachable via FTS5 while `sync_file` skipped
+    // the file forever on the strength of the matching hash.
+
+    /// In-memory DB with the full schema. `register_sqlite_vec` must run before
+    /// the connection is opened or the `vec0` virtual tables in the schema fail
+    /// with "no such module: vec0".
+    fn test_db() -> Arc<Mutex<Connection>> {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        // The live app follows setup with the column migrations (db/mod.rs:35);
+        // `card_meta.last_reconciled_hash` is added there, and reindex writes it.
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    #[test]
+    fn reindex_makes_ai_written_content_searchable() {
+        let db = test_db();
+        let dir = std::env::temp_dir().join(format!("zettel_reindex_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("reindex_note.md");
+        let path = file.to_string_lossy().to_string();
+
+        // Pre-reconcile state: the note is indexed at its ORIGINAL content.
+        std::fs::write(&file, "# Note\n\nzzzoriginalmarker body text\n").unwrap();
+        {
+            let conn = db.lock().unwrap();
+            crate::db::sync::sync_file(&conn, &file).unwrap();
+            // Sanity: the original text is findable, the new text is not yet.
+            assert!(!search::full_text_search(&conn, "zzzoriginalmarker", 10).unwrap().is_empty());
+            assert!(search::full_text_search(&conn, "zzzreconciledmarker", 10).unwrap().is_empty());
+        }
+        let old_hash: String = {
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT hash FROM files WHERE path = ?1", rusqlite::params![&path], |r| r.get(0)).unwrap()
+        };
+
+        // The agent rewrites the note on disk (what safe_write does), then we
+        // reindex. Before the fix this step only bumped files.hash.
+        std::fs::write(&file, "# Note\n\nzzzreconciledmarker generated body\n").unwrap();
+        let new_hash = reindex_reconciled_note(&db, &path, "zettelkasten").unwrap();
+        assert_ne!(new_hash, old_hash, "rewriting the note must change the hash");
+
+        let conn = db.lock().unwrap();
+        // The core assertion: AI-written content is reachable via FTS5.
+        let hits = search::full_text_search(&conn, "zzzreconciledmarker", 10).unwrap();
+        assert!(!hits.is_empty(), "reconciled content must be searchable");
+        assert!(hits.iter().any(|h| h.content.contains("zzzreconciledmarker")));
+        // ...and the superseded chunks are gone, not merely shadowed.
+        assert!(
+            search::full_text_search(&conn, "zzzoriginalmarker", 10).unwrap().is_empty(),
+            "stale chunks must be deleted, not left alongside the new ones",
+        );
+
+        // files.hash and card_meta.last_reconciled_hash must agree — a mismatch
+        // is what re-selects the note on every incremental run.
+        let stored_hash: String = conn
+            .query_row("SELECT hash FROM files WHERE path = ?1", rusqlite::params![&path], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored_hash, new_hash);
+        let meta_hash: String = conn
+            .query_row("SELECT last_reconciled_hash FROM card_meta WHERE file_path = ?1", rusqlite::params![&path], |r| r.get(0))
+            .unwrap();
+        assert_eq!(meta_hash, new_hash);
+
+        drop(conn);
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
+    fn reindex_leaves_hash_untouched_when_the_file_is_gone() {
+        // If reindex fails, `files.hash` must stay at the OLD value so the next
+        // incremental run re-selects the note and repairs the index. Bumping it
+        // on a failed reindex is exactly how a note gets stranded.
+        let db = test_db();
+        let missing = std::env::temp_dir().join("zettel_reindex_does_not_exist.md");
+        let path = missing.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&missing);
+
+        {
+            let conn = db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO files (path, hash, title, last_synced) VALUES (?1, 'oldhash', 'T', datetime('now'))",
+                rusqlite::params![&path],
+            ).unwrap();
+        }
+
+        assert!(reindex_reconciled_note(&db, &path, "zettelkasten").is_err());
+
+        let conn = db.lock().unwrap();
+        let stored: String = conn
+            .query_row("SELECT hash FROM files WHERE path = ?1", rusqlite::params![&path], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, "oldhash", "a failed reindex must not advance files.hash");
     }
 }
 

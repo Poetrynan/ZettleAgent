@@ -7,7 +7,9 @@ import { useApp } from '../../contexts/AppContext';
 import { saveImageToVault, listMarkdownFiles, chatWithLlm } from '../../lib/tauri';
 import { getWikilinkPlugins } from './milkdown-wikilink';
 import { generatedBlockPlugin } from './generatedBlockDecorations';
-import mermaid from 'mermaid';
+// Mermaid is imported on first diagram render — see mermaidLoader.ts for why the
+// engine must not be on the startup path.
+import { renderMermaid } from './mermaidLoader';
 import { codeBlockConfig } from '@milkdown/kit/component/code-block';
 import { useHoverPreview, HoverPreviewCard } from './HoverPreview';
 import { useEditorSuggestions } from './useEditorSuggestions';
@@ -36,18 +38,8 @@ function filterTitles(titles: string[], query: string): string[] {
     .slice(0, 30);
 }
 
-// Detect dark mode for mermaid theme
-const isDarkMode = () => {
-  return document.documentElement.getAttribute('data-theme') === 'dark' ||
-         document.body.classList.contains('dark-theme') ||
-         window.matchMedia('(prefers-color-scheme: dark)').matches;
-};
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: isDarkMode() ? 'dark' : 'default',
-  securityLevel: 'loose',
-});
+// Mermaid theme detection now lives in mermaidLoader.ts, next to the
+// `initialize()` call that is the only thing that ever needed it.
 
 
 // Crepe theme styles — light base theme only; dark mode overrides live in
@@ -221,8 +213,8 @@ function MilkdownInner({ value, onChange }: MilkdownEditorProps) {
             container.innerHTML = '<div class="mermaid-loading" style="color: var(--text-secondary, #475569); font-size: 14px;">Rendering diagram...</div>';
             
             const id = `mermaid-crepe-${Math.random().toString(36).substring(2, 9)}`;
-            mermaid.render(id, content)
-              .then(({ svg }) => {
+            renderMermaid(id, content)
+              .then((svg) => {
                 container.innerHTML = svg;
                 applyPreview(container);
               })

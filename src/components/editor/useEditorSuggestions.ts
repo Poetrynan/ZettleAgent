@@ -165,11 +165,26 @@ export function useEditorSuggestions({
             query: para.text.slice(0, 200),
             limit: 3
           });
-          // Filter out chunks from the same file and low scores
+          // Drop chunks from the file being edited, and stubs too short to
+          // contradict anything.
+          //
+          // No absolute score threshold here on purpose. `search_chunks` returns
+          // `score` in whichever dimension the active mode produces, and the three
+          // are mutually incomparable: FTS-only with rerank off yields SQLite's
+          // bm25 `rank` (negative, more-negative-is-better), hybrid with rerank off
+          // yields RRF sums around 0.016, and any rerank mode overwrites it with a
+          // blended 0..1 value (db/search/rerank.rs:710). The old `>= 0.75` gate
+          // was satisfiable by none of them, so it silently discarded every
+          // candidate and this whole feature never fired.
+          //
+          // Relevance is instead delegated to the two stages that can actually
+          // judge it: the backend already recalls wide, reranks, and cuts to
+          // `limit`, and the LLM below is asked whether a conflict exists at all
+          // and is free to answer "no".
           const relevantChunks = chunks.filter((c: any) => {
             const chunkPath = (c.file_path || '').replace(/\\/g, '/');
             const currentPath = filePath.replace(/\\/g, '/');
-            return chunkPath !== currentPath && c.content && c.content.length > 20 && (c.score ?? 0) >= 0.75;
+            return chunkPath !== currentPath && c.content && c.content.length > 20;
           });
 
           if (relevantChunks.length === 0) continue;

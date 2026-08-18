@@ -90,3 +90,184 @@
   color: var(--text-tertiary);
   text-align: center;
 }
+
+/* ── Related Notes Panel ─────────────────────────────────────────────
+   Lives directly under the backlinks panel in the reading view and shares its
+   visual language, so the two read as one "connections" footer. */
+
+.related-panel {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.related-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.related-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  padding: var(--space-2) var(--space-1);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: color 0.15s;
+}
+
+.related-toggle:hover {
+  color: var(--text-primary);
+}
+
+.related-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.related-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.related-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  transition: color 0.15s, background 0.1s;
+}
+
+.related-refresh:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.related-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A min-height keeps the loading → loaded transition from resizing the panel,
+   so nothing below the reader's cursor jumps while the query runs. */
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  min-height: 72px;
+}
+
+.related-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.related-group-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  text-transform: none;
+}
+
+.related-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.related-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.related-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.related-item-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--accent-primary);
+}
+
+.related-item-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.related-item-reason {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.related-item-preview {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.related-placeholder {
+  padding: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.related-placeholder-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.related-hint {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+.related-error {
+  color: var(--danger, #e5484d);
+}

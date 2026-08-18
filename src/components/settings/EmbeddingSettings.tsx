@@ -6,6 +6,7 @@ import {
   saveChunkEmbeddings,
   finalizeEmbeddingIndex,
   getEmbeddingStats,
+  fetchCustomEmbeddings,
 } from '../../lib/tauri';
 import { getEmbeddingsBatch } from '../../lib/embeddings';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -38,7 +39,7 @@ export function getEmbeddingConfig(): EmbeddingConfig {
   return loadConfig();
 }
 
-export function EmbeddingConfigSection({ isZh, apiKey }: { isZh: boolean; apiKey?: string }) {
+export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
   const [building, setBuilding] = useState(false);
   const [buildResult, setBuildResult] = useState<string | null>(null);
   const [stats, setStats] = useState<{ total_chunks: number; indexed_chunks: number; has_index: boolean } | null>(null);
@@ -142,35 +143,17 @@ export function EmbeddingConfigSection({ isZh, apiKey }: { isZh: boolean; apiKey
             : `Requesting vectors via API (batch chunks: ${contents.length})...`
           );
           // 自定义 API 模式
-          const effectiveApiKey = apiKey || '';
           if (!customApiUrl) {
             throw new Error(isZh ? 'API Endpoint 不能为空' : 'API Endpoint cannot be empty');
           }
           if (!customModel) {
             throw new Error(isZh ? '模型名称不能为空' : 'Model name cannot be empty');
           }
-          // 发起 API 请求
-          const response = await fetch(customApiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${effectiveApiKey}`,
-            },
-            body: JSON.stringify({
-              input: contents,
-              model: customModel,
-            }),
-          });
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`API Error (${response.status}): ${errText}`);
-          }
-          const data = await response.json();
-          if (!data.data || !Array.isArray(data.data)) {
-            throw new Error(isZh ? 'API 返回格式不正确' : 'Invalid API response format');
-          }
-          const sorted = data.data.sort((a: any, b: any) => a.index - b.index);
-          embeddings = sorted.map((item: any) => item.embedding);
+          // The request is issued by Rust, not here: the API key lives in the OS
+          // credential store and has no getter, so the `apiKey` prop is empty
+          // after migration and a WebView fetch would send a blank bearer and
+          // 401. Backend errors arrive already bilingual and actionable.
+          embeddings = await fetchCustomEmbeddings(customApiUrl, customModel, contents);
         }
 
         if (cancelRef.current) {
@@ -304,7 +287,7 @@ export function EmbeddingConfigSection({ isZh, apiKey }: { isZh: boolean; apiKey
                 {/* GPU name + WebGPU badge */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', overflow: 'hidden', minWidth: 0 }}>
-                    <IconDatabase size={12} style={{ flexShrink: 0 }} />
+                    <span style={{ flexShrink: 0, display: 'inline-flex' }}><IconDatabase size={12} /></span>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {hwProfile.bestGpu?.name || (isZh ? '未检测到 GPU' : 'No GPU detected')}
                     </span>

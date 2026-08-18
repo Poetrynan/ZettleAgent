@@ -62,42 +62,81 @@ pub struct NoteSnapshot {
     pub created_at_ms: i64,
 }
 
-/// Save a note snapshot to SQLite. Deduplicates if content is identical to the latest.
-/// Keeps at most 100 snapshots per file (prunes oldest).
-#[tauri::command]
-pub fn save_note_snapshot(state: State<'_, AppState>, file_path: String, content: String) -> Result<bool, ZettelError> {
-    let conn = state.db.lock().map_err(|e| ZettelError::System(format!("DB lock error: {}", e)))?;
+/// Insert one version-history row for `file_path`.
+///
+/// Deduplicates against the newest existing snapshot (returns `Ok(false)` and writes
+/// nothing when the content is unchanged) and prunes back to the newest 100 rows per
+/// file. Plain function rather than a `#[tauri::command]` so the Agent tool layer,
+/// which only has an `Arc<Mutex<Connection>>` and no `State<AppState>`, can reuse it.
+pub fn insert_note_snapshot(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+    content: &str,
+) -> rusqlite::Result<bool> {
+    insert_note_snapshot_inner(conn, file_path, content).map(|(_, inserted)| inserted)
+}
+
+/// Same as [`insert_note_snapshot`] but yields the snapshot row id instead of a
+/// "did we write" flag.
+///
+/// The Agent run journal stores this id as the restore point for a write, so the
+/// de-duplicated case must return the id of the *existing* identical snapshot rather
+/// than nothing — otherwise `agent_run_journal.snapshot_id` would be NULL and the
+/// whole-turn undo would have nothing to roll back to.
+pub fn insert_note_snapshot_returning_id(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+    content: &str,
+) -> rusqlite::Result<i64> {
+    insert_note_snapshot_inner(conn, file_path, content).map(|(id, _)| id)
+}
+
+/// Shared implementation. Returns `(snapshot_id, newly_inserted)`.
+fn insert_note_snapshot_inner(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+    content: &str,
+) -> rusqlite::Result<(i64, bool)> {
     let now_ms = chrono::Utc::now().timestamp_millis();
 
-    // Check if content is identical to the latest snapshot — skip if so
-    let latest: Option<String> = conn
+    // Check if content is identical to the latest snapshot — reuse that row if so.
+    let latest: Option<(i64, String)> = conn
         .query_row(
-            "SELECT content FROM note_snapshots WHERE file_path = ?1 ORDER BY created_at_ms DESC LIMIT 1",
-            params![&file_path],
-            |row| row.get(0),
+            "SELECT id, content FROM note_snapshots WHERE file_path = ?1 ORDER BY created_at_ms DESC, id DESC LIMIT 1",
+            params![file_path],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .ok();
-    if let Some(ref last) = latest {
-        if last == &content {
-            return Ok(false);
+    if let Some((id, ref last)) = latest {
+        if last == content {
+            return Ok((id, false));
         }
     }
 
     // Insert new snapshot
     conn.execute(
         "INSERT INTO note_snapshots (file_path, content, content_length, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
-        params![&file_path, &content, content.len() as i64, now_ms],
+        params![file_path, content, content.len() as i64, now_ms],
     )?;
+    let new_id = conn.last_insert_rowid();
 
     // Prune: keep at most 100 per file
     conn.execute(
         "DELETE FROM note_snapshots WHERE file_path = ?1 AND id NOT IN (
             SELECT id FROM note_snapshots WHERE file_path = ?1 ORDER BY created_at_ms DESC LIMIT 100
         )",
-        params![&file_path],
+        params![file_path],
     )?;
 
-    Ok(true)
+    Ok((new_id, true))
+}
+
+/// Save a note snapshot to SQLite. Deduplicates if content is identical to the latest.
+/// Keeps at most 100 snapshots per file (prunes oldest).
+#[tauri::command]
+pub fn save_note_snapshot(state: State<'_, AppState>, file_path: String, content: String) -> Result<bool, ZettelError> {
+    let conn = state.db.lock().map_err(|e| ZettelError::System(format!("DB lock error: {}", e)))?;
+    Ok(insert_note_snapshot(&conn, &file_path, &content)?)
 }
 
 /// Get all snapshots for a file, sorted newest first.
@@ -133,16 +172,35 @@ pub fn delete_note_snapshot(state: State<'_, AppState>, snapshot_id: i64) -> Res
     Ok(())
 }
 
+/// Delete a file from the file tree.
+///
+/// Not a hard delete: the body is kept in `note_snapshots` and the file itself goes to
+/// the vault-local recycle bin, mirroring what the Agent's `delete_note` tool does.
+/// Signature and return value are unchanged so the frontend needs no edit.
 #[tauri::command]
 pub fn delete_file(state: State<'_, AppState>, path: String) -> Result<(), ZettelError> {
     let file_path = PathBuf::from(&path);
     if file_path.exists() {
-        std::fs::remove_file(&file_path)?;
+        // 1. Preserve the body first, so the text survives even an emptied trash.
+        //    Keyed exactly like the Agent's snapshots and the version-history UI.
+        if let Ok(content) = std::fs::read_to_string(&file_path) {
+            let key = crate::tools::internal_tools::helpers::snapshot_path_key(&file_path);
+            let conn = state.db.lock()?;
+            if let Err(e) = insert_note_snapshot(&conn, &key, &content) {
+                log::warn!("delete_file: could not snapshot {}: {}", key, e);
+            }
+        }
+
+        // 2. Move to `<vault>/.zettelagent/trash/...` instead of unlinking.
+        //    A trash failure must not silently leave the file in place, so it is reported.
+        let vault = crate::tools::internal_tools::helpers::infer_vault_root(&file_path);
+        crate::tools::internal_tools::note_ops::move_to_trash(&vault, &file_path)
+            .map_err(|e| ZettelError::System(format!("Failed to move to trash: {}", e)))?;
     }
     let conn = state.db.lock()?;
     conn.execute("DELETE FROM files WHERE path = ?1", params![path])?;
     crate::db::search::invalidate_graph_cache(&conn);
-    log::info!("Deleted file: {}", path);
+    log::info!("Moved file to trash: {}", path);
     Ok(())
 }
 

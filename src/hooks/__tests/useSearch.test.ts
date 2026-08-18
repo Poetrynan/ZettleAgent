@@ -69,6 +69,10 @@ describe('useSearch', () => {
   });
 
   it('should handle search errors', async () => {
+    // `useSearch` deliberately logs the failure it swallows. That log is expected
+    // here, so mute it: an unexplained "Search failed" on stderr makes a green
+    // suite look broken and hides the stack traces that actually matter.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(searchChunks).mockRejectedValue(new Error('Search failed'));
     vi.mocked(useApp).mockReturnValue({
       state: {
@@ -86,5 +90,8 @@ describe('useSearch', () => {
     expect(result.current.searching).toBe(false);
     expect(result.current.results).toEqual([]);
     expect(result.current.error).toBe('Error: Search failed');
+    // The log is part of the contract — assert it happened rather than just hiding it.
+    expect(consoleError).toHaveBeenCalledWith('Search failed:', expect.any(Error));
+    consoleError.mockRestore();
   });
 });

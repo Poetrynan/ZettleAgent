@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 import { Lang, setLang as setLangInLib } from '../lib/i18n';
 
-export type View = 'note' | 'dashboard' | 'settings' | 'graph' | 'canvas' | 'bases' | 'calendar';
+export type View = 'note' | 'dashboard' | 'settings' | 'graph' | 'canvas' | 'bases' | 'calendar' | 'review';
 
 export interface ToastInfo {
   message: string;

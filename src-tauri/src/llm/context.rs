@@ -3,7 +3,7 @@
  * 
  * Enhanced with intelligent summarization for long conversations.
  */
-use super::{ChatMessage, LlmConfig};
+use super::{ChatMessage, LlmConfig, ToolDef};
 
 /// Estimate token count from text (rough heuristic: ~4 chars per token for English, ~2 for CJK).
 pub fn estimate_tokens(text: &str) -> usize {
@@ -17,6 +17,129 @@ pub fn estimate_tokens(text: &str) -> usize {
     }
     // Add overhead for message framing
     tokens / 4 + 10
+}
+
+// ── Budget accounting ──────────────────────────────────────────────
+//
+// Every estimator below deliberately errs on the HIGH side. The asymmetry
+// matters: under-counting means we ship a request the provider rejects with
+// `context_length_exceeded` (the turn dies, the user loses work), while
+// over-counting only means we compact slightly earlier than strictly needed.
+// So whenever a rounding choice exists, we round up.
+
+/// Fixed per-message overhead: the role tag plus whatever separator tokens the
+/// provider wraps around each message. Real values are model-specific (OpenAI's
+/// own cookbook uses 3–4); this is an estimate, not an exact figure, and we take
+/// the upper bound for the reason described above.
+pub const PER_MESSAGE_OVERHEAD_TOKENS: usize = 4;
+
+/// Fraction of the context window at which compaction is allowed to run.
+///
+/// Why gate at all: compaction rewrites the *front* of the transcript, which
+/// invalidates the provider's prompt-cache prefix (see the prefix-stability
+/// tests in `prompts.rs`). Running it every iteration therefore costs both CPU
+/// and cache hits for no benefit. 0.75 leaves ~25% of the window as headroom
+/// for the next tool result plus the model's reply — enough that a single large
+/// tool output cannot overshoot the hard limit before the next gate check.
+pub const COMPRESSION_TRIGGER_RATIO: f64 = 0.75;
+
+/// Conservative fallback when neither `LlmConfig.context_window` nor the model
+/// name tells us the real window. 32k is the smallest window still common among
+/// supported providers, so assuming it never over-fills a larger model.
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 32_000;
+
+/// How many of the most recent tool-calling turns keep their full tool output
+/// during MicroCompact. The model almost always only needs the latest results to
+/// decide its next action; older ones are recoverable by calling the tool again.
+pub const MICRO_COMPACT_KEEP_RECENT_TURNS: usize = 3;
+
+/// Tool results shorter than this are left alone — replacing them with a
+/// placeholder would reclaim nothing while still burning cache locality.
+const MICRO_COMPACT_MIN_CHARS: usize = 200;
+
+/// Marker prefix for an aged-out tool result. Also used as an idempotency guard
+/// so repeated MicroCompact passes do not re-age (and re-shrink) the same
+/// message, which would otherwise churn the transcript every gate hit.
+const AGED_MARKER: &str = "[aged]";
+
+/// Estimate the tokens a single message contributes to the request body.
+///
+/// Counts the parts the old accounting silently dropped: the `tool_calls`
+/// envelope (name + the arguments JSON, which for edit/write tools is often
+/// larger than the visible content) and the `tool_call_id` correlation string.
+pub fn estimate_message_tokens(msg: &ChatMessage) -> usize {
+    let mut total = estimate_tokens(&msg.content) + PER_MESSAGE_OVERHEAD_TOKENS;
+    if let Some(ref calls) = msg.tool_calls {
+        for call in calls {
+            total += estimate_tokens(&call.id)
+                + estimate_tokens(&call.function.name)
+                + estimate_tokens(&call.function.arguments);
+        }
+    }
+    if let Some(ref id) = msg.tool_call_id {
+        total += estimate_tokens(id);
+    }
+    total
+}
+
+/// Estimate the tokens contributed by the whole message array.
+///
+/// NOTE: the system message is included here. Its cost is real (and with skill
+/// injection it is one of the largest single blocks in the request), so the
+/// budget must see it even though compaction is never allowed to touch it.
+pub fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
+    messages.iter().map(estimate_message_tokens).sum()
+}
+
+/// Estimate the tokens spent on the tool *schemas* sent with every request.
+///
+/// This is the block the previous accounting missed entirely: ~60 tool
+/// definitions, each with a JSON-Schema parameter object, is a five-figure token
+/// constant that is present on *every* call. Serializing the actual struct is
+/// the closest cheap proxy for what goes on the wire.
+pub fn estimate_tool_schema_tokens(tools: &[ToolDef]) -> usize {
+    tools
+        .iter()
+        .map(|t| match serde_json::to_string(t) {
+            Ok(json) => estimate_tokens(&json),
+            // Serialization of a ToolDef cannot realistically fail, but if it
+            // did, fall back to the parts we can see rather than counting zero.
+            Err(_) => estimate_tokens(&t.function.name) + estimate_tokens(&t.function.description),
+        })
+        .sum()
+}
+
+/// Total estimated request size: messages (text + tool_calls + system/skill
+/// prompt) plus the tool schema block.
+pub fn estimate_request_tokens(messages: &[ChatMessage], tools: &[ToolDef]) -> usize {
+    estimate_messages_tokens(messages) + estimate_tool_schema_tokens(tools)
+}
+
+/// Token count above which compaction is allowed to run.
+pub fn compression_trigger_threshold(max_tokens: usize) -> usize {
+    let window = if max_tokens == 0 {
+        DEFAULT_CONTEXT_WINDOW_TOKENS
+    } else {
+        max_tokens
+    };
+    (window as f64 * COMPRESSION_TRIGGER_RATIO) as usize
+}
+
+/// The gate. `true` only when the estimated request actually approaches the
+/// window; otherwise the transcript is returned untouched so the cached prefix
+/// survives.
+///
+/// `user_query` is counted as *reply headroom* rather than as content (the query
+/// itself is already inside `messages`): reserving roughly its size approximates
+/// the answer the model is about to generate on top of the prompt.
+pub fn should_compress(
+    messages: &[ChatMessage],
+    tools: &[ToolDef],
+    user_query: &str,
+    max_tokens: usize,
+) -> bool {
+    let used = estimate_request_tokens(messages, tools) + estimate_tokens(user_query);
+    used > compression_trigger_threshold(max_tokens)
 }
 
 /// Get the maximum context tokens for the given config.
@@ -44,21 +167,49 @@ pub fn get_max_context_tokens(config: &LlmConfig) -> usize {
 }
 
 /// Compress the context window to fit within the token limit.
-/// Strategy: remove oldest non-system messages, keeping the system prompt and recent messages.
+///
+/// Two-stage, cheapest-first:
+///   1. **MicroCompact** — age out older `tool` results in place. Nothing is
+///      removed from the transcript, so turn structure and message count stay
+///      valid, and only the bulky payloads the model has already acted on go
+///      away. This is almost always enough.
+///   2. **Full fold** — only if stage 1 still leaves us over the threshold: drop
+///      whole older turns (whitelist + turn atomicity preserved).
+///
+/// The system message is never rewritten by either stage — see the fold notice
+/// handling at the bottom of this function.
 pub async fn compress_context_window(
     _config: &LlmConfig,
     messages: &mut Vec<ChatMessage>,
+    tools: &[ToolDef],
     user_query: &str,
     max_tokens: usize,
 ) {
-    let total: usize = messages.iter().map(|m| estimate_tokens(&m.content)).sum();
-    let query_tokens = estimate_tokens(user_query);
+    // ── Gate ─────────────────────────────────────────────────────────
+    // Previously this function ran on every agent iteration. That burned CPU
+    // and, worse, rewrote the head of the transcript, invalidating the
+    // provider's prompt-cache prefix on every turn. Now it is a no-op until the
+    // estimated request actually approaches the window.
+    let threshold = compression_trigger_threshold(max_tokens);
+    let schema_tokens = estimate_tool_schema_tokens(tools);
+    let reply_reserve = estimate_tokens(user_query); // headroom for the answer
+    let fixed = schema_tokens + reply_reserve;
 
-    if total + query_tokens <= max_tokens {
-        return; // within budget
+    if estimate_messages_tokens(messages) + fixed <= threshold {
+        return; // comfortably within budget — leave the transcript byte-identical
     }
 
-    let budget = max_tokens.saturating_sub(query_tokens);
+    // ── Stage 1: MicroCompact ────────────────────────────────────────
+    let aged = micro_compact_tool_results(messages, MICRO_COMPACT_KEEP_RECENT_TURNS);
+    if aged > 0 {
+        log::info!("MicroCompact: aged out {} older tool result(s)", aged);
+    }
+    if estimate_messages_tokens(messages) + fixed <= threshold {
+        return; // reclaiming tool payloads was enough; no turns dropped
+    }
+
+    // ── Stage 2: full fold ───────────────────────────────────────────
+    let budget = threshold.saturating_sub(fixed);
 
     // ── Memory flush before fold ──────────────────────────────────────
     // Older turns are about to be dropped. Extract high-signal facts
@@ -83,6 +234,13 @@ pub async fn compress_context_window(
     let system_msg = messages.first().cloned();
     let original_len = messages.len();
 
+    // The system prompt is undroppable, so its cost comes out of the budget
+    // before the history walk. Floor the remainder: a huge injected system
+    // prompt must not starve the walk into dropping the turn currently in
+    // flight, which would leave the model with no idea what it was doing.
+    let system_tokens = system_msg.as_ref().map(estimate_message_tokens).unwrap_or(0);
+    let budget = budget.saturating_sub(system_tokens).max(1_024);
+
     // ── Build the keep-set (indices into `messages`, excluding system at 0) ──
     // Two rules layered on top of the plain "newest fits first" walk:
     //   1. WHITELIST — protected messages survive regardless of budget.
@@ -96,7 +254,7 @@ pub async fn compress_context_window(
 
     for idx in (1..original_len).rev() {
         let msg = &messages[idx];
-        let msg_tokens = estimate_tokens(&msg.content);
+        let msg_tokens = estimate_message_tokens(msg);
         if is_protected(msg) {
             // Whitelisted: keep it even if it blows the budget. Losing an image
             // or a cancelled-operation marker silently corrupts the transcript.
@@ -122,18 +280,95 @@ pub async fn compress_context_window(
     messages.clear();
     if let Some(sys) = system_msg {
         let removed = original_len.saturating_sub(kept.len() + 1); // +1 for system msg
+        // The system message goes back VERBATIM. Appending a fold notice to it
+        // (which is what this used to do) changes the very first bytes of the
+        // request and therefore misses the provider's prompt cache for the rest
+        // of the session — the exact failure `prompts.rs` has prefix-stability
+        // tests for. The notice instead rides in its own message *after* the
+        // static prefix, where it costs a few tokens and nothing else.
+        messages.push(sys);
         if removed > 0 {
-            let mut summary_msg = sys;
-            summary_msg.content = format!(
-                "{}\n\n[Context compressed: {} older messages removed to stay within token budget]",
-                summary_msg.content, removed
-            );
-            messages.push(summary_msg);
-        } else {
-            messages.push(sys);
+            messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: format!(
+                    "[System note] Context compressed: {} older message(s) removed to stay within the token budget.",
+                    removed
+                ),
+                ..Default::default()
+            });
         }
     }
     messages.extend(kept);
+}
+
+/// MicroCompact: age out the payloads of older `tool` results in place.
+///
+/// Rationale: a finished tool result is the cheapest thing in the transcript to
+/// give up — the model has already read it and acted on it, and it can re-run
+/// the tool if it truly needs the detail again. Doing this *before* the full
+/// fold means we usually never have to drop a whole turn, which keeps the
+/// user/assistant narrative (and the model's sense of what it was doing) intact.
+///
+/// Preserved as-is:
+/// - the tool results of the most recent `keep_recent_turns` tool-calling turns,
+/// - anything on the compaction whitelist (`is_protected`),
+/// - short results (aging them reclaims nothing),
+/// - already-aged results (idempotent, so repeated gate hits don't churn).
+///
+/// Returns how many messages were aged.
+fn micro_compact_tool_results(messages: &mut [ChatMessage], keep_recent_turns: usize) -> usize {
+    // tool_call_id → tool name, so the placeholder can still name the tool.
+    let mut call_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    // Indices of assistant messages that issued tool calls == turn boundaries.
+    let mut turn_starts: Vec<usize> = Vec::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        if let Some(ref calls) = msg.tool_calls {
+            if !calls.is_empty() {
+                turn_starts.push(idx);
+            }
+            for call in calls {
+                call_names.insert(call.id.clone(), call.function.name.clone());
+            }
+        }
+    }
+
+    if turn_starts.len() <= keep_recent_turns {
+        return 0; // not enough history to have anything "older"
+    }
+    // Everything before this index belongs to an older turn.
+    let boundary = turn_starts[turn_starts.len() - keep_recent_turns];
+
+    let mut aged = 0usize;
+    for idx in 0..boundary {
+        if messages[idx].role != "tool" {
+            continue;
+        }
+        if is_protected(&messages[idx]) {
+            continue;
+        }
+        if messages[idx].content.starts_with(AGED_MARKER) {
+            continue;
+        }
+        // chars(), never byte slicing — this content is frequently CJK and
+        // `&s[..n]` panics mid-codepoint (this repo has been bitten 6 times).
+        let char_count = messages[idx].content.chars().count();
+        if char_count <= MICRO_COMPACT_MIN_CHARS {
+            continue;
+        }
+        let name = messages[idx]
+            .tool_call_id
+            .as_ref()
+            .and_then(|id| call_names.get(id))
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
+        messages[idx].content = format!(
+            "{} tool `{}` result ({} chars) — 内容已老化回收 / aged out to reclaim context. Re-run the tool if the detail is needed again.",
+            AGED_MARKER, name, char_count
+        );
+        aged += 1;
+    }
+    aged
 }
 
 /// Messages that must never be dropped by compaction.
@@ -357,7 +592,7 @@ impl ContextManager {
     pub fn manage_context(&self, messages: &mut Vec<ChatMessage>, new_message: ChatMessage) {
         messages.push(new_message);
         
-        let current_tokens: usize = messages.iter().map(|m| estimate_tokens(&m.content)).sum();
+        let current_tokens: usize = estimate_messages_tokens(messages);
         let threshold = (self.max_tokens as f64 * self.compression_threshold) as usize;
         
         if current_tokens > threshold {
@@ -490,14 +725,16 @@ impl ContextManager {
     
     /// Check if context needs compression
     pub fn needs_compression(&self, messages: &[ChatMessage]) -> bool {
-        let current_tokens: usize = messages.iter().map(|m| estimate_tokens(&m.content)).sum();
+        let current_tokens: usize = estimate_messages_tokens(messages);
         let threshold = (self.max_tokens as f64 * self.compression_threshold) as usize;
         current_tokens > threshold
     }
     
     /// Get current token usage
     pub fn current_tokens(&self, messages: &[ChatMessage]) -> usize {
-        messages.iter().map(|m| estimate_tokens(&m.content)).sum()
+        // Uses the full per-message estimate (content + tool_calls envelope +
+        // role overhead), not just the visible text.
+        estimate_messages_tokens(messages)
     }
     
     /// Get usage percentage (0.0 to 1.0)
@@ -571,5 +808,294 @@ mod tests {
         
         let summary = ContextManager::generate_summary(&messages);
         assert!(summary.contains("User requests") || summary.contains("Key outcomes"));
+    }
+
+    // ── Test helpers ─────────────────────────────────────────────────
+    use super::super::{ToolCall, ToolCallFunction, ToolDef, ToolFunction};
+
+    fn msg(role: &str, content: &str) -> ChatMessage {
+        ChatMessage { role: role.to_string(), content: content.to_string(), ..Default::default() }
+    }
+
+    fn assistant_with_call(id: &str, name: &str, args: &str) -> ChatMessage {
+        ChatMessage {
+            role: "assistant".to_string(),
+            content: String::new(),
+            tool_calls: Some(vec![ToolCall {
+                id: id.to_string(),
+                call_type: "function".to_string(),
+                function: ToolCallFunction { name: name.to_string(), arguments: args.to_string() },
+            }]),
+            tool_call_id: None,
+        }
+    }
+
+    fn tool_reply(id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "tool".to_string(),
+            content: content.to_string(),
+            tool_calls: None,
+            tool_call_id: Some(id.to_string()),
+        }
+    }
+
+    fn sample_tool(name: &str) -> ToolDef {
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: name.to_string(),
+                description: "A sample tool for testing the schema token estimate.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "search query" },
+                        "limit": { "type": "integer", "description": "max results" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        }
+    }
+
+    // ── B: budget accounting includes every component ────────────────
+
+    #[test]
+    fn estimate_counts_ascii_cjk_and_mixed() {
+        // Not asserting exact values — only that each is counted and CJK is
+        // heavier per character than ASCII (matching the estimator's intent).
+        let ascii = estimate_tokens("the quick brown fox jumps over the lazy dog");
+        let cjk = estimate_tokens("你好世界这是一个测试字符串用来验证分词");
+        let mixed = estimate_tokens("hello 你好 world 世界");
+        assert!(ascii > 0 && cjk > 0 && mixed > 0);
+        // Equal char counts: CJK weighs ~2x ASCII, so it must estimate higher.
+        let ascii_20: String = "a".repeat(20);
+        let cjk_20: String = "中".repeat(20);
+        assert!(estimate_tokens(&cjk_20) > estimate_tokens(&ascii_20));
+    }
+
+    #[test]
+    fn tool_calls_are_included_in_message_estimate() {
+        let plain = msg("assistant", "");
+        let with_args = assistant_with_call(
+            "call_1",
+            "write_note",
+            r#"{"path":"a/very/long/note/path.md","content":"a fairly large body of text that would otherwise be invisible to the old accounting which only looked at the content field"}"#,
+        );
+        // The arguments JSON must push the estimate well above an empty message.
+        assert!(
+            estimate_message_tokens(&with_args) > estimate_message_tokens(&plain) + 20,
+            "tool_calls arguments must be counted"
+        );
+    }
+
+    #[test]
+    fn tool_schema_tokens_grow_with_toolset() {
+        let one = vec![sample_tool("search_notes")];
+        let many: Vec<ToolDef> = (0..10).map(|i| sample_tool(&format!("tool_{i}"))).collect();
+        let one_t = estimate_tool_schema_tokens(&one);
+        let many_t = estimate_tool_schema_tokens(&many);
+        assert!(one_t > 0);
+        assert!(many_t > one_t * 5, "10 schemas should dwarf a single schema");
+    }
+
+    #[test]
+    fn request_estimate_includes_schema_block() {
+        let messages = vec![msg("system", "sys"), msg("user", "hi")];
+        let no_tools = estimate_request_tokens(&messages, &[]);
+        let tools: Vec<ToolDef> = (0..5).map(|i| sample_tool(&format!("t{i}"))).collect();
+        let with_tools = estimate_request_tokens(&messages, &tools);
+        assert!(with_tools > no_tools, "schema block must add to the request estimate");
+    }
+
+    // ── C: gate behaviour ────────────────────────────────────────────
+
+    /// ChatMessage has no `PartialEq`, so the "byte-identical" assertions below
+    /// compare the serialized form — which is also exactly what goes on the wire.
+    fn wire(messages: &[ChatMessage]) -> String {
+        serde_json::to_string(messages).unwrap()
+    }
+
+    #[tokio::test]
+    async fn gate_below_threshold_leaves_messages_untouched() {
+        let mut messages = vec![
+            msg("system", "You are a helpful agent."),
+            msg("user", "hello"),
+            msg("assistant", "hi there"),
+        ];
+        let before = wire(&messages);
+        // Huge window → nowhere near the gate.
+        assert!(!should_compress(&messages, &[], "hello", 128_000));
+        // Compression must be a no-op below the gate.
+        compress_context_window(&LlmConfig::default(), &mut messages, &[], "hello", 128_000).await;
+        assert_eq!(wire(&messages), before, "below threshold must not mutate the transcript");
+    }
+
+    #[test]
+    fn gate_fires_when_over_threshold() {
+        // Small window so a few big messages exceed 75%.
+        let big = "词".repeat(4_000); // CJK → heavy
+        let messages = vec![
+            msg("system", "sys"),
+            msg("user", &big),
+            msg("assistant", &big),
+        ];
+        assert!(should_compress(&messages, &[], "q", 2_000));
+    }
+
+    #[test]
+    fn tool_schemas_alone_can_trip_the_gate() {
+        // The regression this guards: a short transcript plus a large toolset was
+        // previously scored as "tiny" because schemas were not counted at all.
+        let messages = vec![msg("system", "sys"), msg("user", "hi")];
+        assert!(!should_compress(&messages, &[], "hi", 8_000));
+        let tools: Vec<ToolDef> = (0..300).map(|i| sample_tool(&format!("tool_{i}"))).collect();
+        assert!(should_compress(&messages, &tools, "hi", 8_000));
+    }
+
+    // ── C: system prefix must never be rewritten ─────────────────────
+
+    #[tokio::test]
+    async fn fold_never_rewrites_system_message() {
+        let system_text = "STATIC SYSTEM PREFIX — must remain byte-identical for prompt caching.";
+        let big = "x".repeat(6_000);
+        let mut messages = vec![msg("system", system_text)];
+        // Many turns of chatter to force a fold.
+        for i in 0..8 {
+            messages.push(msg("user", &format!("user turn {i} {big}")));
+            messages.push(msg("assistant", &format!("assistant turn {i} {big}")));
+        }
+        let original_len = messages.len();
+        compress_context_window(&LlmConfig::default(), &mut messages, &[], "q", 2_000).await;
+        // System stays first and unchanged.
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(
+            messages[0].content, system_text,
+            "system prefix was rewritten — that breaks the provider prompt cache"
+        );
+        // And the fold actually happened.
+        assert!(messages.len() < original_len, "expected a fold at this budget");
+    }
+
+    // ── D: MicroCompact ──────────────────────────────────────────────
+
+    /// Build a transcript of `turns` tool-calling turns, each with a bulky result.
+    fn transcript_with_tool_turns(turns: usize, payload: &str) -> Vec<ChatMessage> {
+        let mut messages = vec![msg("system", "sys"), msg("user", "do the thing")];
+        for i in 0..turns {
+            let id = format!("call_{i}");
+            messages.push(assistant_with_call(&id, "search_notes", r#"{"query":"x"}"#));
+            messages.push(tool_reply(&id, payload));
+        }
+        messages
+    }
+
+    #[test]
+    fn micro_compact_keeps_recent_turns_and_ages_older_ones() {
+        let payload = "R".repeat(3_000);
+        let mut messages = transcript_with_tool_turns(6, &payload);
+        let aged = micro_compact_tool_results(&mut messages, MICRO_COMPACT_KEEP_RECENT_TURNS);
+        assert_eq!(aged, 6 - MICRO_COMPACT_KEEP_RECENT_TURNS, "only older turns age out");
+
+        let tool_msgs: Vec<&ChatMessage> = messages.iter().filter(|m| m.role == "tool").collect();
+        // The most recent N keep their full payload...
+        for m in tool_msgs.iter().rev().take(MICRO_COMPACT_KEEP_RECENT_TURNS) {
+            assert_eq!(m.content, payload, "recent tool results must stay intact");
+        }
+        // ...older ones become placeholders that still name the tool.
+        for m in tool_msgs.iter().take(6 - MICRO_COMPACT_KEEP_RECENT_TURNS) {
+            assert!(m.content.starts_with(AGED_MARKER));
+            assert!(m.content.contains("search_notes"));
+            assert!(m.content.contains("3000"), "placeholder records the reclaimed size");
+        }
+    }
+
+    #[test]
+    fn micro_compact_is_idempotent() {
+        let mut messages = transcript_with_tool_turns(6, &"R".repeat(3_000));
+        let first = micro_compact_tool_results(&mut messages, MICRO_COMPACT_KEEP_RECENT_TURNS);
+        let snapshot = wire(&messages);
+        let second = micro_compact_tool_results(&mut messages, MICRO_COMPACT_KEEP_RECENT_TURNS);
+        assert!(first > 0);
+        assert_eq!(second, 0, "already-aged results must not be re-aged");
+        assert_eq!(wire(&messages), snapshot);
+    }
+
+    #[test]
+    fn micro_compact_leaves_short_and_protected_results_alone() {
+        let mut messages = vec![msg("system", "sys")];
+        for i in 0..6 {
+            let id = format!("call_{i}");
+            messages.push(assistant_with_call(&id, "read_note", r#"{"path":"a.md"}"#));
+            let content = if i == 0 {
+                "short".to_string() // below MICRO_COMPACT_MIN_CHARS
+            } else if i == 1 {
+                format!("user rejected the operation {}", "P".repeat(3_000)) // whitelisted
+            } else {
+                "R".repeat(3_000)
+            };
+            messages.push(tool_reply(&id, &content));
+        }
+        micro_compact_tool_results(&mut messages, MICRO_COMPACT_KEEP_RECENT_TURNS);
+        let tool_msgs: Vec<&ChatMessage> = messages.iter().filter(|m| m.role == "tool").collect();
+        assert_eq!(tool_msgs[0].content, "short");
+        assert!(tool_msgs[1].content.contains("user rejected"), "whitelist must survive MicroCompact");
+    }
+
+    #[tokio::test]
+    async fn micro_compact_runs_before_any_turn_is_dropped() {
+        // Window sized so that aging the older tool payloads alone gets us back
+        // under the gate — the fold must therefore never run and no message may
+        // disappear. (6 turns × ~1.1k tokens ≈ 6.5k used vs a 4.9k gate; aging
+        // half the tool payloads drops it to ~3.6k.)
+        let mut messages = transcript_with_tool_turns(6, &"R".repeat(4_000));
+        let original_len = messages.len();
+        let user_msg_before = messages[1].content.clone();
+
+        compress_context_window(&LlmConfig::default(), &mut messages, &[], "do the thing", 6_500).await;
+
+        assert_eq!(messages.len(), original_len, "MicroCompact should have sufficed — no turns dropped");
+        assert_eq!(messages[1].content, user_msg_before, "user turn preserved");
+        let aged_count = messages.iter().filter(|m| m.content.starts_with(AGED_MARKER)).count();
+        assert_eq!(aged_count, 6 - MICRO_COMPACT_KEEP_RECENT_TURNS);
+    }
+
+    #[tokio::test]
+    async fn full_fold_only_after_micro_compact_is_insufficient() {
+        // Bulk lives in user/assistant text, which MicroCompact cannot touch, so
+        // the second stage has to run.
+        let big = "词".repeat(3_000);
+        let mut messages = vec![msg("system", "sys")];
+        for i in 0..6 {
+            messages.push(msg("user", &format!("turn {i} {big}")));
+            let id = format!("call_{i}");
+            messages.push(assistant_with_call(&id, "search_notes", r#"{"query":"x"}"#));
+            messages.push(tool_reply(&id, &"R".repeat(3_000)));
+        }
+        let original_len = messages.len();
+        compress_context_window(&LlmConfig::default(), &mut messages, &[], "q", 2_000).await;
+        assert!(messages.len() < original_len, "fold must engage when aging is not enough");
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[0].content, "sys");
+    }
+
+    // ── E: CJK safety ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cjk_heavy_transcript_does_not_panic() {
+        // Every truncation path here must use chars(); byte slicing on these
+        // strings panics mid-codepoint (this repo has hit that bug repeatedly).
+        let cjk = "这是一段很长的中文文本，用于验证任何截断逻辑都不会在字符边界上panic。".repeat(200);
+        let mut messages = vec![msg("system", "系统提示：你是一个中文助手。")];
+        for i in 0..6 {
+            messages.push(msg("user", &format!("第{i}轮：{cjk}")));
+            let id = format!("call_{i}");
+            messages.push(assistant_with_call(&id, "搜索笔记", r#"{"查询":"中文"}"#));
+            messages.push(tool_reply(&id, &cjk));
+        }
+        compress_context_window(&LlmConfig::default(), &mut messages, &[], &cjk, 3_000).await;
+        // Also exercise the tool-result compressor and the summarizer on CJK.
+        let _ = compress_tool_result("搜索笔记", &cjk, 100);
+        let _ = ContextManager::generate_summary(&messages);
+        assert!(!messages.is_empty());
     }
 }

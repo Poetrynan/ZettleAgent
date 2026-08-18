@@ -1,0 +1,29 @@
+# Windows-only link tweak so `cargo test` can actually run.
+#
+# The problem: `tauri-plugin-dialog` → `rfd` statically imports
+# `comctl32.dll!TaskDialogIndirect` plus the window-subclassing APIs
+# (`SetWindowSubclass` / `DefSubclassProc` / `RemoveWindowSubclass`). Those
+# exports exist ONLY in Common-Controls **v6**, which lives in WinSxS and has to
+# be requested by an application manifest. `System32\comctl32.dll` is v5.82 and
+# does not export them.
+#
+# `tauri-build` embeds such a manifest into the *application* binary, but the
+# `cargo test` harness binary gets no manifest — so the loader binds v5.82,
+# cannot resolve the entry points, and the process dies with
+# `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` before a single test runs.
+#
+# Why delay-load rather than embed a second manifest: embedding one here would
+# collide with the RT_MANIFEST resource `tauri-build` already writes into the app
+# binary. `/DELAYLOAD` instead moves comctl32 symbol resolution from load time to
+# first call. Tests never open a dialog, so they never resolve it and now load
+# fine; the real app still has its v6 manifest, so its first actual call resolves
+# exactly as before. No behaviour change for shipped builds.
+# `delayimp.lib` supplies `__delayLoadHelper2`, the thunk the delay-load stubs
+# call on first use. MSVC does not add it implicitly for Rust targets, so without
+# it the link fails with `LNK2001: unresolved external symbol __delayLoadHelper2`.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = [
+    "-C", "link-arg=/DELAYLOAD:comctl32.dll",
+    "-C", "link-arg=delayimp.lib",
+]
+

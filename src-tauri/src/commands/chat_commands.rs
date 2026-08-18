@@ -6,10 +6,15 @@ use crate::error::ZettelError;
 use super::{ChatRequest, ChatResponse, RagChatRequest, CardMetadataRequest};
 
 #[tauri::command]
-pub async fn chat_with_llm(request: ChatRequest) -> Result<ChatResponse, ZettelError> {
+pub async fn chat_with_llm(
+    // Injected by Tauri, not sent by the caller — needed to read the key out of
+    // the OS credential store for users who have migrated.
+    app: tauri::AppHandle,
+    request: ChatRequest,
+) -> Result<ChatResponse, ZettelError> {
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id,
         context_window: request.context_window,
@@ -33,7 +38,7 @@ pub async fn chat_with_llm_stream(
 ) -> Result<(), ZettelError> {
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id,
         supports_thinking: request.supports_thinking,
@@ -330,25 +335,46 @@ fn rag_run_search(
     query_embedding: Option<&[f32]>,
     limit: usize,
 ) -> Result<Vec<search::SearchResult>, ZettelError> {
+    // Relevance rerank config comes from process state (restored from
+    // `app_settings` at startup), so RAG retrieval honours the same user setting
+    // as the search panel without threading it through every RAG entry point.
+    //
+    // `external: None` ⇒ Tier 1 (lexical). Tiers 2/3 need either the webview's
+    // ONNX model or an awaited LLM call; this function is sync and runs while the
+    // caller holds the DB lock, so neither can happen here. `rerank_results`
+    // already degrades CrossEncoder/Llm to Tier 1 when no external reranker is
+    // supplied, so a user on mode=crossEncoder still gets a reranked RAG context.
+    //
+    // This is **not** a pending TODO. Tier 2 lives in the webview, and an agent
+    // turn has no webview in the loop: bridging it would mean suspending the turn
+    // mid-tool-call on a frontend round trip and resuming it — a pending-
+    // continuation registry, not a wiring change. The honest alternative is for
+    // the *caller* to pre-rank via `rerank_search_window` and pass an explicit
+    // chunk order into the RAG command, which changes this command's contract.
+    // Until then, agent RAG is Tier 1 and says so.
+    let config = crate::db::search::rerank::active_config();
     match search_mode {
         "hybrid" => {
             let emb = query_embedding.ok_or_else(|| {
                 ZettelError::Llm("Missing query embedding for hybrid search".to_string())
             })?;
-            Ok(search::hybrid_search(conn, query, emb, limit)?)
+            Ok(search::hybrid_search_reranked(conn, query, emb, limit, &config, None)?)
         }
         "vector" => {
             let emb = query_embedding.ok_or_else(|| {
                 ZettelError::Llm("Missing query embedding for vector search".to_string())
             })?;
+            // Left unreranked: see the note in `search_commands::search_chunks`.
             Ok(search::vector_search(conn, emb, limit)?)
         }
-        _ => Ok(search::full_text_search(conn, query, limit)?),
+        _ => Ok(search::full_text_search_reranked(conn, query, limit, &config, None)?),
     }
 }
 
 #[tauri::command]
 pub async fn rag_search_and_chat(
+    // Injected by Tauri — see `chat_with_llm`.
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     request: RagChatRequest,
 ) -> Result<ChatResponse, ZettelError> {
@@ -371,7 +397,7 @@ pub async fn rag_search_and_chat(
 
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id,
         ..Default::default()
@@ -413,7 +439,7 @@ pub async fn rag_search_and_stream(
 
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key.clone(),
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key.clone()),
         model: request.model.clone().unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id.clone(),
         ..Default::default()
@@ -586,10 +612,14 @@ pub async fn rag_search_and_stream(
 }
 
 #[tauri::command]
-pub async fn generate_card_metadata(request: CardMetadataRequest) -> Result<String, ZettelError> {
+pub async fn generate_card_metadata(
+    // Injected by Tauri — see `chat_with_llm`.
+    app: tauri::AppHandle,
+    request: CardMetadataRequest,
+) -> Result<String, ZettelError> {
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id,
         ..Default::default()
@@ -628,7 +658,7 @@ pub async fn agent_chat(
 
     let config = LlmConfig {
         api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
         provider_id: request.provider_id,
         supports_thinking: request.supports_thinking,
@@ -1009,8 +1039,12 @@ pub async fn agent_chat(
         }
     }
 
-    // Filter tools to intent-specific subset (empty allowed_tools = all tools).
-    let mut filtered_tools = strategy.filter_tool_defs(&tools);
+    // Narrow the tool surface to the intent's scope (`ToolScope::None` drops everything;
+    // `ToolScope::All` resolves to the default surface = tools::CORE_TOOLS + runtime
+    // extension tools, not all ~63 defs — see agents/strategy.rs::visible_tool_defs).
+    // The `todo_write` fallback below also guarantees the list is never empty, which
+    // some providers reject when a `tools` key is present.
+    let mut filtered_tools = strategy.visible_tool_defs(&tools);
     if let Some(todo) = tools.iter().find(|t| t.function.name == "todo_write") {
         if !filtered_tools.iter().any(|t| t.function.name == "todo_write") {
             filtered_tools.push(todo.clone());
@@ -1051,6 +1085,9 @@ pub async fn agent_chat(
     // Register the AppHandle so background flushers can emit MemoryFlushed
     // events (compress_context_window isn't itself invoked with a handle).
     crate::llm::tool_hooks::set_active_app_handle(app.clone());
+    // Register the DB handle so the approval gate can consult `approval_rules`
+    // from inside the orchestrator loop (which is only handed a tool_executor).
+    crate::llm::approval::set_active_db(state.db.clone());
     let _ = app.emit("agent-event", serde_json::json!({
         "type": "stage",
         "stage": "planning",
@@ -1389,4 +1426,34 @@ pub fn write_memory_file(vault_path: String, content: String) -> Result<(), Zett
     std::fs::write(&memory_path, &content)
         .map_err(|e| ZettelError::System(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod rag_search_rerank_tests {
+    use super::*;
+    use crate::db::search::rerank::{self, RerankConfig, RerankMode};
+
+    /// The RAG retrieval entry point must honour the persisted rerank config.
+    /// Under Tier 1 the exact-phrase note wins; under `Off` it stays in FTS order.
+    #[test]
+    fn rag_run_search_respects_active_rerank_config() {
+        let _g = rerank::config_guard();
+        let conn = crate::db::search::test_db_with_ranking_disagreement();
+
+        rerank::store_config(RerankConfig::lexical());
+        let reranked = rag_run_search(&conn, "fts", "knowledge graph", None, 5).unwrap();
+        assert_eq!(
+            reranked[0].file_path, "b.md",
+            "RAG search should apply the lexical rerank"
+        );
+
+        rerank::store_config(RerankConfig { mode: RerankMode::Off, ..Default::default() });
+        let off = rag_run_search(&conn, "fts", "knowledge graph", None, 5).unwrap();
+        let plain = search::full_text_search(&conn, "knowledge graph", 5).unwrap();
+        assert_eq!(
+            off.iter().map(|r| &r.file_path).collect::<Vec<_>>(),
+            plain.iter().map(|r| &r.file_path).collect::<Vec<_>>(),
+            "Off must reproduce the plain FTS order for RAG"
+        );
+    }
 }

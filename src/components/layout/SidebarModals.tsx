@@ -171,7 +171,10 @@ export default function SidebarModals({
       >
         <div className="modal-content">
           <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-base)' }}>
-            {t('sidebar.deleteConfirmMsg').replace('{name}', deleteConfirm?.name || '')}
+            {/* Files go to `<vault>/.zettelagent/trash/` (file_commands::delete_file), so the
+                warning must not claim they are gone forever. Folder deletion still is. */}
+            {t(deleteConfirm?.is_dir ? 'sidebar.deleteConfirmMsg' : 'sidebar.deleteFileConfirmMsg')
+              .replace('{name}', deleteConfirm?.name || '')}
           </p>
         </div>
         <div className="modal-footer">

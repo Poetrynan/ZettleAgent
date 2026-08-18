@@ -46,6 +46,24 @@ pub fn get_local_graph(state: State<'_, AppState>, file_path: String) -> Result<
     Ok(data)
 }
 
+/// Notes related to the one currently being read — the Related Notes panel.
+///
+/// Lives with the other relation reads (`get_local_graph`, `get_edges_by_relation`)
+/// because it answers the same question at a different granularity: this is the local
+/// graph, flattened and explained, for one note. All merge/rank/SQL logic is in
+/// `db::search::get_related_notes`; this stays a thin lock-and-delegate command.
+#[tauri::command]
+pub fn get_related_notes(
+    state: State<'_, AppState>,
+    file_path: String,
+    limit: Option<usize>,
+) -> Result<search::RelatedNotesResult, ZettelError> {
+    let conn = state.db.lock()?;
+    // 8 is what fits the in-note panel without turning passive discovery into a wall
+    // of links; the frontend can ask for more.
+    Ok(search::get_related_notes(&conn, &file_path, limit.unwrap_or(8))?)
+}
+
 /// Export knowledge graph to JSON Canvas 1.0 format
 #[tauri::command]
 pub fn export_canvas(
@@ -64,7 +82,7 @@ pub fn save_canvas_to_file(
     canvas_json: String,
     output_path: String,
 ) -> Result<(), ZettelError> {
-    std::fs::write(&output_path, canvas_json)?;
+    crate::file_lock::safe_write(std::path::Path::new(&output_path), &canvas_json)?;
     Ok(())
 }
 
@@ -154,11 +172,20 @@ pub fn delete_note_relation(
 /// Reads both notes' content and uses LLM to explain the conceptual relationship.
 #[tauri::command]
 pub async fn explain_relationship(
+    // Injected by Tauri — needed to resolve the migrated user's key from the OS
+    // credential store. This command takes bare args rather than a request
+    // struct, but the precedence rule is identical.
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     note_a: String,
     note_b: String,
     api_url: String,
-    api_key: Option<String>,
+    // `Option<RequestApiKey>` rather than a bare `RequestApiKey`: the old
+    // `Option<String>` arg tolerated the caller omitting `apiKey` entirely, and
+    // a Tauri command argument cannot carry `#[serde(default)]` to say so. The
+    // outer `Option` preserves that tolerance; the inner newtype still forces the
+    // value through the precedence helper.
+    api_key: Option<crate::secrets::RequestApiKey>,
     model: String,
     provider_id: Option<String>,
 ) -> Result<String, ZettelError> {
@@ -238,7 +265,7 @@ pub async fn explain_relationship(
 
     let config = crate::llm::LlmConfig {
         api_url,
-        api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, api_key.unwrap_or_default()),
         model,
         provider_id,
         ..Default::default()

@@ -46,3 +46,28 @@ pure-onnx-ocr = "0.1.0"
 image = "0.25"
 wgpu = "0.20"
 
+# ── OS credential store ─────────────────────────────────────────────
+# `keyring` 3.6.3 gives one API over Windows Credential Manager, macOS
+# Keychain and the Linux Secret Service. Version is pinned exactly (repo
+# convention, cf. `"dompurify": "3.4.10"`) because a silent minor bump here
+# would change *where the user's API key physically lives*.
+#
+# Deliberately 3.6.3 and not 4.x: 4.x moved to the `keyring-core` provider
+# model where the process must install a credential store before any
+# `Entry` works, and raises the MSRV to 1.88. 3.6.3 keeps the flat
+# `Entry::new(service, user)` API and MSRV 1.75.
+#
+# Backends are selected per target so no platform pays for another's
+# transport — in particular Windows/macOS never pull in the D-Bus stack.
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", features = ["apple-native"] }
+
+# `crypto-rust` keeps the Secret Service session encryption on pure Rust
+# rather than linking system OpenSSL, which matters for a portable
+# open-source build.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust"] }
+

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::llm::ChatMessage;
+use crate::secrets::RequestApiKey;
 
 pub mod file_commands;
 pub mod search_commands;
@@ -12,6 +13,8 @@ pub mod timeline_commands;
 pub mod attachment_commands;
 pub mod bases_commands;
 pub mod reconcile_commands;
+pub mod undo_commands;
+pub mod review_commands;
 pub use file_commands::*;
 pub use search_commands::*;
 pub use chat_commands::*;
@@ -23,6 +26,8 @@ pub use timeline_commands::*;
 pub use attachment_commands::*;
 pub use bases_commands::*;
 pub use reconcile_commands::*;
+pub use undo_commands::*;
+pub use review_commands::*;
 
 // ── Shared API Request/Response Types ─────────────────────────────
 
@@ -78,7 +83,11 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub api_url: Option<String>,
     pub model: Option<String>,
-    pub api_key: Option<String>,
+    // `RequestApiKey` (not `Option<String>`) so it can only reach an `LlmConfig`
+    // through `resolve_api_key_with_override`. `default` keeps the field
+    // optional on the wire now that it is no longer a bare `Option`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub provider_id: Option<String>,
     /// Selected model's context window (tokens) — from the provider preset.
     /// When set, overrides the backend heuristic context budget.
@@ -101,7 +110,9 @@ pub struct RagChatRequest {
     pub query: String,
     pub api_url: Option<String>,
     pub model: Option<String>,
-    pub api_key: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub provider_id: Option<String>,
     pub search_limit: Option<usize>,
     pub search_mode: Option<String>,
@@ -120,7 +131,9 @@ pub struct CardMetadataRequest {
     pub note_content: String,
     pub api_url: Option<String>,
     pub model: Option<String>,
-    pub api_key: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub provider_id: Option<String>,
     pub methodology: Option<String>,
 }
@@ -132,7 +145,9 @@ pub struct StartSchedulerRequest {
     pub batch_size: Option<usize>,
     pub max_api_calls: Option<usize>,
     pub api_url: Option<String>,
-    pub api_key: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub model: Option<String>,
     pub provider_id: Option<String>,
     pub methodology: Option<String>,
@@ -148,7 +163,9 @@ pub struct StartSchedulerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RunSchedulerNowRequest {
     pub api_url: Option<String>,
-    pub api_key: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub model: Option<String>,
     pub provider_id: Option<String>,
     pub methodology: Option<String>,
@@ -179,7 +196,9 @@ pub struct AgentChatRequest {
     pub messages: Vec<ChatMessage>,
     pub api_url: Option<String>,
     pub model: Option<String>,
-    pub api_key: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
     pub provider_id: Option<String>,
     pub vault_path: Option<String>,
     /// All mounted workspace root directories (multi-vault support)

@@ -259,8 +259,10 @@ function CanvasInner() {
   const [smartCanvasLoading, setSmartCanvasLoading] = useState(false);
 
   // ── Agent 操作进度浮层 ──
+  // `desc`/`descZh` are optional: the AI-layout flow only supplies labels, while the
+  // richer flows below also pass a per-stage description.
   const [agentProgress, setAgentProgress] = useState<{
-    step: number; steps: { label: string; labelZh: string }[];
+    step: number; steps: { label: string; labelZh: string; desc?: string; descZh?: string }[];
   } | null>(null);
 
   // ── Canvas Find (Ctrl+F) ──
@@ -688,10 +690,10 @@ function CanvasInner() {
     }
 
     const _layoutSteps = [
-      { label: 'Analyzing', labelZh: '分析图谱' },
-      { label: 'Generating', labelZh: 'AI 生成布局' },
-      { label: 'Applying', labelZh: '应用布局' },
-      { label: 'Complete', labelZh: '完成' },
+      { label: 'Analyzing', labelZh: '分析图谱', desc: 'Reading nodes and links', descZh: '读取节点与连线' },
+      { label: 'Generating', labelZh: 'AI 生成布局', desc: 'Asking the model for a layout', descZh: '请求模型生成布局方案' },
+      { label: 'Applying', labelZh: '应用布局', desc: 'Moving nodes into place', descZh: '将节点移动到新位置' },
+      { label: 'Complete', labelZh: '完成', desc: 'Layout applied', descZh: '布局已应用' },
     ];
     if (!silent) setAgentProgress({ step: 1, steps: _layoutSteps });
 

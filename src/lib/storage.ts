@@ -1,11 +1,90 @@
 /**
  * Persistent storage using Tauri Store plugin
  * Data is stored in local filesystem, not affected by WebView cache clearing
+ *
+ * ## API key handling
+ *
+ * `llmConfig.apiKey` is deliberately NOT part of what gets written here. It is
+ * routed to the OS credential store through `./secrets` instead, and stripped
+ * from both `localStorage` and `settings.json`. `saveLlmConfig` /
+ * `loadLlmConfig` are the only choke points the rest of the app uses for this
+ * config, which is why the hardening lives here rather than in every caller.
  */
 
 import { Store } from '@tauri-apps/plugin-store';
+import { setApiKey, migrateApiKey, getApiKeyStatus, type SecretStatus } from './secrets';
+import { t } from './i18n';
 
 let store: Store | null = null;
+
+/** Legacy plaintext location. Kept as a constant because several functions
+ *  below exist purely to make sure nothing is left in it. */
+const LLM_LOCAL_KEY = 'zettelagent-llm';
+
+/**
+ * Last known protection status, cached so the settings UI can render a warning
+ * without a round-trip on every keystroke. `null` means "not probed yet".
+ */
+let lastSecretStatus: SecretStatus | null = null;
+
+/**
+ * True once a keyring hand-off has thrown outright and the key had to be kept
+ * in plaintext WebView storage. That copy is invisible to the Rust status
+ * probe (it only knows about the keyring and its own fallback file), so the
+ * frontend must remember it — otherwise the next probe would report
+ * `has_key: false` and the warning banner would silently vanish.
+ */
+let plaintextFallbackActive = false;
+
+/**
+ * The "unprotected, key kept in plaintext" status the backend cannot report
+ * because the only copy lives in WebView storage, not anywhere Rust can see.
+ */
+function plaintextFallbackStatus(): SecretStatus {
+  return {
+    backend: 'unprotected-file',
+    protected: false,
+    has_key: true,
+    fallback_reason: t('settings.apiKeyKeyringWriteFailed'),
+  };
+}
+
+/** Status of the stored key, from cache when available. */
+export async function getSecretStatus(force = false): Promise<SecretStatus | null> {
+  if (lastSecretStatus && !force) return lastSecretStatus;
+  try {
+    const probed = await getApiKeyStatus();
+    // A frontend-only plaintext fallback is invisible to the backend probe, so
+    // it would answer `has_key: false` and drop the warning. Keep warning.
+    lastSecretStatus = plaintextFallbackActive && !probed.has_key
+      ? plaintextFallbackStatus()
+      : probed;
+  } catch {
+    // The command may not be registered (older build). If we degraded to a
+    // plaintext fallback, keep saying so; otherwise report `null` rather than
+    // claim a protection level we can't verify.
+    lastSecretStatus = plaintextFallbackActive ? plaintextFallbackStatus() : null;
+  }
+  return lastSecretStatus;
+}
+
+/** Strip `apiKey` so it never reaches a persistence call. */
+function withoutApiKey(config: Record<string, unknown>): Record<string, unknown> {
+  const { apiKey: _dropped, ...rest } = config;
+  return rest;
+}
+
+/** Write the non-secret part of the config to both stores. */
+async function persistLlmConfig(config: Record<string, unknown>): Promise<void> {
+  localStorage.setItem(LLM_LOCAL_KEY, JSON.stringify(config));
+  try {
+    const st = await getStore();
+    await st.set('llmConfig', config);
+    await st.save();
+  } catch (error) {
+    console.error('Failed to save LLM config to Tauri Store:', error);
+  }
+}
 
 /**
  * Initialize the store
@@ -21,38 +100,100 @@ async function getStore(): Promise<Store> {
 }
 
 /**
- * Save LLM configuration — writes to both Tauri Store and localStorage.
+ * Save LLM configuration.
+ *
+ * The API key is handed to the OS credential store and removed from the
+ * persisted config. If that hand-off throws — e.g. a build where the backend
+ * command isn't available, or one where even the backend's own fallback file
+ * could not be written — we fall back to the historical behaviour of persisting
+ * the key, because losing the user's key is a worse outcome than storing it the
+ * way we always have.
+ *
+ * What must NOT happen is that fallback being silent: it would revert the
+ * hardening with no visible trace. So the degradation is recorded and
+ * `getSecretStatus()` reports an explicitly *unprotected* status from that point
+ * on, which is what puts the warning banner in front of the user on the very
+ * next status read (the settings tab re-probes on save) rather than never.
  */
 export async function saveLlmConfig(config: Record<string, unknown>): Promise<void> {
-  // Always write to localStorage as backup
-  localStorage.setItem('zettelagent-llm', JSON.stringify(config));
-
+  const apiKey = typeof config.apiKey === 'string' ? config.apiKey : '';
   try {
-    const st = await getStore();
-    await st.set('llmConfig', config);
-    await st.save();
+    lastSecretStatus = await setApiKey(apiKey);
+    // The backend owns the key now — either in the keyring, or in its own
+    // clearly-named unprotected file, which its status probe *can* see. Either
+    // way there is no WebView-side plaintext copy left to remember.
+    plaintextFallbackActive = false;
+    await persistLlmConfig(withoutApiKey(config));
   } catch (error) {
-    console.error('Failed to save LLM config to Tauri Store:', error);
+    // Never log `config` itself — it still holds the key at this point.
+    console.error('Failed to store API key in the OS credential store:', error);
+    plaintextFallbackActive = apiKey.length > 0;
+    lastSecretStatus = plaintextFallbackActive ? plaintextFallbackStatus() : null;
+    await persistLlmConfig(config);
   }
 }
 
 /**
  * Load LLM configuration — tries Tauri Store first, falls back to localStorage.
+ *
+ * Any plaintext key found on the way is migrated into the credential store and
+ * then erased from disk (see `hardenLoadedConfig`). The returned object has no
+ * `apiKey`, so request builders pass `undefined` down and the backend resolves
+ * the key itself.
  */
 export async function loadLlmConfig(): Promise<Record<string, unknown> | null> {
   try {
     const st = await getStore();
     const config = await st.get<Record<string, unknown>>('llmConfig');
-    if (config) return config;
+    if (config) return await hardenLoadedConfig(config);
   } catch (error) {
     console.error('Failed to load LLM config from Tauri Store:', error);
   }
   // Fallback: localStorage
   try {
-    const saved = localStorage.getItem('zettelagent-llm');
-    if (saved) return JSON.parse(saved);
+    const saved = localStorage.getItem(LLM_LOCAL_KEY);
+    if (saved) return await hardenLoadedConfig(JSON.parse(saved));
   } catch { /* ignore */ }
   return null;
+}
+
+/**
+ * Migrate a plaintext key out of a just-loaded config, then erase it.
+ *
+ * Ordering matters and is enforced by the backend: it only sets
+ * `plaintext_can_be_deleted` after reading the value back out of the credential
+ * store. We delete the old copy exclusively on that signal, so an interrupted
+ * or failed migration leaves the user's key intact where it was. Re-running on
+ * every launch is safe — the backend treats an already-stored key as "nothing
+ * to do, the plaintext is redundant".
+ */
+async function hardenLoadedConfig(
+  config: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const plaintext = typeof config.apiKey === 'string' ? config.apiKey : '';
+  if (!plaintext) return withoutApiKey(config);
+
+  try {
+    const outcome = await migrateApiKey(plaintext);
+    if (!outcome.plaintext_can_be_deleted) {
+      // Keep the plaintext: it is currently the only copy of the key.
+      console.warn('API key migration incomplete; the plaintext copy was kept.');
+      return config;
+    }
+    // Write-new-succeeded ⇒ delete-old. Not doing this would mean no hardening
+    // at all: the key would simply exist in two places instead of one.
+    await persistLlmConfig(withoutApiKey(config));
+    lastSecretStatus = {
+      backend: outcome.backend,
+      protected: outcome.protected,
+      has_key: true,
+      fallback_reason: outcome.protected ? null : outcome.detail,
+    };
+    return withoutApiKey(config);
+  } catch (error) {
+    console.error('API key migration unavailable; keeping the existing config:', error);
+    return config;
+  }
 }
 
 /**
@@ -66,14 +207,13 @@ export async function migrateFromLocalStorage(): Promise<void> {
     
     // Only migrate if Tauri store is empty
     if (!existingConfig) {
-      const localStorageData = localStorage.getItem('zettelagent-llm');
+      const localStorageData = localStorage.getItem(LLM_LOCAL_KEY);
       if (localStorageData) {
         const config = JSON.parse(localStorageData);
-        await st.set('llmConfig', config);
-        await st.save();
+        // Route the key to the credential store and persist only the rest, so
+        // this migration cannot re-seed plaintext into `settings.json`.
+        await saveLlmConfig(config);
         console.log('Successfully migrated LLM config from localStorage to Tauri Store');
-        // Optionally clear localStorage after successful migration
-        // localStorage.removeItem('zettelagent-llm');
       }
     }
   } catch (error) {

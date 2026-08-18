@@ -240,6 +240,16 @@ export function SmartChat() {
   /** Lifecycle Generation: id of the run we're currently rendering. Events
    *  stamped with any other run id are discarded (see the `agent-event` listener). */
   const currentRunIdRef = useRef('');
+  /** Session that owns the turn currently in flight.
+   *
+   *  The `llm-stream-chunk` listener is registered once (deps `[]`), so the
+   *  `sess` object it closed over — and therefore `sess.sessionId` — is frozen
+   *  at first render. Reading it when the stream finishes persisted the reply
+   *  under the session that happened to be active at mount, not the one the
+   *  user actually sent from. Stamping the owner here at send time and reading
+   *  it back on `done` is the same request-token trick as `currentRunIdRef`
+   *  above and `loadTokenRef` in MarkdownViewer. */
+  const streamSessionIdRef = useRef('');
 
   // Export Modal states
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -394,7 +404,11 @@ export function SmartChat() {
           const last = prev[prev.length - 1];
           if (last && last.streaming) {
             const finalMsg = { ...last, streaming: false };
-            persistMessage(finalMsg, sess.sessionId);
+            // Persist under the session that OWNED this stream, captured at
+            // send time — not `sess.sessionId`, which this once-registered
+            // listener froze at first render. Guards against the reply landing
+            // in whatever session the user switched to mid-stream.
+            persistMessage(finalMsg, streamSessionIdRef.current || sess.sessionId);
             sess.refreshSessions();
             return [...prev.slice(0, -1), finalMsg];
           }
@@ -1149,6 +1163,10 @@ export function SmartChat() {
     sess.handleCreateSession(sess.sessionId, userInput.slice(0, 30), activeMode);
     persistMessage(userMessage, sess.sessionId);
     sess.refreshSessions();
+    // Stamp the owner of this turn. `handleSend` is re-created every render so
+    // `sess.sessionId` is current here; the long-lived `llm-stream-chunk`
+    // listener cannot say the same, which is why it reads this ref instead.
+    streamSessionIdRef.current = sess.sessionId;
 
     const controller = new AbortController();
     abortControllerRef.current = controller;

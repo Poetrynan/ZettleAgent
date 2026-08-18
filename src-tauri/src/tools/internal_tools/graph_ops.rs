@@ -1128,7 +1128,28 @@ pub(super) async fn execute_propagate_fact_update(
 
             if !failed && !patches_applied_to_note.is_empty() {
                 // Write modified file content back
-                if std::fs::write(&canonical_dep, &current_content).is_ok() {
+                // Preserve the downstream note's pre-image before this batch rewrite so
+                // the user can undo an unwanted propagation. Fail-closed: skip the write
+                // for this note if the restore point cannot be recorded.
+                let dep_snapshot_id = match super::helpers::snapshot_before_write(db, &canonical_dep) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        log::warn!("propagate_fact_update: skipping {} — {}", dep_path, e);
+                        continue;
+                    }
+                };
+                if crate::file_lock::safe_write(&canonical_dep, &current_content).is_ok() {
+                    // One journal row per downstream note, so undoing the turn walks
+                    // every propagated edit back.
+                    super::helpers::journal_write(
+                        db,
+                        "propagate_fact_update",
+                        "write",
+                        &super::helpers::snapshot_path_key(&canonical_dep),
+                        None,
+                        dep_snapshot_id,
+                        None,
+                    );
                     // Lock database for writing changes
                     if let Ok(conn) = db.lock() {
                         // Update database metadata for this file (e.g. hash)

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { approveToolCall, rejectToolCall } from '../../lib/tauri';
-import type { ApprovalDiffData } from '../../lib/tauri';
+import { approveToolCall, rejectToolCall, addApprovalRule } from '../../lib/tauri';
+import type { ApprovalDiffData, RiskLevel } from '../../lib/tauri';
 
 interface DiffApprovalCardProps {
   approvalId: string;
@@ -64,6 +64,39 @@ export function DiffApprovalCard({
     }
   };
 
+  /**
+   * "Always allow this kind" — records a persistent allow rule for this tool at this
+   * risk ceiling, then approves the pending call. Scoped to the whole vault because the
+   * card only knows one concrete path; narrowing to a folder belongs in Settings where
+   * the user can see the rule they are writing.
+   *
+   * Never offered for `critical` (deletion): the backend rejects `max_risk='critical'`
+   * and always asks regardless of rules, so a button here would be a lie.
+   */
+  const handleAlwaysAllow = async () => {
+    if (!diffData || diffData.risk_level === 'critical') return;
+    setStatus('approving');
+    try {
+      await addApprovalRule(
+        diffData.tool_name,
+        '',
+        diffData.risk_level,
+        'persistent',
+        isZh ? '从审批卡添加' : 'Added from approval card',
+      );
+    } catch (e) {
+      // A failed rule write must not block the approval the user just gave.
+      console.error('Failed to add approval rule:', e);
+    }
+    try {
+      await approveToolCall(approvalId);
+      onResolved(true);
+    } catch (e) {
+      console.error('Failed to approve:', e);
+      setStatus('pending');
+    }
+  };
+
   // ── Processing state ──────────────────────────────────────────
   if (status !== 'pending') {
     return (
@@ -103,19 +136,31 @@ export function DiffApprovalCard({
     toolArgs = JSON.parse(diffData.tool_args_json);
   } catch { /* ignore parse errors */ }
 
+  // The backend prefixes the title with a provenance warning when the turn is
+  // tainted. Split it back out so a long URL cannot squeeze the real action
+  // title out of the header, and so the wording can be localized here.
+  const { taint, title } = splitTaintPrefix(diffData.title);
+
   // ── Structured diff view ──────────────────────────────────────
   return (
     <div className="diff-approval-card">
-      {/* Header: tool icon + title */}
+      {/* Header: tool icon + title + risk badge */}
       <div className="diff-approval-header">
         <span className="diff-approval-icon"><ToolIcon diffType={diffData.diff_type} /></span>
         <div className="diff-approval-title-area">
-          <span className="diff-approval-title">{diffData.title}</span>
+          <span className="diff-approval-title">{title}</span>
           {diffData.tool_name !== diffData.diff_type && (
             <span className="diff-approval-subtitle">{diffData.tool_name}</span>
           )}
         </div>
+        <RiskBadge level={diffData.risk_level} isZh={isZh} />
       </div>
+
+      {taint && <TaintBanner kind={taint.kind} source={taint.source} isZh={isZh} />}
+
+      {diffData.risk_reason && (
+        <div className="diff-approval-risk-reason">{diffData.risk_reason}</div>
+      )}
 
       {/* Body: diff-type specific rendering */}
       <div className="diff-approval-body">
@@ -126,7 +171,7 @@ export function DiffApprovalCard({
         ) : diffData.diff_type === 'edit' ? (
           <EditView toolArgs={toolArgs} filePath={diffData.file_path} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
         ) : diffData.diff_type === 'delete' ? (
-          <DeleteView filePath={diffData.file_path} />
+          <DeleteView filePath={diffData.file_path} isZh={isZh} />
         ) : diffData.diff_type === 'append' ? (
           <AppendView toolArgs={toolArgs} filePath={diffData.file_path} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
         ) : diffData.diff_type === 'rename' || diffData.diff_type === 'move' ? (
@@ -142,6 +187,8 @@ export function DiffApprovalCard({
         onApprove={handleApprove}
         onReject={handleReject}
         pending={status === 'pending'}
+        onAlwaysAllow={diffData.risk_level === 'critical' ? undefined : handleAlwaysAllow}
+        toolName={diffData.tool_name}
       />
     </div>
   );
@@ -170,10 +217,80 @@ function ToolIcon({ diffType }: { diffType: string }) {
   }
 }
 
+// ── Risk badge & provenance warning ─────────────────────────────────
+
+const RISK_LABEL: Record<RiskLevel, { zh: string; en: string }> = {
+  low: { zh: '低风险', en: 'Low' },
+  medium: { zh: '中风险', en: 'Medium' },
+  high: { zh: '高风险', en: 'High' },
+  critical: { zh: '不可逆', en: 'Critical' },
+};
+
+/** Colour-coded risk chip. Mirrors `RiskLevel` in `llm/approval.rs`. */
+function RiskBadge({ level, isZh }: { level: RiskLevel; isZh: boolean }) {
+  const label = RISK_LABEL[level] ?? RISK_LABEL.medium;
+  return (
+    <span className={`diff-risk-badge diff-risk-${level}`}>
+      {isZh ? label.zh : label.en}
+    </span>
+  );
+}
+
+/**
+ * The backend decorates `title` with a Chinese provenance warning when the turn
+ * read external content. Pull it apart so the header stays short and the wording
+ * can follow the UI language.
+ *
+ * Exported for tests: the format is produced by `build_approval_diff_data` in
+ * `src-tauri/src/llm/approval.rs` and the two must not drift.
+ */
+export function splitTaintPrefix(raw: string): {
+  taint: { kind: 'injection' | 'external'; source: string } | null;
+  title: string;
+} {
+  const m = /^⚠ (本轮检测到疑似注入内容|本轮曾读取外部内容)（([\s\S]*?)） — ([\s\S]*)$/.exec(raw);
+  if (!m) return { taint: null, title: raw };
+  return {
+    taint: {
+      kind: m[1] === '本轮检测到疑似注入内容' ? 'injection' : 'external',
+      source: m[2],
+    },
+    title: m[3],
+  };
+}
+
+function TaintBanner({ kind, source, isZh }: {
+  kind: 'injection' | 'external'; source: string; isZh: boolean;
+}) {
+  const text = kind === 'injection'
+    ? (isZh
+      ? '本轮读取的外部内容命中注入检测，该写入可能并非你的意图。'
+      : 'External content read this turn tripped the injection heuristic — this write may not be what you asked for.')
+    : (isZh
+      ? '本轮读取过外部内容，请确认这次写入确实是你要的。'
+      : 'This turn read external content — confirm the write is what you intended.');
+  return (
+    <div className={`diff-taint-banner ${kind === 'injection' ? 'diff-taint-injection' : ''}`}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+      </svg>
+      <span className="diff-taint-text">{text}</span>
+      <code className="diff-taint-source" title={source}>{source}</code>
+    </div>
+  );
+}
+
 // ── Actions ─────────────────────────────────────────────────────────
 
-function Actions({ isZh, onApprove, onReject, pending }: {
-  isZh: boolean; onApprove: () => void; onReject: () => void; pending: boolean;
+function Actions({ isZh, onApprove, onReject, pending, onAlwaysAllow, toolName }: {
+  isZh: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  pending: boolean;
+  /** Omitted for `critical` calls — deletion can never be pre-authorized. */
+  onAlwaysAllow?: () => void;
+  toolName?: string;
 }) {
   return (
     <div className="diff-approval-actions">
@@ -189,6 +306,18 @@ function Actions({ isZh, onApprove, onReject, pending }: {
         </svg>
         {isZh ? '拒绝' : 'Reject'}
       </button>
+      {onAlwaysAllow && (
+        <button
+          className="diff-approval-btn diff-approval-btn-always"
+          onClick={onAlwaysAllow}
+          disabled={!pending}
+          title={isZh
+            ? `批准，并且以后不再询问 ${toolName || ''} 的同级操作（可在设置中撤销）`
+            : `Approve and stop asking about ${toolName || 'this tool'} at this risk level (revocable in Settings)`}
+        >
+          {isZh ? '始终允许此类' : 'Always allow this kind'}
+        </button>
+      )}
     </div>
   );
 }
@@ -433,15 +562,21 @@ function EditView({ toolArgs, filePath, expanded, onToggle }: {
 
 // ── Delete View ─────────────────────────────────────────────────────
 
-function DeleteView({ filePath }: { filePath: string }) {
+function DeleteView({ filePath, isZh }: { filePath: string; isZh: boolean }) {
   return (
     <div className="diff-view-container">
       <div className="diff-summary-bar">
         <span className="diff-summary-filename">{filePath}</span>
-        <span className="diff-summary-danger">DESTRUCTIVE</span>
+        <span className="diff-summary-danger">{isZh ? '破坏性操作' : 'DESTRUCTIVE'}</span>
       </div>
+      {/* Deletion goes through `<vault>/.zettelagent/trash/` (note_ops::move_to_trash),
+          so promise recoverable — not permanent — removal. */}
       <div className="diff-delete-warning">
-        This file will be <strong>permanently deleted</strong>.
+        {isZh ? (
+          <>该文件将被移入<strong>回收站</strong>，可在设置中恢复或彻底清除。</>
+        ) : (
+          <>This file will be moved to the <strong>recycle bin</strong> — restorable from Settings.</>
+        )}
       </div>
     </div>
   );

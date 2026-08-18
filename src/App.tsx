@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { ResizablePanel } from './components/layout/ResizablePanel';
@@ -6,12 +6,28 @@ import { MarkdownViewer } from './components/editor/MarkdownViewer';
 import { SmartChat } from './components/chat/SmartChat';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Settings } from './components/settings/Settings';
-import { Bases } from './components/dashboard/Bases';
-import { IconDashboard, IconSettings, IconChat, IconLink, IconFile, IconCanvas, IconCalendar, IconSidebar, IconNetwork, IconChart, IconStack } from './components/icons';
-import { KnowledgeGraph } from './components/dashboard/KnowledgeGraph';
-import DailyCalendar from './components/calendar/DailyCalendar';
-import { InteractiveCanvas } from './components/canvas/InteractiveCanvas';
+import { IconDashboard, IconSettings, IconChat, IconLink, IconFile, IconCanvas, IconCalendar, IconSidebar, IconNetwork, IconChart, IconStack, IconBrain } from './components/icons';
 import { openOrCreateDailyNote } from './lib/dailyNote';
+
+/**
+ * Views that are heavy *and* not on the launch path are split out of the startup
+ * chunk.
+ *
+ * This is a desktop app: assets are read from local disk, so bytes on the wire
+ * are not the point. What these boundaries buy is parse-and-execute time before
+ * the window is usable — the graph views alone pulled in ~2.1 MB of three.js and
+ * Pixi that every launch evaluated, including the many sessions that never open
+ * a graph at all.
+ */
+const KnowledgeGraph = lazy(() =>
+  import('./components/dashboard/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
+const InteractiveCanvas = lazy(() =>
+  import('./components/canvas/InteractiveCanvas').then(m => ({ default: m.InteractiveCanvas })));
+const Bases = lazy(() =>
+  import('./components/dashboard/Bases').then(m => ({ default: m.Bases })));
+const DailyCalendar = lazy(() => import('./components/calendar/DailyCalendar'));
+const ReviewSession = lazy(() =>
+  import('./components/review/ReviewSession').then(m => ({ default: m.ReviewSession })));
 
 import { Toast } from './components/common/Toast';
 import { QuickSwitcher } from './components/common/QuickSwitcher';
@@ -29,11 +45,34 @@ import './styles/onboarding.css';
 import './styles/splash.css';
 import './styles/search-panel.css';
 
+/**
+ * Fallback shown while a split-out view's chunk loads. It fills the view host
+ * exactly (height:100%, centred spinner) so swapping it for the real view does
+ * not shift layout — the container's size is owned by `.view-host`, not by what
+ * is inside it.
+ */
+function ViewLoading() {
+  return (
+    <div className="empty-state" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <span className="spinner" />
+    </div>
+  );
+}
+
 function AppLayout() {
   const { state, setView, toggleChat, setCurrentFile, toggleSidebar, showToast, closeSplit } = useApp();
   const { view } = state;
   const currentView = view;
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
+
+  // Which lazily-split views have ever been opened. A view drops into this set
+  // the first time it becomes current and never leaves, so its chunk is fetched
+  // and parsed once — on demand — and its component then stays mounted to keep
+  // the "state survives a tab switch" behaviour the display:none toggles give.
+  const [openedViews, setOpenedViews] = useState<Set<string>>(() => new Set([currentView]));
+  useEffect(() => {
+    setOpenedViews(prev => (prev.has(currentView) ? prev : new Set(prev).add(currentView)));
+  }, [currentView]);
 
   // Split editor divider drag state
   const splitContainerRef = useRef<HTMLDivElement>(null);
@@ -139,6 +178,7 @@ function AppLayout() {
     { key: '5', ctrl: true, handler: () => setView('bases') },
     { key: '6', ctrl: true, handler: () => setView('calendar') },
     { key: '7', ctrl: true, handler: () => setView('settings') },
+    { key: '8', ctrl: true, handler: () => setView('review') },
     { key: ',', ctrl: true, handler: () => setView('settings') },
     { key: 'l', ctrl: true, handler: () => toggleChat() },
     { key: 'k', ctrl: true, handler: () => {
@@ -287,6 +327,13 @@ function AppLayout() {
                 <IconCalendar size={14} /> <span>{t('toolbar.calendar')}</span>
               </button>
               <button
+                className={`toolbar-nav-btn ${currentView === 'review' ? 'active' : ''}`}
+                onClick={() => setView('review')}
+                title={t('review.navTitle')}
+              >
+                <IconBrain size={14} /> <span>{t('review.navTitle')}</span>
+              </button>
+              <button
                 className={`toolbar-nav-btn ${currentView === 'settings' ? 'active' : ''}`}
                 onClick={() => setView('settings')}
                 title={t('settings.title')}
@@ -307,21 +354,33 @@ function AppLayout() {
         </div>
 
         <div className="view-host">
-          {/* Always mount Dashboard + Graph so their state persists across tab switches */}
+          {/* Dashboard is the landing view, so it stays in the startup chunk and
+              always mounted. The rest keep the same "mount once, then never
+              unmount" contract — panning, zoom and scroll position survive a tab
+              switch — but they only start existing the first time they are asked
+              for, which is what lets their code stay out of the launch path. */}
           <div className="view-scroll" style={{ display: currentView === 'dashboard' ? 'block' : 'none' }}>
             <Dashboard />
           </div>
           <div className="view-scroll" style={{ display: currentView === 'graph' ? 'block' : 'none', overflow: 'hidden' }}>
-            <KnowledgeGraph />
+            {openedViews.has('graph') && (
+              <Suspense fallback={<ViewLoading />}><KnowledgeGraph /></Suspense>
+            )}
           </div>
           <div className="view-scroll" style={{ display: currentView === 'canvas' ? 'block' : 'none', overflow: 'hidden' }}>
-            <InteractiveCanvas />
+            {openedViews.has('canvas') && (
+              <Suspense fallback={<ViewLoading />}><InteractiveCanvas /></Suspense>
+            )}
           </div>
           <div className="view-scroll" style={{ display: currentView === 'bases' ? 'flex' : 'none', overflow: 'hidden' }}>
-            <Bases />
+            {openedViews.has('bases') && (
+              <Suspense fallback={<ViewLoading />}><Bases /></Suspense>
+            )}
           </div>
           <div className="view-scroll" style={{ display: currentView === 'calendar' ? 'block' : 'none', overflow: 'hidden' }}>
-            <DailyCalendar />
+            {openedViews.has('calendar') && (
+              <Suspense fallback={<ViewLoading />}><DailyCalendar /></Suspense>
+            )}
           </div>
           {currentView === 'note' && (
             state.isSplitView ? (
@@ -342,6 +401,11 @@ function AppLayout() {
             )
           )}
           {currentView === 'settings' && <Settings />}
+          {/* Mounted only while active: the session snapshots the queue on mount,
+              so keeping it alive in the background would serve a stale deck. */}
+          {currentView === 'review' && (
+            <Suspense fallback={<ViewLoading />}><ReviewSession /></Suspense>
+          )}
         </div>
       </div>
 

@@ -222,7 +222,7 @@ pub async fn start_scheduler(
 
     let llm_config = LlmConfig {
         api_url,
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model,
         provider_id: request.provider_id,
         ..Default::default()
@@ -398,9 +398,13 @@ pub async fn run_scheduler_now(
         ));
     }
 
+    // Resolved once, here, and then cloned into the background task and every
+    // per-note reconcile future via `SchedulerConfig.llm_config` — those run with
+    // no `AppHandle` of their own, so the credential-store read has to happen at
+    // the command boundary.
     let llm_config = LlmConfig {
         api_url,
-        api_key: request.api_key,
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
         model,
         provider_id: request.provider_id,
         ..Default::default()
