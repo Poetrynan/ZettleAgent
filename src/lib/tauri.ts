@@ -855,7 +855,7 @@ export interface PlanStep {
 }
 
 export interface AgentEvent {
-type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage';
+type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage' | 'batch_progress';
 message?: string;
 tool_call_id?: string;
 name?: string;
@@ -924,6 +924,15 @@ answer_preview?: string;
   total?: number;
   /** cache_read / (cache_read + input), 0..1 */
   cache_hit_rate?: number;
+  // Batch agent progress (batch_progress event, one per item of a `run_batch_agent` run).
+  // `run_id` (declared above) is the *whole batch's* id — the same id `undoAgentRun`
+  // takes to roll the entire batch back. `total` (declared above) is the item count.
+  /** 0-based index of the item that just finished */
+  index?: number;
+  /** Vault-relative path of the note this item processed */
+  file_path?: string;
+  /** Per-item outcome: ok | error | skipped */
+  status?: 'ok' | 'error' | 'skipped';
 }
 
 export async function agentChat(request: AgentChatRequest): Promise<string> {
@@ -1171,6 +1180,147 @@ export interface BasesData {
 
 export async function getBasesData(vaultPath: string): Promise<BasesData> {
   return invoke('get_bases_data', { vaultPath });
+}
+
+// ── Notes Overview / 知识库总览 ────────────────────────────────────
+//
+// Replaces `get_bases_data` for the table view. The backend struct is
+// `#[serde(rename_all = "camelCase")]`, so what arrives here is camelCase.
+// `confidence` is deliberately absent: nothing in the repo ever writes
+// `card_meta.confidence`, so the old column was always empty.
+
+/** Four-state index health of one note. `noChunks` = the file was never chunked. */
+export type NoteIndexStatus = 'indexed' | 'partial' | 'notIndexed' | 'noChunks';
+
+export interface NoteRow {
+  path: string;
+  title: string;
+  folder: string;
+  noteType: string;
+  tags: string[];
+  /** `card_meta.links` length — outbound wikilinks. */
+  outboundLinks: number;
+  backlinkCount: number;
+  semanticDegree: number;
+  indexStatus: NoteIndexStatus;
+  chunkTotal: number;
+  chunkEmbedded: number;
+  /** `null` = never reconciled by the AI. */
+  reconciledAt: string | null;
+  hasContradictions: boolean;
+  contradictionCount: number;
+  reviewState: string | null;
+  reviewDueAtMs: number | null;
+  reviewIsDue: boolean;
+  reviewSuspended: boolean;
+  reviewLapses: number;
+  /** Only non-null when the overview was fetched with `includeGraphSignals`. */
+  pagerank: number | null;
+  isHub: boolean | null;
+  createdAt: string;
+  lastSynced: string;
+}
+
+export interface NotesOverview {
+  rows: NoteRow[];
+  folders: string[];
+  allTags: string[];
+  allTypes: string[];
+  /** `false` = the semantic index has never been computed. Do **not** paint every
+   *  note as a semantic island in that case — say "not computed" instead. */
+  semanticIndexReady: boolean;
+  graphSignalsIncluded: boolean;
+  total: number;
+  /** `true` = the 20k row safety cap was hit; warn "showing first N only". */
+  truncated: boolean;
+}
+
+/**
+ * Every note under `vaultPath` with its health signals.
+ *
+ * `includeGraphSignals` triggers a **full-graph PageRank rebuild** (hundreds of
+ * ms to seconds on a few thousand notes) and is the only thing that fills
+ * `pagerank` / `isHub`. Pass `false` for the interactive load.
+ */
+export async function getNotesOverview(
+  vaultPath: string,
+  includeGraphSignals = false,
+): Promise<NotesOverview> {
+  return invoke('get_notes_overview', { vaultPath, includeGraphSignals });
+}
+
+/** A named filter+sort+columns preset. Persisted as one JSON blob in app_settings. */
+export interface SavedView {
+  id: string;
+  name: string;
+  query: string;
+  folder: string;
+  noteType: string;
+  tag: string;
+  sortField: string;
+  sortDir: string;
+  visibleColumns: string[];
+  groupBy: string | null;
+  createdAtMs: number;
+}
+
+export async function listSavedViews(): Promise<SavedView[]> {
+  return invoke('list_saved_views');
+}
+
+/** Upsert by `id`. */
+export async function saveView(view: SavedView): Promise<void> {
+  return invoke('save_view', { view });
+}
+
+export async function deleteSavedView(id: string): Promise<void> {
+  return invoke('delete_saved_view', { id });
+}
+
+// ── Batch AI over a selection ─────────────────────────────────────
+//
+// One `runId` covers the whole batch, so `undoAgentRun(runId)` rolls every note
+// back in one shot. Per-item progress arrives on the `agent-event` channel as
+// `batch_progress` events carrying `run_id` / `index` / `total` / `file_path` /
+// `status`.
+
+export interface BatchAgentItem {
+  filePath: string;
+  status: 'ok' | 'error' | 'skipped';
+  summary: string | null;
+  error: string | null;
+}
+
+export interface BatchAgentReport {
+  runId: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  items: BatchAgentItem[];
+  cancelled: boolean;
+}
+
+export interface BatchAgentRequest {
+  filePaths: string[];
+  instruction: string;
+  vaultPath: string;
+  model?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  providerId?: string;
+  methodology?: string;
+  continueOnError?: boolean;
+}
+
+/**
+ * Run one instruction over a selection of notes, note by note.
+ *
+ * Every write still goes through the normal approval path, so unless the user
+ * has raised their permission tier this will raise one `DiffApprovalCard` per
+ * note. Warn before calling.
+ */
+export async function runBatchAgent(request: BatchAgentRequest): Promise<BatchAgentReport> {
+  return invoke('run_batch_agent', { request });
 }
 
 // ── Conflict Detection & Resolution ──────────────────────────────

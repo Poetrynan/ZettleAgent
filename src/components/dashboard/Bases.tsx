@@ -1,531 +1,780 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { getBasesData, BasesEntry } from '../../lib/tauri';
-import { t } from '../../lib/i18n';
-import { parseQuery } from '../../lib/basesQuery';
+import {
+  getNotesOverview,
+  listSavedViews,
+  saveView,
+  deleteSavedView,
+  addCardsToReview,
+  chatWithLlm,
+  type NotesOverview,
+  type NoteRow,
+  type SavedView,
+} from '../../lib/tauri';
+import { t, tf } from '../../lib/i18n';
+import {
+  parseQuery,
+  matchesQuery,
+  ruleLabel,
+  hasToken,
+  toggleToken,
+  removeToken,
+} from '../../lib/basesQuery';
+import {
+  HEALTH_PERSPECTIVES,
+  perspectiveCounts,
+  isPerspectiveEnabled,
+  COLUMN_DEFS,
+  defaultVisibleColumns,
+  compareRows,
+  type ColumnId,
+} from '../../lib/notesHealth';
+import { OverviewTable, type FlatItem } from './OverviewTable';
+import { NotePeekPanel } from './NotePeekPanel';
+import { BatchAgentDialog } from './BatchAgentDialog';
+import { ResizablePanel } from '../layout/ResizablePanel';
 
-type SortField = 'title' | 'noteType' | 'linkCount' | 'createdAt' | 'lastSynced' | 'confidence';
-type SortDir = 'asc' | 'desc';
+type GroupBy = 'folder' | 'noteType' | 'reviewState' | null;
 
+/** The DSL cheat-sheet rows. `conf>80` is gone — the backend never returned it. */
+const DSL_EXAMPLES: Array<[string, string]> = [
+  ['type:permanent', 'overview.col.noteType'],
+  ['#ai', 'overview.col.tags'],
+  ['backlinks=0', 'overview.col.backlinks'],
+  ['links>=3', 'overview.col.outbound'],
+  ['semantic=0', 'overview.col.semantic'],
+  ['index:notIndexed', 'overview.col.index'],
+  ['review:none', 'overview.col.review'],
+  ['reconciled:never', 'overview.persp.neverReconciled'],
+  ['due:true', 'overview.persp.dueToday'],
+  ['created>2026-01-01', 'overview.col.created'],
+];
+
+/**
+ * 知识库总览 / Notes Overview — the vault's health desk.
+ *
+ * This view exists for the three things an AI conversation cannot give you:
+ * **scanability** (hundreds of statuses in one glance), **completeness** (every
+ * note matching a condition, not the model's top 5) and **batch action** (pick a
+ * set, act on all of it). Everything here serves one of those three.
+ *
+ * Filter state is a single DSL string. Health-lens chips are literally `lens:*`
+ * tokens in that string, which is why a `SavedView` — whose contract has no
+ * field for chips — still round-trips them.
+ */
 export function Bases() {
   const { state, setCurrentFile, setView, showToast } = useApp();
 
-  const [entries, setEntries] = useState<BasesEntry[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
-  const [allTypes, setAllTypes] = useState<string[]>([]);
+  const [data, setData] = useState<NotesOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [graphLoading, setGraphLoading] = useState(false);
 
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFolder, setSelectedFolder] = useState('');
-  const [selectedType, setSelectedType] = useState('');
-  const [selectedTag, setSelectedTag] = useState('');
+  // Filters. There is exactly one filter model: the DSL string. The three
+  // `All folders / types / tags` dropdowns used to keep their own state beside
+  // it, duplicating `folder:` / `type:` / `#tag` and hiding their value in a
+  // `<select>` label instead of showing it as a pill.
+  const [query, setQuery] = useState('');
 
-  // Sort
-  const [sortField, setSortField] = useState<SortField>('lastSynced');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  // Sort / columns / grouping
+  const [sortField, setSortField] = useState<ColumnId>('lastSynced');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => defaultVisibleColumns());
+  const [groupBy, setGroupBy] = useState<GroupBy>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-  // Query Help Toggle
+  // Selection / peek / batch
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [peekPath, setPeekPath] = useState<string | null>(null);
+  const [batchOpen, setBatchOpen] = useState(false);
+
+  // Saved views
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState('');
+  const [namingView, setNamingView] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
+
+  // Panels
   const [showHelp, setShowHelp] = useState(false);
-  const [showIntro, setShowIntro] = useState(false);
+  /** The one disclosure that holds every occasional control (see the toolbar). */
+  const [showSettings, setShowSettings] = useState(false);
+  const [nlLoading, setNlLoading] = useState(false);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  // ── Data ──────────────────────────────────────────────────────────
+  const loadData = useCallback(async (includeGraph: boolean) => {
+    if (includeGraph) setGraphLoading(true); else setLoading(true);
     try {
-      const data = await getBasesData(state.vaultPath || '');
-      setEntries(data.entries);
-      setFolders(data.folders);
-      setAllTags(data.allTags);
-      setAllTypes(data.allTypes);
+      const overview = await getNotesOverview(state.vaultPath || '', includeGraph);
+      setData(overview);
     } catch (err) {
-      console.error('Failed to load bases data:', err);
+      console.error('Failed to load notes overview:', err);
+      showToast(String(err), 'error');
     } finally {
       setLoading(false);
+      setGraphLoading(false);
     }
-  }, [state.vaultPath]);
+  }, [state.vaultPath, showToast]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { void loadData(false); }, [loadData]);
+  useEffect(() => { void listSavedViews().then(setViews).catch(() => {}); }, []);
 
-  // Parse SQL-like search queries
-  const parsedQuery = useMemo(() => {
-    return parseQuery(searchQuery);
-  }, [searchQuery]);
+  const rows = data?.rows ?? [];
+  const semanticReady = data?.semanticIndexReady ?? false;
+  const graphIncluded = data?.graphSignalsIncluded ?? false;
 
-  // Handle removing a specific query pill/rule
-  const handleRemovePill = (token: string) => {
-    setSearchQuery(prev => {
-      // Escape special characters in the token to prevent regex errors
-      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`\\s*${escaped}\\s*|^\\s*${escaped}\\s*$`);
-      return prev.replace(regex, ' ').trim();
-    });
-  };
+  const parsed = useMemo(() => parseQuery(query), [query]);
 
-  // Filtered + sorted entries
-  const filteredEntries = useMemo(() => {
-    let result = [...entries];
+  // The columns actually offered: graph-only ones appear once signals are loaded.
+  const availableColumns = useMemo(
+    () => COLUMN_DEFS.filter(c => !c.graphOnly || graphIncluded),
+    [graphIncluded],
+  );
 
-    // 1. Dropdown Filters (override query if selected)
-    if (selectedFolder) {
-      result = result.filter(e => e.folder === selectedFolder);
-    }
-    if (selectedType) {
-      result = result.filter(e => e.noteType === selectedType);
-    }
-    if (selectedTag) {
-      result = result.filter(e => e.tags.includes(selectedTag));
-    }
-
-    // 2. Structured SQL-like Rules
-    const { rules, keywords } = parsedQuery;
-    for (const rule of rules) {
-      const valLower = rule.value.toLowerCase();
-      result = result.filter(e => {
-        switch (rule.field) {
-          case 'title':
-            return e.title.toLowerCase().includes(valLower);
-          case 'noteType':
-            return e.noteType.toLowerCase().includes(valLower);
-          case 'tag':
-            return e.tags.some(t => t.toLowerCase().includes(valLower));
-          case 'folder':
-            return e.folder.toLowerCase().includes(valLower);
-          case 'linkCount': {
-            const num = parseInt(rule.value, 10);
-            if (isNaN(num)) return true;
-            if (rule.operator === 'greater') return e.linkCount > num;
-            if (rule.operator === 'less') return e.linkCount < num;
-            if (rule.operator === 'greaterEqual') return e.linkCount >= num;
-            if (rule.operator === 'lessEqual') return e.linkCount <= num;
-            return e.linkCount === num;
-          }
-          case 'confidence': {
-            const num = parseFloat(rule.value);
-            if (isNaN(num)) return true;
-            // Handle both percentage (0-100) and fraction (0-1.0)
-            const target = num > 1 ? num / 100 : num;
-            const entryConf = e.confidence ?? 0;
-            if (rule.operator === 'greater') return entryConf > target;
-            if (rule.operator === 'less') return entryConf < target;
-            if (rule.operator === 'greaterEqual') return entryConf >= target;
-            if (rule.operator === 'lessEqual') return entryConf <= target;
-            return Math.abs(entryConf - target) < 0.01;
-          }
-          case 'createdAt':
-            if (rule.operator === 'greater') return e.createdAt > rule.value;
-            if (rule.operator === 'less') return e.createdAt < rule.value;
-            if (rule.operator === 'greaterEqual') return e.createdAt >= rule.value;
-            if (rule.operator === 'lessEqual') return e.createdAt <= rule.value;
-            return e.createdAt.startsWith(rule.value);
-          case 'lastSynced':
-            if (rule.operator === 'greater') return e.lastSynced > rule.value;
-            if (rule.operator === 'less') return e.lastSynced < rule.value;
-            if (rule.operator === 'greaterEqual') return e.lastSynced >= rule.value;
-            if (rule.operator === 'lessEqual') return e.lastSynced <= rule.value;
-            return e.lastSynced.startsWith(rule.value);
-          default:
-            return true;
-        }
-      });
-    }
-
-    // 3. Regular keywords
-    if (keywords.length > 0) {
-      result = result.filter(e => {
-        return keywords.every(kw =>
-          e.title.toLowerCase().includes(kw) ||
-          e.noteType.toLowerCase().includes(kw) ||
-          e.tags.some(t => t.toLowerCase().includes(kw)) ||
-          e.folder.toLowerCase().includes(kw)
-        );
-      });
-    }
-
-    // 4. Sort
-    result.sort((a, b) => {
-      let cmp = 0;
-      switch (sortField) {
-        case 'title': cmp = a.title.localeCompare(b.title); break;
-        case 'noteType': cmp = a.noteType.localeCompare(b.noteType); break;
-        case 'linkCount': cmp = a.linkCount - b.linkCount; break;
-        case 'createdAt': cmp = a.createdAt.localeCompare(b.createdAt); break;
-        case 'lastSynced': cmp = a.lastSynced.localeCompare(b.lastSynced); break;
-        case 'confidence': cmp = (a.confidence ?? 0) - (b.confidence ?? 0); break;
-      }
+  // DSL + keywords, then sort. This is the "completeness" contract: every
+  // matching row, deterministically ordered — never a model's sample.
+  const filtered = useMemo(() => {
+    let result = rows.filter(r => matchesQuery(r, parsed));
+    result = [...result].sort((a, b) => {
+      const cmp = compareRows(a, b, sortField);
       return sortDir === 'asc' ? cmp : -cmp;
     });
-
     return result;
-  }, [entries, selectedFolder, selectedType, selectedTag, parsedQuery, sortField, sortDir]);
+  }, [rows, parsed, sortField, sortDir]);
 
-  const handleSort = (field: SortField) => {
+  const counts = useMemo(() => perspectiveCounts(rows, semanticReady), [rows, semanticReady]);
+
+  // Flatten (optionally grouped) rows into the uniform list the table windows over.
+  const flatItems = useMemo<FlatItem[]>(() => {
+    if (!groupBy) return filtered.map(row => ({ kind: 'row', row }));
+    const groups = new Map<string, NoteRow[]>();
+    for (const row of filtered) {
+      const raw = groupBy === 'reviewState' ? (row.reviewState ?? '') : (row[groupBy] as string);
+      const key = raw || t('overview.ungrouped');
+      const arr = groups.get(key);
+      if (arr) arr.push(row); else groups.set(key, [row]);
+    }
+    const items: FlatItem[] = [];
+    for (const [key, groupRows] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const isCollapsed = collapsed.has(key);
+      items.push({ kind: 'group', key, label: key, count: groupRows.length, collapsed: isCollapsed });
+      if (!isCollapsed) for (const row of groupRows) items.push({ kind: 'row', row });
+    }
+    return items;
+  }, [filtered, groupBy, collapsed]);
+
+  // ── Handlers ──────────────────────────────────────────────────────
+  const handleSort = useCallback((field: ColumnId) => {
     if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
       setSortDir('desc');
     }
-  };
+  }, [sortField]);
 
-  const handleRowClick = (entry: BasesEntry) => {
-    setCurrentFile(entry.path);
-    setView('note');
-  };
-
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '—';
-    try {
-      const d = new Date(dateStr.replace(' ', 'T') + (dateStr.includes('Z') ? '' : 'Z'));
-      return d.toLocaleDateString(state.lang === 'zh' ? 'zh-CN' : 'en-US', {
-        month: 'short', day: 'numeric', year: 'numeric'
-      });
-    } catch {
-      return dateStr.substring(0, 10);
-    }
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) {
-      return (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.3 }}>
-          <path d="M7 15l5 5 5-5M7 9l5-5 5 5" />
-        </svg>
-      );
-    }
-    return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 1 }}>
-        {sortDir === 'asc' ? <path d="M7 14l5-5 5 5" /> : <path d="M7 10l5 5 5-5" />}
-      </svg>
-    );
-  };
-
-  const noteTypeColor = (type: string) => {
-    const colors: Record<string, string> = {
-      permanent: '#10B981',
-      literature: '#3B82F6',
-      fleeting: '#F59E0B',
-      index: '#8B5CF6',
-      hub: '#EC4899',
-      journal: '#06B6D4',
-      reference: '#6366F1',
-      project: '#F97316',
-    };
-    return colors[type.toLowerCase()] || '#64748B';
-  };
-
-  const handleApplyHelpQuery = (query: string) => {
-    setSearchQuery(prev => {
-      const trimmed = prev.trim();
-      return trimmed ? `${trimmed} ${query}` : query;
+  const toggleRow = useCallback((path: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
     });
-    showToast(state.lang === 'zh' ? '已应用查询模板' : 'Applied query template', 'success');
-  };
+  }, []);
 
-  const isZh = state.lang === 'zh';
+  const filteredPaths = useMemo(() => filtered.map(r => r.path), [filtered]);
+  const allSelected = filteredPaths.length > 0 && filteredPaths.every(p => selected.has(p));
 
-  if (loading) {
-    return (
-      <div className="bases-container">
-        <div className="bases-loading">
-          <div className="bases-spinner" />
-        </div>
-      </div>
-    );
-  }
+  const toggleAll = useCallback(() => {
+    setSelected(prev => {
+      const everySelected = filteredPaths.length > 0 && filteredPaths.every(p => prev.has(p));
+      if (everySelected) {
+        const next = new Set(prev);
+        for (const p of filteredPaths) next.delete(p);
+        return next;
+      }
+      return new Set([...prev, ...filteredPaths]);
+    });
+  }, [filteredPaths]);
 
-  if (entries.length === 0) {
-    return (
-      <div className="bases-container">
-        <div className="bases-empty">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-tertiary)' }}>
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M3 9h18M9 21V9" />
-          </svg>
-          <h3>{t('bases.empty')}</h3>
-          <p>{t('bases.emptyDesc')}</p>
-        </div>
-      </div>
-    );
-  }
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
 
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Row click opens the peek pane. It must NOT navigate away — leaving the list
+  // on a single click is exactly what kills the scan flow this view is built for.
+  const handleRowClick = useCallback((row: NoteRow) => {
+    setPeekPath(row.path);
+  }, []);
+
+  const openFull = useCallback((path: string) => {
+    setCurrentFile(path);
+    setView('note');
+  }, [setCurrentFile, setView]);
+
+  const toggleColumn = useCallback((id: ColumnId) => {
+    setVisibleColumns(prev => (prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]));
+  }, []);
+
+  const toggleLens = useCallback((token: string) => {
+    setQuery(prev => toggleToken(prev, token));
+  }, []);
+
+  const removePill = useCallback((token: string) => {
+    setQuery(prev => removeToken(prev, token));
+  }, []);
+
+  // ── Batch actions & saved views ───────────────────────────────────
+  /** Immediate, no AI, no approval: FSRS just starts scheduling these notes. */
+  const handleAddToReview = useCallback(async () => {
+    const paths = [...selected];
+    if (paths.length === 0) return;
+    try {
+      const added = await addCardsToReview(paths);
+      showToast(
+        added > 0 ? tf('overview.batchReviewDone', added) : t('overview.batchReviewNone'),
+        added > 0 ? 'success' : 'info',
+      );
+      await loadData(graphIncluded);
+    } catch (err) {
+      showToast(String(err), 'error');
+    }
+  }, [selected, showToast, loadData, graphIncluded]);
+
+  /**
+   * Re-apply a stored view.
+   *
+   * Older views carry `folder` / `noteType` / `tag` from the three dropdowns the
+   * toolbar used to have. Those dropdowns are gone — the DSL already expresses
+   * all three (`folder:` / `type:` / `#tag`) — so their values are folded into
+   * the query string here. The filter then shows up as removable pills like
+   * everything else instead of as invisible state, and old views keep working.
+   */
+  const applyView = useCallback((view: SavedView) => {
+    let q = view.query;
+    if (view.folder) q = toggleToken(q, `folder:${view.folder}`);
+    if (view.noteType) q = toggleToken(q, `type:${view.noteType}`);
+    if (view.tag) q = toggleToken(q, `#${view.tag}`);
+    setQuery(q);
+    setSortField((view.sortField || 'lastSynced') as ColumnId);
+    setSortDir(view.sortDir === 'asc' ? 'asc' : 'desc');
+    if (view.visibleColumns.length > 0) setVisibleColumns(view.visibleColumns as ColumnId[]);
+    setGroupBy((view.groupBy as GroupBy) ?? null);
+    setActiveViewId(view.id);
+  }, []);
+
+  const handleSaveView = useCallback(async () => {
+    const name = newViewName.trim();
+    if (!name) {
+      showToast(t('overview.viewNameEmpty'), 'error');
+      return;
+    }
+    const view: SavedView = {
+      id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      query,
+      // The `SavedView` contract keeps these three fields; the view no longer
+      // has separate state for them, so everything lives in `query` and old
+      // views are still read back correctly by `applyView`.
+      folder: '',
+      noteType: '',
+      tag: '',
+      sortField,
+      sortDir,
+      visibleColumns,
+      groupBy,
+      createdAtMs: Date.now(),
+    };
+    try {
+      await saveView(view);
+      const list = await listSavedViews();
+      setViews(list);
+      setActiveViewId(view.id);
+      setNamingView(false);
+      setNewViewName('');
+      showToast(t('overview.viewSaved'), 'success');
+    } catch (err) {
+      showToast(String(err), 'error');
+    }
+  }, [newViewName, query, sortField, sortDir, visibleColumns, groupBy, showToast]);
+
+  const handleDeleteView = useCallback(async () => {
+    const view = views.find(v => v.id === activeViewId);
+    if (!view) return;
+    try {
+      await deleteSavedView(view.id);
+      setViews(await listSavedViews());
+      setActiveViewId('');
+      showToast(t('overview.viewDeleted'), 'success');
+    } catch (err) {
+      showToast(String(err), 'error');
+    }
+  }, [views, activeViewId, showToast]);
+
+  // ── Natural-language → filter ─────────────────────────────────────
+  /**
+   * Natural language → filter, via the *existing* DSL rather than a bespoke
+   * structured-output protocol.
+   *
+   * The model's only job is to emit one line of the same syntax the user could
+   * have typed. That line goes through `parseQuery`, so whatever the AI
+   * misunderstood shows up as removable pills — the user always sees, and can
+   * correct, the machine's reading. It also means a bad model response degrades
+   * to "no rules parsed" instead of a silently wrong table.
+   *
+   * It reads the *one* search field. There used to be a second box next to it for
+   * this, which is what made the toolbar unanswerable: two inputs side by side
+   * and no way to know which one your sentence belonged in. Now the same field
+   * takes either, and the AI rewrites the sentence into DSL in place.
+   */
+  const handleNlTranslate = useCallback(async () => {
+    const text = query.trim();
+    if (!text) {
+      showToast(t('overview.nlEmpty'), 'error');
+      return;
+    }
+    if (!state.llmConfig?.model || !state.llmConfig?.apiUrl) {
+      showToast(t('overview.nlNoConfig'), 'error');
+      return;
+    }
+    setNlLoading(true);
+    try {
+      const vocabulary = [
+        'type:<noteType>', 'folder:<name>', '#<tag>', 'title:<text>',
+        'links<N|>N|=N (outbound)', 'backlinks<N|>N|=N', 'semantic=N',
+        'index:indexed|partial|notIndexed|noChunks',
+        'review:new|learning|review|relearning|none', 'due:true|false',
+        'reconciled:never|yes', 'contradictions>0', 'created>YYYY-MM-DD',
+        'modified>YYYY-MM-DD', 'pagerank>0.01', 'hub:true',
+        'lens:orphan|neverReconciled|hasContradictions|notIndexed|dueToday|semanticIsland',
+      ].join('\n');
+      const prompt = [
+        'Translate the user request into ONE line of this note-filter DSL.',
+        'Terms are space separated and combined with AND. Output the line only —',
+        'no prose, no code fence, no explanation. If nothing maps, output nothing.',
+        '',
+        'Fields:',
+        vocabulary,
+        '',
+        `Request: ${text}`,
+      ].join('\n');
+
+      const res = await chatWithLlm({
+        messages: [{ role: 'user', content: prompt }],
+        apiUrl: state.llmConfig.apiUrl,
+        model: state.llmConfig.model,
+        apiKey: state.llmConfig.apiKey || undefined,
+        providerId: state.llmConfig.providerId,
+      });
+
+      // Defensive: models like fences and preambles. Take the first non-empty,
+      // non-fence line and cap it — this string goes straight into the parser.
+      const line = (res.content || '')
+        .split('\n')
+        .map(l => l.trim())
+        .find(l => l && !l.startsWith('```')) ?? '';
+      const candidate = [...line].slice(0, 300).join('');
+
+      if (!candidate || parseQuery(candidate).rules.length === 0) {
+        showToast(t('overview.nlFailed'), 'error');
+        return;
+      }
+      setQuery(candidate);
+      showToast(t('overview.nlApplied'), 'success');
+    } catch (err) {
+      console.error('[Overview] NL translate failed:', err);
+      showToast(t('overview.nlFailed'), 'error');
+    } finally {
+      setNlLoading(false);
+    }
+  }, [query, state.llmConfig, showToast]);
+
+  const clearFilters = useCallback(() => {
+    setQuery('');
+    setActiveViewId('');
+  }, []);
+
+  const hasFilter = query.trim() !== '';
+
+  // ── Render ────────────────────────────────────────────────────────
   return (
-    <div className="bases-container">
-      {/* Filter Bar */}
-      <div className="bases-toolbar">
-        <div className="bases-toolbar-left">
-          <div className="bases-search-wrap">
+    <div className="overview-container">
+      <div className="overview-main">
+        <div className="overview-head">
+          <div className="overview-head-text">
+            <h2 className="overview-head-title">{t('overview.title')}</h2>
+            <span className="overview-head-sub">{t('overview.subtitle')}</span>
+          </div>
+          <div className="overview-head-right">
+            <span className="overview-head-count" data-testid="overview-count">
+              {hasFilter
+                ? tf('overview.countFiltered', filtered.length, rows.length)
+                : tf('overview.count', rows.length)}
+            </span>
+            <button
+              className="overview-refresh-btn"
+              onClick={() => void loadData(graphIncluded)}
+              title={t('overview.refresh')}
+              aria-label={t('overview.refresh')}
+              aria-busy={loading || graphLoading}
+              disabled={loading || graphLoading}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Health lenses: the product's core move — put "what you should do" on
+            the surface instead of handing the user a query language. This is the
+            protagonist of the view, so it leads and is styled up, not buried in
+            the toolbar. */}
+        <div className="overview-lenses" role="group" aria-label={t('overview.perspectives')}>
+          <span className="overview-lenses-label">{t('overview.perspectives')}</span>
+          {HEALTH_PERSPECTIVES.map(p => {
+            const token = `lens:${p.id}`;
+            const on = hasToken(query, token);
+            const enabled = isPerspectiveEnabled(p, data);
+            const count = enabled ? counts[p.id] : 0;
+            const btn = (
+              <button
+                key={p.id}
+                type="button"
+                className={`overview-lens ${on ? 'is-on' : ''} ${enabled ? '' : 'is-disabled'} ${enabled && count === 0 ? 'is-empty' : ''}`}
+                onClick={() => enabled && toggleLens(token)}
+                disabled={!enabled}
+                aria-pressed={on}
+                data-testid={`lens-${p.id}`}
+              >
+                <span className="overview-lens-label">{t(p.labelKey as Parameters<typeof t>[0])}</span>
+                <span className="overview-lens-badge">{enabled ? counts[p.id] : '—'}</span>
+              </button>
+            );
+            // A disabled button eats pointer events, so its `title` never shows.
+            // Wrap it so the "why is this greyed out" hint is actually reachable.
+            return enabled ? btn : (
+              <span key={p.id} className="overview-lens-lock" title={t('overview.persp.semanticDisabled')}>
+                {btn}
+              </span>
+            );
+          })}
+        </div>
+
+        <div className="overview-toolbar">
+          {/* ONE primary input. It filters live as DSL while you type; if what
+              you typed is plain prose (no DSL rule parsed), the AI button turns
+              it into DSL in place. Two side-by-side boxes used to force the user
+              to guess which one their sentence belonged in — this removes the
+              guess. */}
+          <div className="overview-search-wrap">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input
               type="text"
-              className="bases-search"
-              placeholder={isZh ? '高级 SQL-like 过滤...' : 'Advanced SQL-like filter...'}
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              className="overview-search"
+              placeholder={t('overview.searchPlaceholder')}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              aria-label={t('overview.searchPlaceholder')}
             />
-          </div>
-
-          {/* SQL Query Help Toggle Button */}
-          <button
-            className={`bases-query-help-btn ${showHelp ? 'active' : ''}`}
-            onClick={() => setShowHelp(!showHelp)}
-            title={isZh ? '查询帮助' : 'Query Guide'}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
-              <path d="M9 18h6" />
-              <path d="M10 22h4" />
-            </svg>
-            <span>{isZh ? 'SQL 帮助' : 'Query Helper'}</span>
-          </button>
-
-          <select
-            className="bases-filter-select"
-            value={selectedFolder}
-            onChange={e => setSelectedFolder(e.target.value)}
-          >
-            <option value="">{t('bases.allFolders')}</option>
-            {folders.map(f => (
-              <option key={f} value={f}>{f || '/'}</option>
-            ))}
-          </select>
-
-          <select
-            className="bases-filter-select"
-            value={selectedType}
-            onChange={e => setSelectedType(e.target.value)}
-          >
-            <option value="">{t('bases.allTypes')}</option>
-            {allTypes.map(tp => (
-              <option key={tp} value={tp}>{tp}</option>
-            ))}
-          </select>
-
-          <select
-            className="bases-filter-select"
-            value={selectedTag}
-            onChange={e => setSelectedTag(e.target.value)}
-          >
-            <option value="">{t('bases.allTags')}</option>
-            {allTags.map(tag => (
-              <option key={tag} value={tag}>{tag}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="bases-toolbar-right">
-          <span className="bases-count">
-            {t('bases.totalNotes').replace('{count}', String(filteredEntries.length))}
-          </span>
-          <button 
-            className={`btn btn-ghost btn-icon-sm ${showIntro ? 'active' : ''}`}
-            onClick={() => setShowIntro(!showIntro)} 
-            title={isZh ? '什么是数据库？' : 'What is Bases?'}
-            style={{ marginRight: 4 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-          </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={loadData} title="Refresh">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Database (Bases) Explanation Panel */}
-      {showIntro && (
-        <div 
-          className="bases-query-help-card"
-          style={{ 
-            marginBottom: 12, 
-            padding: '14px 16px', 
-            background: 'var(--bg-elevated)', 
-            border: '1px dashed var(--accent-primary)',
-            borderRadius: 'var(--radius-lg)',
-            animation: 'fadeIn 0.2s ease-out'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              {isZh ? '什么是数据库视图？' : 'What is Database View?'}
-            </div>
-            <button 
-              onClick={() => setShowIntro(false)}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1 }}
+            {query.trim() !== '' && (
+              <span className={`overview-mode ${parsed.rules.length > 0 ? 'is-dsl' : ''}`} data-testid="search-mode">
+                {parsed.rules.length > 0 ? t('overview.modeDsl') : t('overview.modeText')}
+              </span>
+            )}
+            <button
+              type="button"
+              className="overview-ai-btn"
+              onClick={() => void handleNlTranslate()}
+              disabled={nlLoading || query.trim() === ''}
+              title={t('overview.aiTranslateHint')}
+              data-testid="nl-translate"
             >
-              ×
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" />
+              </svg>
+              {nlLoading ? t('overview.nlRunning') : t('overview.nlRun')}
             </button>
           </div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            {isZh ? (
-              <>
-                <p style={{ margin: '0 0 6px 0' }}>
-                  <strong>数据库视图 (Bases)</strong> 会自动将所有笔记提取为结构化的表格。您可以在此以类似 Notion 数据库的方式查阅并管理所有笔记。
-                </p>
-                <p style={{ margin: 0 }}>
-                  通过 <strong>AI 整理</strong>，系统会自动更新笔记的 <strong>类型</strong> (Permanent 永久/Literature 文献/Fleeting 闪念)、<strong>标签</strong>以及<strong>关联双链</strong>。「置信度」栏显示了 AI 的分类可信度（默认为空，只有图谱连接等细化规则会带上置信值）。您可使用下拉菜单，或使用 <strong>SQL 帮助</strong> 里的高级语法来进行强大的筛选！
-                </p>
-              </>
-            ) : (
-              <>
-                <p style={{ margin: '0 0 6px 0' }}>
-                  <strong>Database View (Bases)</strong> automatically scans your knowledge vault and extracts all notes into a structured table. You can browse and manage your notes here just like a Notion database.
-                </p>
-                <p style={{ margin: 0 }}>
-                  With <strong>AI Organize</strong>, the system automatically curates each note's <strong>Type</strong> (Permanent/Literature/Fleeting), <strong>Tags</strong>, and <strong>Links</strong>. Confidence column indicates AI classification certainty. Use the filter dropdowns or click <strong>Query Helper</strong> to query notes with advanced syntax!
-                </p>
-              </>
+
+          <button
+            type="button"
+            className={`overview-chip-btn ${showHelp ? 'is-on' : ''}`}
+            onClick={() => setShowHelp(v => !v)}
+            aria-expanded={showHelp}
+          >
+            {t('overview.dslHelp')}
+          </button>
+
+          {hasFilter && (
+            <button type="button" className="overview-chip-btn" onClick={clearFilters}>
+              {t('overview.clearFilters')}
+            </button>
+          )}
+
+          <select
+            className="overview-select"
+            value={activeViewId}
+            onChange={e => {
+              const v = views.find(x => x.id === e.target.value);
+              if (v) applyView(v); else setActiveViewId('');
+            }}
+            aria-label={t('overview.views')}
+            data-testid="view-select"
+          >
+            <option value="">{t('overview.viewCurrent')}</option>
+            {views.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+
+          {/* Every occasional control lives here: grouping, columns, saving a
+              view, and the expensive graph-signals recompute. None of them earn
+              permanent toolbar space, and folding them together is what lets the
+              search field and the lenses dominate. */}
+          <div className="overview-columns-wrap">
+            <button
+              type="button"
+              className={`overview-chip-btn ${showSettings ? 'is-on' : ''}`}
+              onClick={() => setShowSettings(v => !v)}
+              aria-expanded={showSettings}
+              data-testid="view-settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+                <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+                <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+              </svg>
+              {t('overview.viewSettings')}
+            </button>
+            {showSettings && (
+              <div className="overview-columns-menu" data-testid="view-settings-menu">
+                <div className="overview-settings-group">
+                  <span className="overview-settings-title">{t('overview.groupBy')}</span>
+                  <select
+                    className="overview-select"
+                    value={groupBy ?? ''}
+                    onChange={e => setGroupBy((e.target.value || null) as GroupBy)}
+                    aria-label={t('overview.groupBy')}
+                    data-testid="group-select"
+                  >
+                    <option value="">{t('overview.groupNone')}</option>
+                    <option value="folder">{t('overview.groupFolder')}</option>
+                    <option value="noteType">{t('overview.groupType')}</option>
+                    <option value="reviewState">{t('overview.groupReview')}</option>
+                  </select>
+                </div>
+
+                <div className="overview-settings-group">
+                  <span className="overview-settings-title">{t('overview.columns')}</span>
+                  <div className="overview-columns-list" data-testid="columns-menu">
+                    {availableColumns.map(col => (
+                      <label key={col.id} className={`overview-columns-item ${col.locked ? 'is-locked' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={visibleColumns.includes(col.id)}
+                          disabled={col.locked}
+                          onChange={() => toggleColumn(col.id)}
+                        />
+                        <span>{t(col.labelKey as Parameters<typeof t>[0])}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overview-settings-group">
+                  <span className="overview-settings-title">{t('overview.views')}</span>
+                  <div className="overview-settings-row">
+                    <button
+                      type="button"
+                      className="overview-chip-btn overview-chip-btn-sm"
+                      onClick={() => { setNamingView(true); setShowSettings(false); }}
+                      data-testid="save-view"
+                    >
+                      {t('overview.saveAsView')}
+                    </button>
+                    {activeViewId && (
+                      <button type="button" className="overview-chip-btn overview-chip-btn-sm is-danger" onClick={() => void handleDeleteView()}>
+                        {t('overview.deleteView')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overview-settings-group">
+                  <span className="overview-settings-title">{t('overview.graphSignals')}</span>
+                  <button
+                    type="button"
+                    className={`overview-chip-btn overview-chip-btn-sm ${graphIncluded ? 'is-on' : ''}`}
+                    onClick={() => void loadData(true)}
+                    disabled={graphLoading}
+                    data-testid="compute-graph"
+                  >
+                    {graphLoading ? t('overview.computingGraph') : graphIncluded ? t('overview.graphReady') : t('overview.computeGraph')}
+                  </button>
+                  <span className="overview-settings-desc">{t('overview.graphHint')}</span>
+                </div>
+              </div>
             )}
           </div>
         </div>
-      )}
 
-      {/* SQL Query Helper Interactive Card */}
-      {showHelp && (
-        <div className="bases-query-help-card">
-          <div className="bases-query-help-title">
-            {isZh ? '💡 ZettelAgent 高级 SQL-like 查询指南 (Dataview)' : '💡 ZettelAgent SQL-like Query Guide (Dataview)'}
-          </div>
-          <div className="bases-query-help-grid">
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('type:permanent')}>type:permanent</div>
-              <div className="bases-query-help-desc">{isZh ? '按类型过滤' : 'Filter by note type'}</div>
-            </div>
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('#ai')}>#ai</div>
-              <div className="bases-query-help-desc">{isZh ? '按标签过滤 (如 #tag)' : 'Filter by tag shorthand'}</div>
-            </div>
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('links>=3')}>links&gt;=3</div>
-              <div className="bases-query-help-desc">{isZh ? '按双链数过滤 (支持 >, <, >=, <=, =)' : 'Filter by link count'}</div>
-            </div>
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('conf>80')}>conf&gt;80</div>
-              <div className="bases-query-help-desc">{isZh ? '按 AI 置信度过滤 (百分比或 0-1 小数)' : 'Filter by AI confidence %'}</div>
-            </div>
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('folder:daily')}>folder:daily</div>
-              <div className="bases-query-help-desc">{isZh ? '按所在文件夹路径搜索' : 'Search by path folder name'}</div>
-            </div>
-            <div className="bases-query-help-item">
-              <div className="bases-query-help-code" onClick={() => handleApplyHelpQuery('created>2026-06-25')}>created&gt;2026-06-25</div>
-              <div className="bases-query-help-desc">{isZh ? '按创建时间过滤' : 'Filter by creation date'}</div>
+        {showHelp && (
+          <div className="overview-help-card">
+            <div className="overview-help-title">{t('overview.dslHelpTitle')}</div>
+            <div className="overview-help-grid">
+              {DSL_EXAMPLES.map(([example, labelKey]) => (
+                <button
+                  key={example}
+                  type="button"
+                  className="overview-help-item"
+                  onClick={() => setQuery(prev => (prev.trim() ? `${prev.trim()} ${example}` : example))}
+                >
+                  <code>{example}</code>
+                  <span>{t(labelKey as Parameters<typeof t>[0])}</span>
+                </button>
+              ))}
             </div>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-            {isZh ? '提示：你可以输入多个过滤项，用空格隔开。点击上方的绿色代码即可一键填入输入框！' : 'Tip: Combine multiple terms separated by spaces. Click any green query above to apply!'}
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Query Filter Pills / Chips */}
-      {parsedQuery.rules.length > 0 && (
-        <div className="bases-query-pills">
-          {parsedQuery.rules.map((rule, idx) => (
-            <div key={idx} className="bases-query-pill">
-              <span>
-                {rule.field === 'tag' ? '#' : `${rule.field}:`}
-                {rule.operator !== 'contains' && rule.operator !== 'equals' ? ` ${rule.token.replace(/^[a-zA-Z]+/, '')}` : ` ${rule.value}`}
-              </span>
-              <span className="bases-query-pill-close" onClick={() => handleRemovePill(rule.token)}>×</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="bases-table-wrap">
-        <table className="bases-table">
-          <thead>
-            <tr>
-              <th className="bases-th bases-th-title" onClick={() => handleSort('title')}>
-                <span>{t('bases.noteTitle')}</span> <SortIcon field="title" />
-              </th>
-              <th className="bases-th" onClick={() => handleSort('noteType')}>
-                <span>{t('bases.noteType')}</span> <SortIcon field="noteType" />
-              </th>
-              <th className="bases-th bases-th-tags">
-                <span>{t('bases.noteTags')}</span>
-              </th>
-              <th className="bases-th" onClick={() => handleSort('linkCount')}>
-                <span>{t('bases.noteLinks')}</span> <SortIcon field="linkCount" />
-              </th>
-              <th className="bases-th" onClick={() => handleSort('createdAt')}>
-                <span>{t('bases.noteCreated')}</span> <SortIcon field="createdAt" />
-              </th>
-              <th className="bases-th" onClick={() => handleSort('lastSynced')}>
-                <span>{t('bases.noteModified')}</span> <SortIcon field="lastSynced" />
-              </th>
-              <th className="bases-th" onClick={() => handleSort('confidence')}>
-                <span>{t('bases.noteConfidence')}</span> <SortIcon field="confidence" />
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEntries.map(entry => (
-              <tr
-                key={entry.path}
-                className="bases-row"
-                onClick={() => handleRowClick(entry)}
-              >
-                <td className="bases-td bases-td-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                  </svg>
-                  <span className="bases-title-text">{entry.title}</span>
-                </td>
-                <td className="bases-td">
-                  <span
-                    className="bases-type-badge"
-                    style={{ '--badge-color': noteTypeColor(entry.noteType) } as React.CSSProperties}
+        {parsed.rules.length > 0 && (
+          <div className="overview-pills" data-testid="query-pills">
+            {parsed.rules.map(rule => {
+              const lens = rule.field === 'lens'
+                ? HEALTH_PERSPECTIVES.find(p => p.id.toLowerCase() === rule.value.toLowerCase())
+                : undefined;
+              return (
+                <span key={rule.token} className={`overview-pill ${lens ? 'is-lens' : ''}`}>
+                  <span>{lens ? t(lens.labelKey as Parameters<typeof t>[0]) : ruleLabel(rule)}</span>
+                  <button
+                    type="button"
+                    className="overview-pill-x"
+                    onClick={() => removePill(rule.token)}
+                    aria-label={`remove ${rule.token}`}
                   >
-                    {entry.noteType}
-                  </span>
-                </td>
-                <td className="bases-td bases-td-tags">
-                  {entry.tags.slice(0, 3).map(tag => (
-                    <span key={tag} className="bases-tag">{tag}</span>
-                  ))}
-                  {entry.tags.length > 3 && (
-                    <span className="bases-tag bases-tag-more">+{entry.tags.length - 3}</span>
-                  )}
-                </td>
-                <td className="bases-td bases-td-num">{entry.linkCount}</td>
-                <td className="bases-td bases-td-date">{formatDate(entry.createdAt)}</td>
-                <td className="bases-td bases-td-date">{formatDate(entry.lastSynced)}</td>
-                <td className="bases-td bases-td-confidence">
-                  {entry.confidence !== null ? (
-                    <div className="bases-confidence-bar-wrap">
-                      <div
-                        className="bases-confidence-bar"
-                        style={{ width: `${Math.round((entry.confidence) * 100)}%` }}
-                      />
-                      <span>{Math.round((entry.confidence) * 100)}%</span>
-                    </div>
-                  ) : (
-                    <span style={{ color: 'var(--text-tertiary)' }}>—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {namingView && (
+          <div className="overview-inline-form" data-testid="name-view-form">
+            <input
+              type="text"
+              className="overview-nl-input"
+              placeholder={t('overview.saveViewPrompt')}
+              value={newViewName}
+              onChange={e => setNewViewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void handleSaveView(); }}
+              aria-label={t('overview.saveViewPrompt')}
+              autoFocus
+            />
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleSaveView()} data-testid="confirm-save-view">
+              {t('overview.saveAsView')}
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setNamingView(false); setNewViewName(''); }}>
+              {t('overview.ai.cancel')}
+            </button>
+          </div>
+        )}
+
+        {data?.truncated && (
+          <div className="overview-banner" data-testid="truncated-banner">
+            {tf('overview.truncated', data.total)}
+          </div>
+        )}
+
+        {selected.size > 0 && (
+          <div className="overview-batchbar" data-testid="batch-bar">
+            <span className="overview-batchbar-count">{tf('overview.selected', selected.size)}</span>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => void handleAddToReview()} data-testid="batch-review">
+              {t('overview.batchReview')}
+            </button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setBatchOpen(true)} data-testid="batch-ai">
+              {t('overview.batchAi')}
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={clearSelection}>
+              {t('overview.clearSelection')}
+            </button>
+          </div>
+        )}
+
+        {/* The body area always occupies the same box, so swapping spinner →
+            table → empty state never shifts the toolbar above it. */}
+        <div className="overview-body">
+          {loading && (
+            <div className="overview-state" data-testid="overview-loading">
+              <span className="overview-spinner" />
+            </div>
+          )}
+          {!loading && rows.length === 0 && (
+            <div className="overview-state overview-empty" data-testid="overview-empty">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+              </svg>
+              <h3>{t('overview.empty')}</h3>
+              <p>{t('overview.emptyDesc')}</p>
+            </div>
+          )}
+          {!loading && rows.length > 0 && filtered.length === 0 && (
+            <div className="overview-state overview-empty" data-testid="overview-empty-filtered">
+              <h3>{t('overview.emptyFiltered')}</h3>
+              <p>{t('overview.emptyFilteredDesc')}</p>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={clearFilters}>
+                {t('overview.clearFilters')}
+              </button>
+            </div>
+          )}
+          {!loading && filtered.length > 0 && (
+            <OverviewTable
+              items={flatItems}
+              visibleColumns={visibleColumns}
+              sortField={sortField}
+              sortDir={sortDir}
+              onSort={handleSort}
+              selected={selected}
+              onToggleRow={toggleRow}
+              allSelected={allSelected}
+              onToggleAll={toggleAll}
+              onRowClick={handleRowClick}
+              peekPath={peekPath}
+              semanticIndexReady={semanticReady}
+              onToggleGroup={toggleGroup}
+              lang={state.lang}
+            />
+          )}
+        </div>
+
       </div>
+
+      {peekPath !== null && (
+        <ResizablePanel side="right" defaultWidth={420} minWidth={280} maxWidth={720} storageKey="za-overview-peek-width">
+          <NotePeekPanel
+            path={peekPath}
+            title={rows.find(r => r.path === peekPath)?.title ?? null}
+            onClose={() => setPeekPath(null)}
+            onOpenFull={openFull}
+          />
+        </ResizablePanel>
+      )}
+
+      {batchOpen && (
+        <BatchAgentDialog
+          filePaths={[...selected]}
+          onClose={() => setBatchOpen(false)}
+          onFinished={() => void loadData(graphIncluded)}
+        />
+      )}
     </div>
   );
 }
+
