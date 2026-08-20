@@ -5,6 +5,9 @@ pub mod embedding_cache;
 pub mod rerank;
 pub mod memory_store;
 pub mod review_store;
+pub mod notes_overview;
+pub mod saved_views;
+pub mod wikilink;
 
 use rusqlite::Connection;
 use std::path::Path;

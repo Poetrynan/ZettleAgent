@@ -167,7 +167,29 @@ pub(super) fn execute_get_timeline(
 }
 
 
-pub(super) fn execute_get_backlinks(
+/// 与侧边栏反链面板同一口径 / the exact query the sidebar backlink panel runs.
+///
+/// This used to be a line-for-line copy of the *pre-fix* sidebar implementation
+/// and had inherited every one of its bugs:
+///
+/// * `note_relations` was read without `source_path != target_path`, so a note
+///   could be listed as its own backlink.
+/// * the wikilink half was `content LIKE '%[[title]]%'` — bare links only (no
+///   `[[标题|别名]]`, no `[[标题#小节]]`) and title-only (no `[[文件名]]`).
+/// * a silent `LIMIT 50` truncated the result with no indication.
+///
+/// Net effect: the user saw 5 backlinks in the sidebar while the agent's tool
+/// reported 3, and the agent then reasoned about the graph from the短 list. A
+/// disagreement between what the user sees and what the AI sees is worse than
+/// either number being wrong, because neither side can tell.
+///
+/// `collect_backlinks` is `Connection`-typed precisely so this call site can
+/// share it. De-dup, self-relation skipping and `[[…]]` resolution now have one
+/// implementation; the `LIMIT` is gone rather than made quieter.
+/// `pub(crate)` rather than `pub(super)` so the five-way backlink agreement test
+/// in `db::wikilink` can call the tool through its real entry point (JSON in,
+/// JSON out) instead of re-implementing what it does.
+pub(crate) fn execute_get_backlinks(
     arguments: &str,
     db: &Arc<Mutex<Connection>>,
 ) -> anyhow::Result<String> {
@@ -177,57 +199,21 @@ pub(super) fn execute_get_backlinks(
         .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
 
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+    let entries = crate::commands::file_commands::collect_backlinks(&conn, path)?;
 
-    let mut backlinks: Vec<serde_json::Value> = Vec::new();
-
-    // From note_relations table
-    let mut stmt = conn.prepare(
-        "SELECT nr.source_path, COALESCE(f.title, '') as title, COALESCE(nr.relation_type, '') as rel
-         FROM note_relations nr
-         LEFT JOIN files f ON f.path = nr.source_path
-         WHERE nr.target_path = ?1"
-    )?;
-    let rows = stmt.query_map(rusqlite::params![path], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-    })?;
-    let mut seen = std::collections::HashSet::new();
-    for row in rows {
-        let (src, title, rel) = row?;
-        if seen.insert(src.clone()) {
-            backlinks.push(json!({ "source": src, "title": title, "relation": rel }));
-        }
-    }
-
-    // Also scan for [[wikilinks]] using a single SQL query (much faster than per-file scanning)
-    let target_title: Option<String> = conn.query_row(
-        "SELECT title FROM files WHERE path = ?1",
-        rusqlite::params![path],
-        |row| row.get(0),
-    ).ok();
-
-    if let Some(ref title) = target_title {
-        let pattern = format!("%[[{}]]%", title);
-        let mut wl_stmt = conn.prepare(
-            "SELECT DISTINCT c.file_path, COALESCE(f.title, '') as ftitle
-             FROM chunks c
-             LEFT JOIN files f ON f.path = c.file_path
-             WHERE c.content LIKE ?1 AND c.file_path != ?2
-             LIMIT 50"
-        )?;
-        let wl_rows = wl_stmt.query_map(rusqlite::params![pattern, path], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in wl_rows {
-            let (fpath, ftitle) = row?;
-            if seen.insert(fpath.clone()) {
-                backlinks.push(json!({
-                    "source": fpath,
-                    "title": ftitle,
-                    "relation": "wikilink"
-                }));
-            }
-        }
-    }
+    let backlinks: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|b| {
+            json!({
+                "source": b.file_path,
+                "title": b.title,
+                // For a `note_relations` source this is the relation type; for a
+                // wikilink source it is the line the link sits on. Same field the
+                // sidebar renders, so the agent and the user read the same thing.
+                "context": b.context,
+            })
+        })
+        .collect();
 
     Ok(serde_json::to_string_pretty(&json!({
         "target": path,

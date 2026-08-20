@@ -233,30 +233,42 @@ pub fn list_markdown_files(dir_path: String) -> Result<Vec<String>, ZettelError>
     Ok(files)
 }
 
+/// 点击 `[[链接]]` 时前端问的就是这个 / the command the editor calls to follow a link.
+///
+/// 为什么改用共享 resolver / why this now delegates:
+///
+/// * The old scan ended in `normalize_title(&filename).contains(&title_norm)` — a
+///   **substring** fallback on the file stem. Clicking `[[笔记]]` could therefore
+///   open `会议笔记.md`, and since the query had no `ORDER BY`, *which* wrong note
+///   opened was down to SQLite's row order. Navigating the user to the wrong note
+///   is the most visible form of this bug in the whole app.
+/// * It never cut `|别名` / `#小节`, so a caller passing the raw link text of
+///   `[[标题|别名]]` resolved nothing.
+/// * It had no collision rule, so it could disagree with the backlink panel about
+///   which of two same-key notes a link belongs to.
+///
+/// New boundary: exactly the note the panel, graph, health desk, related-notes and
+/// the agent tool all agree `[[X]]` points at, or `None`. No `from_path` context is
+/// available here (the caller passes a bare title), so the collision tie-break is
+/// the path-order rule, not the same-vault one.
 #[tauri::command]
 pub fn resolve_wikilink(state: State<'_, AppState>, title: String) -> Result<Option<String>, ZettelError> {
     let conn = state.db.lock()?;
-    let title_norm = crate::db::search::normalize_title(&title);
-    if title_norm.is_empty() {
+    Ok(resolve_wikilink_target(&conn, &title)?)
+}
+
+/// `Connection`-typed core of [`resolve_wikilink`], shared with the agent tool
+/// `resolve_wikilink` (`tools::internal_tools::note_ops`) so the editor and the AI
+/// follow a link to the same note.
+pub fn resolve_wikilink_target(
+    conn: &rusqlite::Connection,
+    raw_title: &str,
+) -> rusqlite::Result<Option<String>> {
+    let Some(target) = crate::db::wikilink::parse_link_target(raw_title) else {
         return Ok(None);
-    }
-    let mut stmt = conn.prepare("SELECT path, title FROM files")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    })?;
-    for row in rows {
-        let (path, file_title) = row?;
-        if let Some(t) = file_title {
-            if crate::db::search::normalize_title(&t) == title_norm {
-                return Ok(Some(path));
-            }
-        }
-        let filename = path.replace('\\', "/").rsplit('/').next().unwrap_or(&path).replace(".md", "");
-        if crate::db::search::normalize_title(&filename) == title_norm || crate::db::search::normalize_title(&filename).contains(&title_norm) {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
+    };
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
+    Ok(resolver.resolve(&target).map(|s| s.to_string()))
 }
 
 /// A backlink entry: a note that links to the current note.
@@ -271,7 +283,19 @@ pub struct BacklinkEntry {
 #[tauri::command]
 pub fn get_backlinks(state: State<'_, AppState>, file_path: String) -> Result<Vec<BacklinkEntry>, ZettelError> {
     let conn = state.db.lock()?;
+    Ok(collect_backlinks(&conn, &file_path)?)
+}
 
+/// The backlink query itself, `Connection`-typed so it is testable without Tauri.
+///
+/// The command above stays thin (lock + delegate), matching the
+/// `commands::bases_commands` / `db::notes_overview` split. This split exists
+/// because the three-way agreement between this panel, the knowledge graph and
+/// the health desk is only provable by a test that calls all three.
+pub fn collect_backlinks(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+) -> rusqlite::Result<Vec<BacklinkEntry>> {
     // Extract the title from the target file for wikilink matching
     let target_title: Option<String> = conn.query_row(
         "SELECT title FROM files WHERE path = ?1",
@@ -283,12 +307,21 @@ pub fn get_backlinks(state: State<'_, AppState>, file_path: String) -> Result<Ve
     let mut seen_paths = std::collections::HashSet::new();
 
     // Method 1: Query note_relations table (AI-discovered relations)
+    //
+    // `source_path != target_path` 跳过自关系 / self-relations are skipped: a note
+    // must never appear in its own backlink list. Reconciliation can genuinely
+    // write one — `card_meta.links` may name the note's own title, and
+    // `find_file_path_for_title_prioritized` then resolves it straight back to
+    // the source (scheduler/reconcile_task.rs:947) — so this is reachable data,
+    // not a hypothetical. `db::notes_overview::backlink_sources` has always
+    // skipped it; this side did not, so "笔记给自己建了 AI 关系" made the sidebar
+    // list one more source than the health desk counted. Same rule both sides now.
     {
         let mut stmt = conn.prepare(
             "SELECT nr.source_path, COALESCE(f.title, '') as title, COALESCE(nr.relation_type, '') as rel_type
              FROM note_relations nr
              LEFT JOIN files f ON f.path = nr.source_path
-             WHERE nr.target_path = ?1"
+             WHERE nr.target_path = ?1 AND nr.source_path != nr.target_path"
         )?;
         let rows = stmt.query_map(rusqlite::params![file_path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
@@ -305,14 +338,21 @@ pub fn get_backlinks(state: State<'_, AppState>, file_path: String) -> Result<Ve
         }
     }
 
-    // Method 2: Scan all files for [[title]] wikilinks pointing to this file
-    if let Some(ref title) = target_title {
-        let title_lower = title.to_lowercase();
-        let file_stem = std::path::Path::new(&file_path)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
+    // Method 2: Scan all files for [[title]] wikilinks pointing to this file.
+    //
+    // Parsing and matching are delegated to `db::wikilink` so that this panel,
+    // the knowledge graph (`db::search`) and the health desk
+    // (`db::notes_overview`) cannot disagree about what `[[标题|别名]]` or
+    // `[[标题#小节]]` points at — they used to, and the user saw three different
+    // numbers for one link. De-duplication stays local (`seen_paths`, one row per
+    // linking note); only parse+resolve is shared.
+    //
+    // `target_title` is still required as a guard: a path with no `files` row is
+    // not a note and cannot own backlinks. The resolver, not the title string, is
+    // what actually decides a match, and it keys notes by title *and* file stem,
+    // so a `[[file-stem]]` link resolves too.
+    if target_title.is_some() {
+        let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
 
         let mut stmt = conn.prepare(
             "SELECT c.file_path, COALESCE(f.title, '') as title, c.content
@@ -328,23 +368,14 @@ pub fn get_backlinks(state: State<'_, AppState>, file_path: String) -> Result<Ve
             if seen_paths.contains(&source_path) {
                 continue;
             }
-            // Check if content contains [[target_title]] or [[file_stem]]
-            let content_lower = content.to_lowercase();
-            let has_link = content_lower.contains(&format!("[[{}]]", title_lower))
-                || content_lower.contains(&format!("[[{}]]", file_stem));
-            if has_link {
+            // Does any wikilink in this chunk resolve to *this* note? The helper
+            // returns the line it found, which is also the `context` snippet —
+            // one scan, no second differently-written search.
+            if let Some(line) = resolver.first_linking_line(&content, file_path) {
                 if seen_paths.insert(source_path.clone()) {
-                    // Extract a snippet around the wikilink
-                    let snippet = content.lines()
-                        .find(|line| {
-                            let ll = line.to_lowercase();
-                            ll.contains(&format!("[[{}]]", title_lower)) || ll.contains(&format!("[[{}]]", file_stem))
-                        })
-                        .unwrap_or("")
-                        .trim()
-                        .chars()
-                        .take(120)
-                        .collect::<String>();
+                    // UTF-8 iron rule: 120 *chars*, never 120 bytes — a snippet
+                    // holding `[[中文标题|别名]]` would panic on a byte cut.
+                    let snippet = line.trim().chars().take(120).collect::<String>();
                     backlinks.push(BacklinkEntry {
                         file_path: source_path,
                         title: source_title,

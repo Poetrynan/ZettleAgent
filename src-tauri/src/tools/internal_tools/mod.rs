@@ -5,7 +5,9 @@ mod search_ops;
 // `pub(crate)` so the trash / undo commands can reuse `note_ops::move_to_trash`
 // instead of growing a second recycle-bin implementation.
 pub(crate) mod note_ops;
-mod graph_ops;
+// `pub(crate)` so the five-way backlink agreement test in `db::wikilink` can drive
+// `graph_ops::execute_get_backlinks` through its real entry point.
+pub(crate) mod graph_ops;
 mod web_ops;
 mod canvas_ops;
 pub(crate) mod workspace_ops;
@@ -359,7 +361,7 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
             tool_type: "function".to_string(),
             function: ToolFunction {
                 name: "get_backlinks".to_string(),
-                description: "Get all notes that contain a [[wikilink]] pointing to a specific note, plus AI-discovered semantic relations. Returns: count, and for each backlink: source path, title, relation type. Use for 'who references this note' questions. Different from get_local_graph which shows bidirectional structural connections.".to_string(),
+                description: "Get all notes that contain a [[wikilink]] pointing to a specific note (all spellings: [[Title]], [[Title|alias]], [[Title#heading]], [[file-stem]]), plus AI-discovered semantic relations. Returns: count, and for each backlink: source path, title, context (the relation type for an AI relation, or the line the wikilink sits on). Not truncated — this is the same set the user sees in the sidebar backlink panel. Use for 'who references this note' questions. Different from get_local_graph which shows bidirectional structural connections.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

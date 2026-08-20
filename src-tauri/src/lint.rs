@@ -2,7 +2,6 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use regex::Regex;
 use crate::db::search::normalize_title;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -158,27 +157,50 @@ pub fn create_note_stub(
         anyhow::bail!("File already exists: {}", file_path.display());
     }
 
-    // Find all files that reference this title (to add as context)
-    let search_pattern = format!("[[{}]]", title);
+    // Find all files that reference this title (to add as context).
+    //
+    // 接共享解析器 / delegated to `db::wikilink`. This used to read every note off
+    // disk and test `content.contains("[[title]]")`, which (a) missed
+    // `[[标题|别名]]` and `[[标题#小节]]` — exactly the links a stub is created to
+    // repair — and (b) bypassed `chunks`, the indexed copy every other link view
+    // reads, so the stub's 「Referenced By」list could disagree with the backlink
+    // panel for the same note. The stub's own note does not exist yet, so this
+    // compares keys directly instead of going through `LinkResolver`.
+    let title_key = crate::db::wikilink::link_key(title);
     let mut referencing: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let mut stmt = conn.prepare(
-        "SELECT path, title FROM files"
+        "SELECT c.file_path, COALESCE(f.title, ''), c.content FROM chunks c
+         LEFT JOIN files f ON f.path = c.file_path
+         WHERE c.content LIKE '%[[%]]%'
+         ORDER BY c.file_path, c.chunk_index",
     )?;
-    let files: Vec<(String, String)> = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?.filter_map(|r| r.ok()).collect();
+    let hits: Vec<(String, String, String)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
 
-    for (fpath, ftitle) in &files {
-        if let Ok(content) = std::fs::read_to_string(fpath) {
-            if content.contains(&search_pattern) {
-                let display_title = if ftitle.is_empty() {
-                    fpath.rsplit(['/', '\\']).next().unwrap_or(fpath).replace(".md", "")
-                } else {
-                    ftitle.clone()
-                };
-                referencing.push(display_title);
-            }
+    for (fpath, ftitle, content) in &hits {
+        if !seen.contains(fpath)
+            && crate::db::wikilink::wikilink_targets(content)
+                .iter()
+                .any(|t| crate::db::wikilink::link_key(t) == title_key)
+        {
+            seen.insert(fpath.clone());
+            let display_title = if ftitle.is_empty() {
+                fpath.rsplit(['/', '\\']).next().unwrap_or(fpath).replace(".md", "")
+            } else {
+                ftitle.clone()
+            };
+            referencing.push(display_title);
         }
     }
 
@@ -246,7 +268,21 @@ pub fn run_vault_lint(conn: &Connection) -> anyhow::Result<LintReport> {
     let mut broken_links = Vec::new();
     let mut missing_metadata = Vec::new();
 
-    let re_wikilink = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
+    // 断链判定必须与「这条链接指向谁」同一口径 / broken-ness must be decided by the
+    // same resolver that decides where a link points.
+    //
+    // The old scan was `Regex::new(r"\[\[([^\]]+)\]\]")` + `normalize_title(inner)`
+    // compared against note *titles* only. Two false positives followed:
+    //   * `[[标题|别名]]` normalised to `标题别名` (normalize_title drops `|` but
+    //     keeps the alias), matching no note ⇒ a perfectly good link was reported
+    //     as broken, and `fix_broken_link` was offered for it.
+    //   * `[[文件名]]` where the note's stored title differs from its filename —
+    //     the spelling drag-and-drop produces — was also reported as broken, even
+    //     though the sidebar, graph, health desk and related-notes panel all
+    //     resolve it fine.
+    // `LinkResolver` keys notes by title *and* file stem and cuts `|别名`/`#小节`
+    // first, so "not broken" here now means exactly "the panel can follow it".
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
 
     for (path_str, title) in &files_list {
         let path = Path::new(path_str);
@@ -267,39 +303,35 @@ pub fn run_vault_lint(conn: &Connection) -> anyhow::Result<LintReport> {
             });
         }
 
-        // Scan lines for wikilinks
+        // Scan lines for wikilinks. Per line, because `BrokenLinkInfo` reports a
+        // 1-based line number — and Obsidian wikilinks are line-local anyway.
         for (line_idx, line) in content.lines().enumerate() {
-            for cap in re_wikilink.captures_iter(line) {
-                let target_title = cap.get(1).unwrap().as_str().trim();
-                let target_title_norm = normalize_title(target_title);
-
-                if target_title_norm.is_empty() {
+            for hit in crate::db::wikilink::wikilink_hits(line) {
+                if resolver.resolve(&hit.target).is_some() {
                     continue;
                 }
-
-                // Check if target exists in our valid titles list
-                let exists = valid_titles_norm.iter().any(|(norm, _)| norm == &target_title_norm);
-                if !exists {
-                    // Find closest fuzzy match
-                    let mut best_match: Option<String> = None;
-                    let mut min_dist = usize::MAX;
-
-                    for (norm, actual) in &valid_titles_norm {
-                        let dist = levenshtein(&target_title_norm, norm);
-                        if dist < min_dist && dist < 5 {
-                            min_dist = dist;
-                            best_match = Some(actual.clone());
-                        }
+                // Closest existing title, for the "did you mean" fix. Distances are
+                // computed on the normalised key, same as before.
+                let target_norm = normalize_title(&hit.target);
+                let mut best_match: Option<String> = None;
+                let mut min_dist = usize::MAX;
+                for (norm, actual) in &valid_titles_norm {
+                    let dist = levenshtein(&target_norm, norm);
+                    if dist < min_dist && dist < 5 {
+                        min_dist = dist;
+                        best_match = Some(actual.clone());
                     }
-
-                    broken_links.push(BrokenLinkInfo {
-                        file_path: path_str.clone(),
-                        target_title: target_title.to_string(),
-                        line_number: line_idx + 1,
-                        context: line.trim().to_string(),
-                        suggested_fix: best_match,
-                    });
                 }
+
+                broken_links.push(BrokenLinkInfo {
+                    file_path: path_str.clone(),
+                    // The bare target, so `fix_broken_link` edits the title segment
+                    // and not the user's alias.
+                    target_title: hit.target.clone(),
+                    line_number: line_idx + 1,
+                    context: line.trim().to_string(),
+                    suggested_fix: best_match,
+                });
             }
         }
     }

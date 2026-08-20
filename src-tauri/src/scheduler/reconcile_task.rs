@@ -930,6 +930,9 @@ fn update_card_meta_from_response(
             // Phase 4: Sync links to note_relations table
             if let Some(links_val) = meta.get("links") {
                 if let Ok(parsed_links) = serde_json::from_value::<Vec<search::SuggestedLink>>(links_val.clone()) {
+                    // One resolution table for this note's links (built once, not
+                    // once per link — see schema::migrate_links_to_relations).
+                    let resolver = crate::db::wikilink::LinkResolver::from_files(&conn)?;
                     for link in &parsed_links {
                         let target = link.target();
                         let relation = link.relation().unwrap_or("related");
@@ -939,14 +942,16 @@ fn update_card_meta_from_response(
                         };
                         let conf = link.confidence();
 
-                        let target_clean = target
-                            .trim_start_matches("[[")
-                            .trim_end_matches("]]")
-                            .trim();
-                        // Resolve title to actual file path (fixes note_relations JOIN accuracy), prioritizing the same vault
-                        let target_path = schema::find_file_path_for_title_prioritized(&conn, target_clean, Some(path))
-                            .unwrap_or_else(|| target_clean.to_string());
-                        
+                        // 先切 `|别名`/`#小节`，匹配不到就不写 / strip alias-heading,
+                        // skip when unresolved — shared with the migration path so
+                        // a ghost node (`知识图谱|图谱` stored as a path) can never be
+                        // written from either writer. See resolve_relation_target.
+                        let Some(target_path) =
+                            schema::resolve_relation_target(&resolver, target, path)
+                        else {
+                            continue;
+                        };
+
                         let _ = conn.execute(
                             "INSERT OR IGNORE INTO note_relations (source_path, target_path, relation_type, confidence, reason)
                              VALUES (?1, ?2, ?3, ?4, ?5)",

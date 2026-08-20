@@ -501,6 +501,28 @@ pub(super) fn execute_rename_note(
         std::fs::create_dir_all(parent)?;
     }
 
+    // 旧标题的两种写法 / both spellings the old note could be linked by.
+    //
+    // Other notes may write `[[files.title]]` *or* `[[file-stem]]`, and the two
+    // genuinely differ (an imported `202401-note.md` titled 「完全不同的标题」).
+    // The old code only ever looked at the file stem, so a note whose title and
+    // filename disagreed had even its **bare** links left dangling after a rename.
+    // Read before the DB rows are repointed at the new path below — afterwards the
+    // old title is gone.
+    let old_db_title: Option<String> = {
+        let old_norm_pre = normalize_db_path(&old_canonical);
+        let old_raw_pre = old_full.to_string_lossy().to_string();
+        db.lock().ok().and_then(|conn| {
+            conn.query_row(
+                "SELECT title FROM files WHERE path IN (?1, ?2, ?3)",
+                rusqlite::params![old_norm_pre, old_raw_pre, old_path],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+        })
+    };
+
     // Rename on filesystem
     // Key the journal off the pre-rename canonical path — after the move the old path
     // no longer canonicalizes, so it cannot be derived later.
@@ -578,24 +600,46 @@ pub(super) fn execute_rename_note(
         }
     }
 
-    // Update wikilinks in all vault files: [[old_title]] → [[new_title]]
-    let old_title = old_full.file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    // 全库改写指向旧标题的 wikilink / retarget every wikilink that pointed here.
+    //
+    // 为什么不能再用 `content.replace("[[old]]", "[[new]]")`:
+    // that only matched the **bare** spelling, so after a rename every
+    // `[[老标题|别名]]` and `[[老标题#小节]]` in the vault was left pointing at a
+    // title that no longer exists — a refactor silently manufacturing broken
+    // links, i.e. data loss the user only discovers later. `rewrite_link_targets`
+    // replaces the title segment and keeps `|别名` / `#小节` verbatim.
     let new_title = new_full.file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
+    let old_stem = old_full.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Both old spellings, de-duplicated. Applying them in sequence is safe: the
+    // first pass has already turned matching links into `[[new_title|…]]`, and
+    // `rewrite_link_targets` refuses a from/to pair that normalises alike.
+    let mut old_spellings: Vec<String> = Vec::new();
+    for cand in [old_stem, old_db_title.unwrap_or_default()] {
+        if !cand.is_empty() && !old_spellings.contains(&cand) {
+            old_spellings.push(cand);
+        }
+    }
 
     let mut updated_files = 0;
-    if !old_title.is_empty() && !new_title.is_empty() && old_title != new_title {
-        let old_link = format!("[[{}]]", old_title);
-        let new_link = format!("[[{}]]", new_title);
+    if !new_title.is_empty() && !old_spellings.is_empty() {
         // Walk all .md files in vault recursively
         let md_files = walk_md_files(std::path::Path::new(vault_path));
         for ep in md_files {
             if let Ok(content) = std::fs::read_to_string(&ep) {
-                if content.contains(&old_link) {
-                    let updated = content.replace(&old_link, &new_link);
+                let mut updated = content.clone();
+                let mut replaced = 0usize;
+                for old in &old_spellings {
+                    let (next, n) =
+                        crate::db::wikilink::rewrite_link_targets(&updated, old, &new_title);
+                    updated = next;
+                    replaced += n;
+                }
+                if replaced > 0 {
                     if let Err(e) = crate::file_lock::safe_write(&ep, &updated) {
                         log::warn!("backlink update failed for {:?}: {}", ep, e);
                     }
@@ -868,11 +912,34 @@ pub(super) fn execute_merge_notes(
         None,
     );
 
-    // Update wikilinks: [[source_title]] → [[target_title]]
+    // 全库改写指向 source 的 wikilink / retarget every wikilink to the source.
+    //
+    // Same two defects as `rename_note` had, same fix: `content.replace("[[src]]",
+    // "[[dst]]")` only matched bare links, so `[[源标题|别名]]` / `[[源标题#小节]]`
+    // survived a merge pointing at a note that is about to be **deleted** below —
+    // guaranteed broken links. And only the file stem was considered, never
+    // `files.title`, so a note whose title differs from its filename kept even its
+    // bare links. `rewrite_link_targets` preserves the alias and the heading.
+    let mut old_spellings: Vec<String> = Vec::new();
+    let source_db_title: Option<String> = db.lock().ok().and_then(|conn| {
+        let src_norm = normalize_db_path(&source_canonical);
+        let src_raw = source_canonical.to_string_lossy().to_string();
+        conn.query_row(
+            "SELECT title FROM files WHERE path IN (?1, ?2, ?3)",
+            rusqlite::params![src_norm, src_raw, source_path],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    });
+    for cand in [source_title.clone(), source_db_title.unwrap_or_default()] {
+        if !cand.is_empty() && !old_spellings.contains(&cand) {
+            old_spellings.push(cand);
+        }
+    }
+
     let mut updated_files = 0;
-    if !source_title.is_empty() && source_title != target_title {
-        let old_link = format!("[[{}]]", source_title);
-        let new_link = format!("[[{}]]", target_title);
+    if !target_title.is_empty() && !old_spellings.is_empty() {
         // Walk all .md files in ALL vaults recursively
         let mut md_files = Vec::new();
         for vp in all_vault_paths {
@@ -882,10 +949,19 @@ pub(super) fn execute_merge_notes(
             md_files = walk_md_files(std::path::Path::new(vault_path));
         }
         for ep in md_files {
+            // The source is about to be deleted; the target now *contains* the
+            // source's text, so its own copies of these links are rewritten too.
             if ep != source_canonical {
                 if let Ok(content) = std::fs::read_to_string(&ep) {
-                    if content.contains(&old_link) {
-                        let updated = content.replace(&old_link, &new_link);
+                    let mut updated = content.clone();
+                    let mut replaced = 0usize;
+                    for old in &old_spellings {
+                        let (next, n) =
+                            crate::db::wikilink::rewrite_link_targets(&updated, old, &target_title);
+                        updated = next;
+                        replaced += n;
+                    }
+                    if replaced > 0 {
                         if let Err(e) = crate::file_lock::safe_write(&ep, &updated) {
                             log::warn!("backlink update failed for {:?}: {}", ep, e);
                         }
@@ -978,6 +1054,13 @@ pub(super) fn execute_batch_read_notes(
 
 // ── resolve_wikilink ───────────────────────────────────────────────
 
+/// 与前端点击链接同一口径 / the same answer the editor gets when the user clicks.
+///
+/// This was a third hand-rolled title/stem scan: exact `normalize_title` compares,
+/// no `|别名` / `#小节` cut (so the agent could not resolve a link it had just read
+/// out of a note), no `ORDER BY` and therefore no collision rule. It now shares
+/// `commands::file_commands::resolve_wikilink_target` with the Tauri command, so the
+/// AI and the user follow `[[X]]` to the same note.
 pub(super) fn execute_resolve_wikilink(
     arguments: &str,
     db: &Arc<Mutex<Connection>>,
@@ -987,30 +1070,10 @@ pub(super) fn execute_resolve_wikilink(
         .ok_or_else(|| anyhow::anyhow!("Missing 'title' parameter"))?;
 
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
-    let title_norm = crate::db::search::normalize_title(title);
-    if title_norm.is_empty() {
-        return Ok(json!({ "found": false, "title": title, "path": null }).to_string());
+    match crate::commands::file_commands::resolve_wikilink_target(&conn, title)? {
+        Some(path) => Ok(json!({ "found": true, "title": title, "path": path }).to_string()),
+        None => Ok(json!({ "found": false, "title": title, "path": null }).to_string()),
     }
-
-    let mut stmt = conn.prepare("SELECT path, title FROM files")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    })?;
-
-    for row in rows {
-        let (path, file_title) = row?;
-        if let Some(t) = &file_title {
-            if crate::db::search::normalize_title(t) == title_norm {
-                return Ok(json!({ "found": true, "title": title, "path": path }).to_string());
-            }
-        }
-        let filename = path.replace('\\', "/").rsplit('/').next().unwrap_or(&path).replace(".md", "");
-        if crate::db::search::normalize_title(&filename) == title_norm {
-            return Ok(json!({ "found": true, "title": title, "path": path }).to_string());
-        }
-    }
-
-    Ok(json!({ "found": false, "title": title, "path": null }).to_string())
 }
 
 // ── fix_broken_link ────────────────────────────────────────────────
@@ -1879,6 +1942,181 @@ mod snapshot_and_trash_tests {
         assert_eq!(latest_content(&db, &key), body);
 
         let _ = std::fs::remove_dir_all(&vault);
+    }
+}
+
+// ── 重命名/合并的 wikilink 改写 / retargeting links on rename & merge ────────
+//
+// 这是本轮最重要的测试 / the most important tests in this change. `rename_note` and
+// `merge_notes` used `content.replace("[[old]]", "[[new]]")`, which matched only the
+// bare spelling and only the file stem. Everything below fails against that code and
+// each failure is a *silently broken link* in the user's vault — a refactor
+// destroying data, discovered much later.
+
+#[cfg(test)]
+mod wikilink_retarget_tests {
+    use super::{execute_merge_notes, execute_rename_note, normalize_db_path};
+    use rusqlite::Connection;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    fn mem_db() -> Arc<Mutex<Connection>> {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    /// Unique scratch vault — tests run in parallel in the same process.
+    fn vault(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir()
+            .join(format!("zettel_link_{}_{}_{}", tag, std::process::id(), nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    fn read(p: &Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    /// Register a note in `files` under the path shape the app stores, with a title
+    /// that deliberately differs from the file stem.
+    fn register(db: &Arc<Mutex<Connection>>, path: &Path, title: &str) {
+        let canonical = std::fs::canonicalize(path).unwrap();
+        let stored = normalize_db_path(&canonical);
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO files (path, hash, title) VALUES (?1, 'h', ?2)",
+                rusqlite::params![stored, title],
+            )
+            .unwrap();
+    }
+
+    /// rename: 三种装饰写法都跟着改名，别名与小节原样保留。
+    #[test]
+    fn rename_retargets_alias_and_heading_links() {
+        let v = vault("rename_alias");
+        let db = mem_db();
+        write(&v, "老标题.md", "# 老标题\n");
+        let refs = write(
+            &v,
+            "引用.md",
+            "裸 [[老标题]]\n别名 [[老标题|旧称]]\n小节 [[老标题#背景]]\n两者 [[老标题|旧称#背景]]\n无关 [[别的笔记]]\n",
+        );
+
+        let args = r#"{"old_path":"老标题.md","new_path":"新标题.md"}"#;
+        execute_rename_note(args, v.to_str().unwrap(), &db, &[v.to_string_lossy().to_string()])
+            .unwrap();
+
+        let body = read(&refs);
+        assert!(body.contains("裸 [[新标题]]"), "{}", body);
+        assert!(body.contains("别名 [[新标题|旧称]]"), "alias dropped: {}", body);
+        assert!(body.contains("小节 [[新标题#背景]]"), "heading dropped: {}", body);
+        assert!(body.contains("两者 [[新标题|旧称#背景]]"), "alias+heading dropped: {}", body);
+        assert!(body.contains("无关 [[别的笔记]]"), "unrelated link touched: {}", body);
+        assert!(!body.contains("老标题"), "old title survived: {}", body);
+
+        let _ = std::fs::remove_dir_all(&v);
+    }
+
+    /// rename: `files.title` 与 file_stem 不一致时，两种写法都要被改写。
+    ///
+    /// The old code took the old name from `file_stem()` alone, so for an imported
+    /// note titled 「旧的中文标题」 the links written as the *title* were never
+    /// rewritten — not even the bare ones.
+    ///
+    /// The stems here are chosen so that `normalize_title` keeps them distinct.
+    /// A rename like `202401-note.md` → `202402-note.md` is deliberately a **no-op**
+    /// for link text: `normalize_title` strips leading digits, so both stems have the
+    /// key `note` and the old spelling already resolves to the renamed note.
+    #[test]
+    fn rename_rewrites_links_written_as_the_db_title_too() {
+        let v = vault("rename_title");
+        let db = mem_db();
+        let note = write(&v, "note-alpha.md", "# 旧的中文标题\n");
+        register(&db, &note, "旧的中文标题");
+        let refs = write(
+            &v,
+            "引用.md",
+            "按文件名 [[note-alpha|草稿]]\n按标题 [[旧的中文标题#背景]]\n",
+        );
+
+        let args = r#"{"old_path":"note-alpha.md","new_path":"note-beta.md"}"#;
+        execute_rename_note(args, v.to_str().unwrap(), &db, &[v.to_string_lossy().to_string()])
+            .unwrap();
+
+        let body = read(&refs);
+        assert!(body.contains("按文件名 [[note-beta|草稿]]"), "{}", body);
+        assert!(
+            body.contains("按标题 [[note-beta#背景]]"),
+            "a link written as files.title was left dangling: {}",
+            body
+        );
+
+        let _ = std::fs::remove_dir_all(&v);
+    }
+
+    /// merge: same guarantee, and it matters more — the source note is deleted, so a
+    /// missed rewrite is a link to a file that no longer exists.
+    #[test]
+    fn merge_retargets_alias_and_heading_links() {
+        let v = vault("merge_alias");
+        let db = mem_db();
+        write(&v, "源笔记.md", "源正文\n");
+        write(&v, "目标笔记.md", "目标正文\n");
+        let refs = write(
+            &v,
+            "引用.md",
+            "裸 [[源笔记]]\n别名 [[源笔记|旧称]]\n小节 [[源笔记#背景]]\n两者 [[源笔记|旧称#背景]]\n无关 [[目标笔记]]\n",
+        );
+
+        let args = r#"{"source_path":"源笔记.md","target_path":"目标笔记.md"}"#;
+        execute_merge_notes(args, v.to_str().unwrap(), &db, &[v.to_string_lossy().to_string()])
+            .unwrap();
+
+        let body = read(&refs);
+        assert!(body.contains("裸 [[目标笔记]]"), "{}", body);
+        assert!(body.contains("别名 [[目标笔记|旧称]]"), "alias dropped: {}", body);
+        assert!(body.contains("小节 [[目标笔记#背景]]"), "heading dropped: {}", body);
+        assert!(body.contains("两者 [[目标笔记|旧称#背景]]"), "alias+heading dropped: {}", body);
+        assert!(!body.contains("源笔记"), "link to the deleted source survived: {}", body);
+
+        let _ = std::fs::remove_dir_all(&v);
+    }
+
+    /// merge: 按 `files.title` 写的链接同样要改。
+    #[test]
+    fn merge_rewrites_links_written_as_the_db_title_too() {
+        let v = vault("merge_title");
+        let db = mem_db();
+        let src = write(&v, "202401-src.md", "源正文\n");
+        register(&db, &src, "源的中文标题");
+        write(&v, "目标笔记.md", "目标正文\n");
+        let refs = write(&v, "引用.md", "按标题 [[源的中文标题|旧称]]\n");
+
+        let args = r#"{"source_path":"202401-src.md","target_path":"目标笔记.md"}"#;
+        execute_merge_notes(args, v.to_str().unwrap(), &db, &[v.to_string_lossy().to_string()])
+            .unwrap();
+
+        assert!(
+            read(&refs).contains("按标题 [[目标笔记|旧称]]"),
+            "{}",
+            read(&refs)
+        );
+
+        let _ = std::fs::remove_dir_all(&v);
     }
 }
 

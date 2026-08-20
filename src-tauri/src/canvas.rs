@@ -108,11 +108,17 @@ pub enum LayoutAlgorithm {
 }
 
 /// Node metadata for layout calculations
+///
+/// No `title` field: the only thing that ever read one was the link matcher below,
+/// via `n_title == target_title || n_file.contains(&target_title)`. Link resolution
+/// now goes through `db::wikilink::LinkResolver` (keyed on title *and* file stem
+/// over the whole `files` table), and a JSON Canvas `file` node carries only the
+/// path — Obsidian renders the title itself. Keeping a write-only copy of the title
+/// here is what invited the substring match in the first place.
 #[derive(Debug, Clone)]
 struct NodeData {
     id: String,
     file_path: String,
-    title: String,
     note_type: String,
     outgoing_links: Vec<String>,
     incoming_links: Vec<String>,
@@ -207,14 +213,13 @@ fn load_graph_data(
     })?;
 
     for (idx, row) in rows.enumerate() {
-        let (path, title, note_type, _links_json) = row?;
+        let (path, _title, note_type, _links_json) = row?;
         let id = format!("node-{}", idx);
         path_to_id.insert(path.clone(), id.clone());
 
         nodes.push(NodeData {
             id,
             file_path: path,
-            title,
             note_type,
             outgoing_links: Vec::new(),
             incoming_links: Vec::new(),
@@ -226,6 +231,12 @@ fn load_graph_data(
     }
 
     // Load links from card_meta
+    //
+    // 归一化解析表 / one shared resolution table. Built over the *whole* `files`
+    // table (not just the exported nodes) so that a link is resolved to the same
+    // note the sidebar/graph/health views resolve it to; the `path_to_id` lookup
+    // below then decides whether that note made the `max_nodes` cut.
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
     let mut edges = Vec::new();
     let mut stmt = conn.prepare(
         "SELECT file_path, links FROM card_meta WHERE links IS NOT NULL AND links != '[]'"
@@ -238,34 +249,49 @@ fn load_graph_data(
         let (file_path, links_json) = row?;
         if let Ok(links) = serde_json::from_str::<Vec<crate::db::search::SuggestedLink>>(&links_json) {
             for link in links {
-                let target = link.target();
-                // simple title normalization for mapping
-                let link_clean = target.trim_start_matches("[[").trim_end_matches("]]").trim().to_lowercase();
-                edges.push((file_path.clone(), link_clean));
+                // 为什么删掉 `n_file.contains(&target_title)` /
+                // why the substring fallback had to go.
+                //
+                // The old matcher was
+                // `if n_title == target_title || n_file.contains(&target_title)`,
+                // and `n_file` is the **full path**, not the basename. So in a vault
+                // literally called `d:/我的笔记/`, the target `笔记` was contained in
+                // every single path and `[[某笔记]]` wired itself to whichever note
+                // the node scan hit first — an arbitrary, wrong edge in an exported
+                // Canvas the user then edits by hand. The directory name of the
+                // vault is not part of any link's meaning.
+                //
+                // It also normalised with a bare `to_lowercase()` and never cut
+                // `|别名` / `#小节`, so decorated links matched nothing at all.
+                //
+                // New boundary: exactly one note or no edge, keyed on title *and*
+                // file stem, same tie-break as every other view.
+                let Some(raw_target) = crate::db::wikilink::parse_link_target(link.target())
+                else {
+                    continue;
+                };
+                // 同 vault 优先 / same-vault first: the linking note is the context.
+                if let Some(target_path) = resolver.resolve_near(&raw_target, Some(&file_path)) {
+                    edges.push((file_path.clone(), target_path.to_string()));
+                }
             }
         }
     }
 
     // Build incoming/outgoing
-    for (source_path, target_title) in edges {
-        let mut target_id_opt = None;
-        for n in &nodes {
-            let n_title = n.title.to_lowercase();
-            let n_file = n.file_path.replace('\\', "/").to_lowercase();
-            if n_title == target_title || n_file.contains(&target_title) {
-                target_id_opt = Some(n.id.clone());
-                break;
+    for (source_path, target_path) in edges {
+        // Only notes that survived the `max_nodes` cut can carry an edge.
+        let Some(target_id) = path_to_id.get(&target_path).cloned() else { continue };
+        if let Some(source_id) = path_to_id.get(&source_path) {
+            if source_id == &target_id {
+                continue; // a note is not its own neighbour
             }
-        }
-        
-        if let Some(target_id) = target_id_opt {
-            if let Some(source_id) = path_to_id.get(&source_path) {
-                if let Some(s) = nodes.iter_mut().find(|n| n.id == *source_id) {
-                    s.outgoing_links.push(target_id.clone());
-                }
-                if let Some(t) = nodes.iter_mut().find(|n| n.id == target_id) {
-                    t.incoming_links.push(source_id.clone());
-                }
+            let source_id = source_id.clone();
+            if let Some(s) = nodes.iter_mut().find(|n| n.id == source_id) {
+                s.outgoing_links.push(target_id.clone());
+            }
+            if let Some(t) = nodes.iter_mut().find(|n| n.id == target_id) {
+                t.incoming_links.push(source_id.clone());
             }
         }
     }
@@ -542,6 +568,86 @@ fn create_canvas_edges(nodes: &[NodeData], options: &ExportOptions) -> Vec<Edge>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── 错连回归 / the wrong-edge regression ─────────────────────────────
+
+    fn test_db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        conn
+    }
+
+    fn add_note_with_links(conn: &Connection, path: &str, title: &str, links_json: &str) {
+        conn.execute(
+            "INSERT INTO files (path, hash, title) VALUES (?1, 'h', ?2)",
+            rusqlite::params![path, title],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO card_meta (file_path, links) VALUES (?1, ?2)",
+            rusqlite::params![path, links_json],
+        )
+        .unwrap();
+    }
+
+    /// The vault directory itself is called 「我的笔记」, and `[[会议笔记]]` must
+    /// attach to that one note only.
+    ///
+    /// Under the old matcher (`n_file.contains(&target_title)` against the **full
+    /// path**) the substring 「笔记」 of the target was present in every path under
+    /// `d:/我的笔记/`, so the link wired itself to whichever note the node scan
+    /// reached first. Exporting a Canvas then handed the user a graph with an
+    /// arbitrary wrong edge in it.
+    #[test]
+    fn a_link_never_attaches_to_a_note_just_because_the_vault_path_contains_it() {
+        let conn = test_db();
+        add_note_with_links(&conn, "d:/我的笔记/会议笔记.md", "会议笔记", "[]");
+        add_note_with_links(&conn, "d:/我的笔记/读书笔记.md", "读书笔记", "[]");
+        add_note_with_links(&conn, "d:/我的笔记/项目笔记.md", "项目笔记", "[]");
+        add_note_with_links(
+            &conn,
+            "d:/我的笔记/源.md",
+            "源",
+            r#"["[[会议笔记|上周会议]]"]"#,
+        );
+
+        let options = ExportOptions { include_orphans: true, ..Default::default() };
+        let nodes = load_graph_data(&conn, &options).unwrap();
+
+        let id_of = |path: &str| {
+            nodes.iter().find(|n| n.file_path == path).map(|n| n.id.clone()).unwrap()
+        };
+        let source = nodes.iter().find(|n| n.file_path == "d:/我的笔记/源.md").unwrap();
+
+        assert_eq!(
+            source.outgoing_links,
+            vec![id_of("d:/我的笔记/会议笔记.md")],
+            "exactly one edge, to the note actually named in the link"
+        );
+        for other in ["d:/我的笔记/读书笔记.md", "d:/我的笔记/项目笔记.md"] {
+            let n = nodes.iter().find(|n| n.file_path == other).unwrap();
+            assert!(
+                n.incoming_links.is_empty(),
+                "{} must not receive an edge from a path substring",
+                other
+            );
+        }
+    }
+
+    /// A target that matches nothing produces no edge at all, rather than
+    /// attaching to the longest path that happens to contain the text.
+    #[test]
+    fn an_unresolvable_link_produces_no_edge() {
+        let conn = test_db();
+        add_note_with_links(&conn, "d:/我的笔记/会议笔记.md", "会议笔记", "[]");
+        add_note_with_links(&conn, "d:/我的笔记/源.md", "源", r#"["[[不存在的笔记]]"]"#);
+
+        let options = ExportOptions { include_orphans: true, ..Default::default() };
+        let nodes = load_graph_data(&conn, &options).unwrap();
+        assert!(nodes.iter().all(|n| n.outgoing_links.is_empty() && n.incoming_links.is_empty()));
+    }
 
     #[test]
     fn test_canvas_serialization() {

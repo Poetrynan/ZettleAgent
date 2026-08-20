@@ -268,7 +268,8 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
             serialized_data BLOB NOT NULL,
             node_count INTEGER NOT NULL DEFAULT 0,
             edge_count INTEGER NOT NULL DEFAULT 0,
-            computed_at TEXT DEFAULT (datetime('now'))
+            computed_at TEXT DEFAULT (datetime('now')),
+            content_fingerprint TEXT
         );",
         [],
     )?;
@@ -490,6 +491,12 @@ pub fn migrate_schema_columns(conn: &Connection) -> Result<()> {
     let _ = conn.execute("ALTER TABLE fact_history ADD COLUMN extraction_time TEXT NOT NULL DEFAULT (datetime('now'));", []);
     let _ = conn.execute("ALTER TABLE fact_history ADD COLUMN is_current INTEGER NOT NULL DEFAULT 0;", []);
 
+    // Graph cache staleness fingerprint (see `search::graph_input_fingerprint`).
+    // Deliberately nullable: an existing row written by an older build has no
+    // fingerprint, and `get_graph_data` must read that NULL as "unknown ⇒ stale"
+    // and recompute once, never as a match.
+    let _ = conn.execute("ALTER TABLE graph_cache ADD COLUMN content_fingerprint TEXT;", []);
+
     Ok(())
 }
 
@@ -654,6 +661,9 @@ pub fn migrate_add_update_cascade(conn: &Connection) -> Result<()> {
 
 /// Migrate existing card_meta.links data into note_relations table.
 /// Safe to call multiple times (uses INSERT OR IGNORE).
+///
+/// Returns the number of relations actually written. Entries whose target cannot
+/// be resolved to a real note are **skipped** — see [`resolve_relation_target`].
 pub fn migrate_links_to_relations(conn: &Connection) -> Result<usize> {
     use crate::db::search::SuggestedLink;
 
@@ -670,6 +680,13 @@ pub fn migrate_links_to_relations(conn: &Connection) -> Result<usize> {
         .filter_map(|r| r.ok())
         .collect();
 
+    // 建一次表复用 / one resolution table for the whole migration. The old code
+    // called `find_file_path_for_title_prioritized` inside the loop, and that
+    // function does a full `SELECT path, title FROM files` every call — the
+    // migration was O(links × files) on a vault where both grow together. The
+    // resolver is one pass over `files` plus a hash lookup per link.
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
+
     for (file_path, links_json) in rows {
         if let Ok(links) = serde_json::from_str::<Vec<SuggestedLink>>(&links_json) {
             for link in &links {
@@ -681,14 +698,11 @@ pub fn migrate_links_to_relations(conn: &Connection) -> Result<usize> {
                 };
                 let conf = link.confidence();
 
-                let target_clean = target
-                    .trim_start_matches("[[")
-                    .trim_end_matches("]]")
-                    .trim();
-
-                // Try to find the actual file path for this target, prioritizing the same vault
-                let target_path = find_file_path_for_title_prioritized(conn, target_clean, Some(&file_path))
-                    .unwrap_or_else(|| target_clean.to_string());
+                let Some(target_path) =
+                    resolve_relation_target(&resolver, target, &file_path)
+                else {
+                    continue;
+                };
 
                 let _ = conn.execute(
                     "INSERT OR IGNORE INTO note_relations (source_path, target_path, relation_type, confidence, reason)
@@ -709,71 +723,70 @@ pub fn migrate_links_to_relations(conn: &Connection) -> Result<usize> {
     Ok(count)
 }
 
-/// Helper: find a file path in the files table that matches a title, prioritizing the current vault path.
-pub fn find_file_path_for_title_prioritized(conn: &Connection, title: &str, current_file_path: Option<&str>) -> Option<String> {
-    let title_lower = title.to_lowercase();
-    let mut stmt = conn.prepare("SELECT path, title FROM files").ok()?;
-    let rows: Vec<(String, Option<String>)> = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-        })
-        .ok()?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    let mut best_match: Option<String> = None;
-    let mut max_common_len = 0;
-
-    for (path, file_title) in &rows {
-        let mut matches = false;
-        if let Some(ft) = file_title {
-            if ft.to_lowercase() == title_lower {
-                matches = true;
-            }
-        }
-        if !matches {
-            let filename = path.replace('\\', "/");
-            let basename = filename.rsplit('/').next().unwrap_or(path).to_lowercase();
-            let basename_no_ext = basename.strip_suffix(".md").unwrap_or(&basename);
-            if basename_no_ext == title_lower {
-                matches = true;
-            }
-        }
-
-        if matches {
-            if let Some(curr_path) = current_file_path {
-                let common_len = common_directory_prefix_len(path, curr_path);
-                if best_match.is_none() || common_len > max_common_len {
-                    max_common_len = common_len;
-                    best_match = Some(path.clone());
-                }
-            } else {
-                return Some(path.clone());
-            }
-        }
-    }
-    best_match
+/// `card_meta.links` 的一条 target → `note_relations.target_path`。
+/// Resolve one `card_meta.links` target into a `note_relations.target_path`.
+///
+/// Shared by this module's migration and `scheduler::reconcile_task`, the only
+/// two places that write `note_relations` from LLM output, so the两处 cannot drift.
+///
+/// ## 两个必须一起做的修正 / the two fixes this encodes
+///
+/// **1. 先切 `|别名` / `#小节`.** Both writers used a bare
+/// `trim_start_matches("[[")`, so an LLM emitting `"[[知识图谱|图谱]]"` (the shape
+/// the prompts invite, since they tell it to copy the exact title and the body
+/// spells links that way) produced the lookup key `知识图谱|图谱`, which matches no
+/// note. `parse_link_target` cuts the decorations first.
+///
+/// **2. 匹配不到就不写 / an unresolved target is not written at all.** The old code
+/// ended in `.unwrap_or_else(|| target_clean.to_string())`, i.e. on a failed match
+/// it stored the *link text* in a column that every reader treats as a file path.
+/// That fabricates a 幽灵节点 / ghost node visible to everything reading
+/// `note_relations`: the graph's relation edges, backlinks, related-notes, the
+/// health desk, `analyze_workspace`'s relation counts, and `lint`'s
+/// unidirectional-relation report (a ghost can never have a reverse edge, so it is
+/// permanently listed as a defect). Combined with fix 1 it was worse than a
+/// missing note: `知识图谱|图谱` is neither a path nor a title.
+///
+/// 为什么不怕丢掉「链接到尚未创建的笔记」/ why dropping forward references is safe:
+/// `note_relations` is **derived** data — `card_meta.links` remains the record of
+/// what the LLM proposed, this function is `INSERT OR IGNORE` and idempotent, and
+/// broken-link reporting does not read this table at all (`lint::run_vault_lint`
+/// scans note text against `files` titles, lint.rs:270-304). So a link to a note
+/// that does not exist yet is still reported as broken by the feature that owns
+/// that job, and the relation appears as soon as the target exists and the source
+/// is reconciled again. 宁缺勿脏 / a missing derived row is recoverable; a row
+/// pointing at a path that does not exist corrupts every consumer.
+pub fn resolve_relation_target(
+    resolver: &crate::db::wikilink::LinkResolver,
+    raw_target: &str,
+    source_path: &str,
+) -> Option<String> {
+    let target = crate::db::wikilink::parse_link_target(raw_target)?;
+    // `resolve_near`: 同 vault 优先 / same-vault first, which is the tie-break this
+    // write path has always used. It now comes from the shared resolver, so the
+    // read side answers "which note is `[[X]]`?" the same way.
+    resolver
+        .resolve_near(&target, Some(source_path))
+        .map(|s| s.to_string())
 }
 
-fn common_directory_prefix_len(p1: &str, p2: &str) -> usize {
-    let p1_clean = p1.replace('\\', "/");
-    let p2_clean = p2.replace('\\', "/");
-    // Track a *byte* offset so the slice below never splits a multi-byte char.
-    let mut len = 0;
-    for ((byte_idx, c1), c2) in p1_clean.char_indices().zip(p2_clean.chars()) {
-        if c1 == c2 {
-            len = byte_idx + c1.len_utf8();
-        } else {
-            break;
-        }
-    }
-    // We only care about directory levels, so find the last slash in the common prefix
-    let common_prefix = &p1_clean[..len];
-    if let Some(slash_idx) = common_prefix.rfind('/') {
-        slash_idx + 1
-    } else {
-        0
-    }
+/// Helper: find a file path in the files table that matches a title, prioritizing the current vault path.
+///
+/// Kept as a thin wrapper over the shared resolver: the collision rule (同 vault
+/// 优先, then lowest path) used to live only here, which meant a multi-vault user
+/// could get one answer when a relation was *written* and a different one when the
+/// same link was *read* by the panel/graph/health views. There is now one rule, in
+/// `db::wikilink::LinkResolver`.
+///
+/// Note this builds a resolution table per call (one pass over `files`), exactly
+/// like the hand-rolled scan it replaces. Loops should build a `LinkResolver` once
+/// and call `resolve_near` directly.
+pub fn find_file_path_for_title_prioritized(conn: &Connection, title: &str, current_file_path: Option<&str>) -> Option<String> {
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn).ok()?;
+    let target = crate::db::wikilink::parse_link_target(title)?;
+    resolver
+        .resolve_near(&target, current_file_path)
+        .map(|s| s.to_string())
 }
 
 /// Helper: find a file path in the files table that matches a title.
@@ -806,5 +819,130 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> anyhow::Result<
         rusqlite::params![key, value],
     )?;
     Ok(())
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+//
+// These pin the two `note_relations` write-side guarantees: the target is parsed
+// before it is looked up, and an unresolvable target is not written at all.
+
+#[cfg(test)]
+mod relation_target_tests {
+    use super::*;
+    use rusqlite::params;
+
+    /// Production runs both schema functions (db/mod.rs:35); a fixture that only
+    /// runs the first drifts from the real schema.
+    fn test_db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        setup_database_schema(&conn).unwrap();
+        migrate_schema_columns(&conn).unwrap();
+        conn
+    }
+
+    fn add_file(conn: &Connection, path: &str, title: &str) {
+        conn.execute(
+            "INSERT INTO files (path, hash, title) VALUES (?1, 'h', ?2)",
+            params![path, title],
+        )
+        .unwrap();
+    }
+
+    fn set_links(conn: &Connection, path: &str, links_json: &str) {
+        conn.execute(
+            "INSERT INTO card_meta (file_path, links) VALUES (?1, ?2)
+             ON CONFLICT(file_path) DO UPDATE SET links = ?2",
+            params![path, links_json],
+        )
+        .unwrap();
+    }
+
+    fn targets_of(conn: &Connection, source: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT target_path FROM note_relations WHERE source_path = ?1 ORDER BY target_path")
+            .unwrap();
+        stmt.query_map(params![source], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    /// 别名写法必须落到真实路径 / an aliased target lands on the real note path.
+    ///
+    /// The bug: `"[[知识图谱|图谱]]"` was only `trim_start_matches("[[")`-ed, so the
+    /// lookup key was `知识图谱|图谱`, nothing matched, and the fallback stored that
+    /// literal string in `target_path` — a 幽灵节点 for every reader.
+    #[test]
+    fn aliased_target_resolves_to_the_real_note_path() {
+        let conn = test_db();
+        add_file(&conn, "d:/vault/知识图谱.md", "知识图谱");
+        add_file(&conn, "d:/vault/源.md", "源");
+        set_links(
+            &conn,
+            "d:/vault/源.md",
+            r#"["[[知识图谱|图谱]]", "[[知识图谱#定义]]"]"#,
+        );
+
+        migrate_links_to_relations(&conn).unwrap();
+
+        assert_eq!(
+            targets_of(&conn, "d:/vault/源.md"),
+            vec!["d:/vault/知识图谱.md".to_string()],
+            "both spellings resolve to the one real path, deduped by INSERT OR IGNORE"
+        );
+        // The specific string that used to be stored must not exist anywhere.
+        let ghosts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_relations nr
+                 WHERE NOT EXISTS (SELECT 1 FROM files f WHERE f.path = nr.target_path)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ghosts, 0, "no relation may point at a non-existent path");
+    }
+
+    /// 匹配不到就不写 / an unresolvable target writes no row.
+    ///
+    /// This locks the decision to drop the old `unwrap_or_else(|| target_clean)`
+    /// fallback. `note_relations` is derived data and this migration is idempotent,
+    /// so the relation appears once the note exists; broken-link *reporting* reads
+    /// note text, not this table, so nothing is lost by staying silent here.
+    #[test]
+    fn unresolvable_target_is_not_written_at_all() {
+        let conn = test_db();
+        add_file(&conn, "d:/vault/源.md", "源");
+        set_links(&conn, "d:/vault/源.md", r#"["[[尚未创建的笔记]]", "[[]]"]"#);
+
+        let written = migrate_links_to_relations(&conn).unwrap();
+        assert_eq!(written, 0, "nothing resolvable ⇒ nothing written");
+        assert!(targets_of(&conn, "d:/vault/源.md").is_empty());
+
+        // …and it does appear once the target exists, so this is a deferral, not a loss.
+        add_file(&conn, "d:/vault/尚未创建的笔记.md", "尚未创建的笔记");
+        assert_eq!(migrate_links_to_relations(&conn).unwrap(), 1);
+        assert_eq!(
+            targets_of(&conn, "d:/vault/源.md"),
+            vec!["d:/vault/尚未创建的笔记.md".to_string()]
+        );
+    }
+
+    /// 多 vault：写侧与读侧同一裁决 / the write side uses the shared same-vault rule.
+    #[test]
+    fn same_vault_wins_when_two_vaults_hold_the_same_title() {
+        let conn = test_db();
+        add_file(&conn, "d:/vaultA/项目笔记.md", "项目笔记");
+        add_file(&conn, "d:/vaultB/项目笔记.md", "项目笔记");
+        add_file(&conn, "d:/vaultB/源.md", "源");
+        set_links(&conn, "d:/vaultB/源.md", r#"["[[项目笔记]]"]"#);
+
+        migrate_links_to_relations(&conn).unwrap();
+        assert_eq!(
+            targets_of(&conn, "d:/vaultB/源.md"),
+            vec!["d:/vaultB/项目笔记.md".to_string()],
+            "the relation stays inside the linking note's own vault"
+        );
+    }
 }
 

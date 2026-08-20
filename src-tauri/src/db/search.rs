@@ -416,16 +416,21 @@ pub fn full_text_search_reranked(
 }
 
 /// Fetch knowledge graph data with caching.
-/// Returns cached data if available and file count hasn't changed.
-/// Otherwise recomputes and caches the result.
+///
+/// The cache is keyed on a **content fingerprint** of every table the builder
+/// actually reads (see [`graph_input_fingerprint`]). The previous condition was
+/// `cached.nodes.len() == COUNT(*) FROM files`, which pure content editing never
+/// changes: a user could add a hundred `[[wikilink]]`s, or the reconciler could
+/// rewrite `card_meta.links`, and the cached edges, communities and PageRank
+/// would keep being served indefinitely.
 pub fn get_graph_data(conn: &Connection) -> anyhow::Result<GraphData> {
-    // Check if cache is valid
-    let current_file_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
-        .unwrap_or(0);
+    let fingerprint = graph_input_fingerprint(conn);
 
-    if let Ok(cached) = get_cached_graph(conn) {
-        if cached.nodes.len() as i64 == current_file_count && current_file_count > 0 {
+    if let Ok((cached, cached_fingerprint)) = get_cached_graph(conn) {
+        // `cached_fingerprint` is NULL for a row written by a pre-migration build.
+        // Unknown is *not* a match: recompute once and stamp the fingerprint, or
+        // an upgraded vault would keep the stale graph forever.
+        if cached_fingerprint.as_deref() == Some(fingerprint.as_str()) {
             return Ok(cached);
         }
     }
@@ -433,16 +438,132 @@ pub fn get_graph_data(conn: &Connection) -> anyhow::Result<GraphData> {
     // Cache miss or stale: recompute
     let graph = build_graph_data_uncached(conn)?;
 
-    // Store in cache
+    // Store in cache.
+    //
+    // The fingerprint is re-read *after* the build on purpose: `build_graph_data_uncached`
+    // may itself populate `semantic_edges` (the "no precomputed edges yet" path),
+    // and those rows are part of the graph it just returned. Storing the
+    // pre-build fingerprint would therefore never match again and the cache would
+    // miss on every single call.
+    let stored_fingerprint = graph_input_fingerprint(conn);
     if let Ok(serialized) = serde_json::to_vec(&graph) {
         let _ = conn.execute(
-            "INSERT OR REPLACE INTO graph_cache (id, serialized_data, node_count, edge_count, computed_at)
-             VALUES (1, ?1, ?2, ?3, datetime('now'))",
-            params![serialized, graph.nodes.len() as i64, graph.edges.len() as i64],
+            "INSERT OR REPLACE INTO graph_cache (id, serialized_data, node_count, edge_count, computed_at, content_fingerprint)
+             VALUES (1, ?1, ?2, ?3, datetime('now'), ?4)",
+            params![serialized, graph.nodes.len() as i64, graph.edges.len() as i64, stored_fingerprint],
         );
     }
 
     Ok(graph)
+}
+
+/// 图谱输入的内容指纹 / Content fingerprint of the graph builder's real inputs.
+///
+/// `build_graph_data_uncached` reads exactly five tables, and this covers each:
+///
+/// | input | why the graph depends on it | fingerprint component |
+/// |---|---|---|
+/// | `files` (path, title) | node set + link resolution keys | `COUNT(*)`, `MAX(last_synced)`, total title length |
+/// | `chunks` (content, id, created_at) | inline `[[wikilink]]` edges, chunk counts, node `created_at` | `COUNT(*)`, `MAX(id)`, `MAX(updated_at/created_at)` |
+/// | `card_meta` (links, note_type) | explicit link edges + node type | `COUNT(*)`, total `links` length, total `note_type` length, `MAX(last_reconciled)` |
+/// | `note_relations` | labelled relation edges | `COUNT(*)`, `MAX(id)` |
+/// | `semantic_edges` | similarity edges | `COUNT(*)`, `MAX(id)` |
+///
+/// `chunks_vec` / `files_vec` are deliberately absent: the builder never reads
+/// them. It can *write* `semantic_edges` from them, and that write shows up in
+/// the `semantic_edges` component.
+///
+/// ## 为什么 `MAX(id)` 是这里最强的信号 / Why `MAX(id)` is the strongest signal
+///
+/// `chunks.id`, `note_relations.id` and `semantic_edges.id` are
+/// `INTEGER PRIMARY KEY AUTOINCREMENT`, which never re-uses a value. `sync_file`
+/// (`db/sync.rs`) edits a note by `DELETE FROM chunks WHERE file_path = ?` and
+/// re-inserting, so **any** content edit mints strictly larger ids —
+/// `MAX(id)` moves even when the byte count is unchanged, which a length- or
+/// timestamp-based fingerprint would miss. `semantic_edges` is written with
+/// `INSERT OR REPLACE`, which also allocates a new id. `COUNT(*)` covers the
+/// deletion direction, where `MAX(id)` can move backwards or not at all.
+///
+/// ## 抓不到什么（诚实说明）/ What it does NOT catch — honestly
+///
+/// 1. An **in-place** `UPDATE chunks SET content = …` that keeps the same row id
+///    and leaves `updated_at` alone. Nothing in this repo does that today (sync
+///    deletes and re-inserts, and `chunks.updated_at` has no update trigger), but
+///    a future writer that does would slip past.
+/// 2. A `card_meta.links` (or `note_type`) edit whose **total text length is
+///    unchanged** — swapping `[[AAA]]` for `[[BBB]]`. In production the
+///    reconciler that performs such a rewrite also calls
+///    `invalidate_graph_cache` (`scheduler::reconcile_task`), so the fingerprint
+///    is the backstop, not the only line of defence. A per-row hash would close
+///    this, but hashing every note's link JSON on every cache probe costs more
+///    than the staleness is worth.
+/// 3. A `files.title` rename to a **same-length** title inside the same second
+///    (`last_synced` is second-resolution). The accompanying chunk re-insert
+///    normally moves `MAX(chunks.id)` anyway, so this needs a title-only DB edit.
+/// 4. Timestamp collisions in general: `datetime('now')` has one-second
+///    granularity, so timestamp components only distinguish changes at least a
+///    second apart. Every component above is paired with a count or an id for
+///    exactly this reason.
+///
+/// Cost: five scalar aggregate queries, no content hashing. `COUNT(*)`/`MAX(id)`
+/// are index reads; the `SUM(LENGTH(...))` pairs are over `card_meta` and
+/// `files.title` only — one short row per note — never over `chunks.content`,
+/// which is the one table where a length sum would be genuinely expensive.
+fn graph_input_fingerprint(conn: &Connection) -> String {
+    // A failed component degrades to a fixed sentinel rather than a random value:
+    // a table that cannot be read is a broken DB, and the graph build itself will
+    // fail loudly right after. Silently *matching* is the only outcome to avoid.
+    let files: (i64, String, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(last_synced), ''), COALESCE(SUM(LENGTH(title)), 0) FROM files",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap_or((-1, "?".to_string(), -1));
+
+    let chunks: (i64, i64, String) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0),
+                    COALESCE(MAX(COALESCE(updated_at, created_at)), '') FROM chunks",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap_or((-1, -1, "?".to_string()));
+
+    let card_meta: (i64, i64, i64, String) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(links)), 0), COALESCE(SUM(LENGTH(note_type)), 0),
+                    COALESCE(MAX(last_reconciled), '')
+             FROM card_meta",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap_or((-1, -1, -1, "?".to_string()));
+
+    let relations: (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM note_relations",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((-1, -1));
+
+    let semantic: (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM semantic_edges",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((-1, -1));
+
+    format!(
+        "v1|files:{}:{}:{}|chunks:{}:{}:{}|card_meta:{}:{}:{}:{}|relations:{}:{}|semantic:{}:{}",
+        files.0, files.1, files.2,
+        chunks.0, chunks.1, chunks.2,
+        card_meta.0, card_meta.1, card_meta.2, card_meta.3,
+        relations.0, relations.1,
+        semantic.0, semantic.1,
+    )
 }
 
 /// Invalidate the graph cache. Call when notes are created, deleted, renamed,
@@ -451,15 +572,16 @@ pub fn invalidate_graph_cache(conn: &Connection) {
     let _ = conn.execute("DELETE FROM graph_cache WHERE id = 1", []);
 }
 
-/// Read cached graph data from the database.
-fn get_cached_graph(conn: &Connection) -> anyhow::Result<GraphData> {
-    let blob: Vec<u8> = conn.query_row(
-        "SELECT serialized_data FROM graph_cache WHERE id = 1",
+/// Read cached graph data from the database, together with the fingerprint it was
+/// computed under (`None` when the row predates the `content_fingerprint` column).
+fn get_cached_graph(conn: &Connection) -> anyhow::Result<(GraphData, Option<String>)> {
+    let (blob, fingerprint): (Vec<u8>, Option<String>) = conn.query_row(
+        "SELECT serialized_data, content_fingerprint FROM graph_cache WHERE id = 1",
         [],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let graph: GraphData = serde_json::from_slice(&blob)?;
-    Ok(graph)
+    Ok((graph, fingerprint))
 }
 
 /// Build graph data from scratch (no caching).
@@ -504,6 +626,12 @@ fn build_graph_data_uncached(conn: &Connection) -> anyhow::Result<GraphData> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
+    // 归一化解析表，Step 2 与 Step 2b 共用一份 / one resolution table, shared by
+    // both link steps. Built once: `from_files` is a full pass over `files`, and
+    // the two steps must resolve `[[X]]` identically or the graph would contain
+    // edges the backlink panel and the health desk disagree with.
+    let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
+
     // ── Step 2: Get explicit wikilink edges ─────────────────────────
     let mut stmt = conn.prepare(
         "SELECT file_path, links FROM card_meta WHERE links IS NOT NULL AND links != '[]'",
@@ -521,34 +649,59 @@ fn build_graph_data_uncached(conn: &Connection) -> anyhow::Result<GraphData> {
         let (file_path, links_json) = row?;
         if let Ok(links) = serde_json::from_str::<Vec<SuggestedLink>>(&links_json) {
             for link_item in links {
-                let link_target = link_item.target();
                 let relation = link_item.relation();
-                let link_clean = link_target
-                    .trim_start_matches("[[")
-                    .trim_end_matches("]]")
-                    .trim()
-                    .to_lowercase();
 
-                let link_norm = normalize_title(&link_clean);
-                if link_norm.is_empty() {
+                // `card_meta.links` 的真实形状 / what is actually stored here:
+                // the reconciler copies the LLM's `suggested_links` array verbatim
+                // (scheduler/reconcile_task.rs:557), and both prompts that produce
+                // it demand `"target": "[[Exact Candidate Title]]"` —
+                // llm/prompts.rs:220 and :554. So an entry is a `SuggestedLink`
+                // whose `target` is a **bracket-wrapped note title**. Nothing
+                // validates that, though: the LLM may drop the brackets (hence
+                // reconcile_task.rs:571 re-wrapping them) and may append
+                // `|别名` / `#小节` copied out of the note body. `parse_link_target`
+                // handles all four spellings plus the optional brackets, which is
+                // why it tolerates them at all.
+                let Some(raw_target) = crate::db::wikilink::parse_link_target(link_item.target())
+                else {
                     continue;
-                }
+                };
 
-                for node in &nodes {
-                    let node_norm = normalize_title(&node.label);
-                    let filename = node.id.replace('\\', "/").rsplit('/').next().unwrap_or(&node.id).to_lowercase();
-                    let filename_norm = normalize_title(&filename);
-                    if node_norm == link_norm || filename_norm == link_norm || filename_norm.contains(&link_norm) {
-                        if node.id != file_path {
-                            edges.push(GraphEdge {
-                                source: file_path.clone(),
-                                target: node.id.clone(),
-                                edge_type: "link".to_string(),
-                                weight: 1.0,
-                                label: relation.map(|s| s.to_string()),
-                            });
-                        }
-                        break;
+                // 为什么删掉 `filename_norm.contains(link_norm)` 模糊兜底 /
+                // Why the old fuzzy fallback had to go.
+                //
+                // This used to walk every node and accept the first one where
+                // `node_norm == link_norm || filename_norm == link_norm ||
+                //  filename_norm.contains(&link_norm)`. The third arm is a
+                // substring test, so `[[Rust]]` attached itself to whichever of
+                // `Rust.md` / `Rust进阶笔记.md` the node scan reached first. That is
+                // not a missing edge, it is a **wrong** edge, and the graph is not
+                // where wrong edges stop: `link` edges feed PageRank, community
+                // detection, hub/orphan flags and the local-graph view, so one bad
+                // substring hit silently reweights the whole vault.
+                //
+                // Nothing needed the fuzziness. The resolver keys every note by
+                // *both* its title and its file stem, which covers every spelling
+                // the prompts can legitimately produce ("use the EXACT title") and
+                // every spelling a human writes by hand. A target that matches
+                // neither key is either a note that does not exist or an LLM
+                // paraphrase of a title — and in both cases guessing a longer note
+                // that merely *contains* the text is worse than admitting the link
+                // is broken. 宁缺勿错 / a missing edge is recoverable, a wrong edge
+                // corrupts every metric downstream.
+                //
+                // Behaviour boundary now: an entry resolves to exactly one note or
+                // to nothing. Ambiguous keys (`重复` vs `重复！`) go to the lowest
+                // path, the same first-writer-wins rule the other three views use.
+                if let Some(target_path) = resolver.resolve(&raw_target) {
+                    if target_path != file_path {
+                        edges.push(GraphEdge {
+                            source: file_path.clone(),
+                            target: target_path.to_string(),
+                            edge_type: "link".to_string(),
+                            weight: 1.0,
+                            label: relation.map(|s| s.to_string()),
+                        });
                     }
                 }
             }
@@ -556,6 +709,16 @@ fn build_graph_data_uncached(conn: &Connection) -> anyhow::Result<GraphData> {
     }
 
     // ── Step 2b: Get inline wikilinks from note content chunks ───────
+    // Parsing + resolution are delegated to `db::wikilink`, the single shared
+    // implementation the backlink panel, the health desk and the related-notes
+    // panel also use, and — since Step 2 above — the same `resolver` instance.
+    // This replaces the old inline `[[…]]` walk that (a) fed the raw inner text
+    // through `normalize_title`, which merges `标题|别名` into `标题别名` and so
+    // matched no note, and (b) fell back to a `filename.contains(link)` fuzzy
+    // test that could attach a link to the wrong note. The resolver keys every
+    // note by title *and* file stem, first-writer-wins, so `[[标题|别名]]` and
+    // `[[标题#小节]]` now resolve to exactly the note the other views resolve
+    // them to. The old per-node scan is also O(chunks × nodes); this is O(links).
     let mut chunk_stmt = conn.prepare(
         "SELECT file_path, content FROM chunks WHERE content LIKE '%[[%]]%'",
     )?;
@@ -567,39 +730,17 @@ fn build_graph_data_uncached(conn: &Connection) -> anyhow::Result<GraphData> {
 
     for row in chunk_rows {
         let (file_path, content) = row?;
-        let mut start_idx = 0;
-        while let Some(open_idx) = content[start_idx..].find("[[") {
-            let actual_open_idx = start_idx + open_idx;
-            if let Some(close_idx) = content[actual_open_idx..].find("]]") {
-                let actual_close_idx = actual_open_idx + close_idx;
-                let link_title = &content[actual_open_idx + 2..actual_close_idx];
-                
-                let link_clean = link_title.trim().to_lowercase();
-                let link_norm = normalize_title(&link_clean);
-                
-                if !link_norm.is_empty() {
-                    for node in &nodes {
-                        let node_norm = normalize_title(&node.label);
-                        let filename = node.id.replace('\\', "/").rsplit('/').next().unwrap_or(&node.id).to_lowercase();
-                        let filename_norm = normalize_title(&filename);
-                        if node_norm == link_norm || filename_norm == link_norm || filename_norm.contains(&link_norm) {
-                            if node.id != file_path {
-                                edges.push(GraphEdge {
-                                    source: file_path.clone(),
-                                    target: node.id.clone(),
-                                    edge_type: "link".to_string(),
-                                    weight: 1.0,
-                                    label: None,
-                                });
-                            }
-                            break;
-                        }
-                    }
+        for raw_target in crate::db::wikilink::wikilink_targets(&content) {
+            if let Some(target_path) = resolver.resolve(&raw_target) {
+                if target_path != file_path {
+                    edges.push(GraphEdge {
+                        source: file_path.clone(),
+                        target: target_path.to_string(),
+                        edge_type: "link".to_string(),
+                        weight: 1.0,
+                        label: None,
+                    });
                 }
-                
-                start_idx = actual_close_idx + 2;
-            } else {
-                break;
             }
         }
     }
@@ -1402,8 +1543,20 @@ pub fn get_related_notes(
     }
 
     // ── Signal 3: incoming [[wikilink]] backlinks ──
-    // Same detection as `get_backlinks`' method 2: scan chunk content for the target's
-    // title or file stem wrapped in [[…]]. Cheap LIKE prefilter, then exact check.
+    // Parsing + resolution are delegated to `db::wikilink`, the same shared
+    // implementation the backlink panel (`commands::file_commands`), the health
+    // desk (`db::notes_overview`) and the graph builder above use.
+    //
+    // This replaces a hand-rolled `content_lower.contains("[[title]]")` /
+    // `[[stem]]` pair — a byte-for-byte copy of the bug `get_backlinks` already
+    // had. Because it demanded the closing `]]` immediately after the title, a
+    // note linking here as `[[知识图谱|图谱]]` or `[[知识图谱#定义]]` produced no
+    // hit, and the user reading this note saw the linking note missing from the
+    // 「相关笔记 / Related notes」panel while the backlink panel listed it.
+    //
+    // `target_title` stays as a guard, not as the matcher: a path with no `files`
+    // row is not a note and cannot own backlinks. The resolver decides matches,
+    // and it keys notes by title *and* file stem, so `[[文件名]]` resolves too.
     let target_title: Option<String> = conn
         .query_row(
             "SELECT title FROM files WHERE path = ?1",
@@ -1411,13 +1564,8 @@ pub fn get_related_notes(
             |row| row.get(0),
         )
         .ok();
-    if let Some(ref title) = target_title {
-        let title_lower = title.to_lowercase();
-        let file_stem = std::path::Path::new(file_path)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
+    if target_title.is_some() {
+        let resolver = crate::db::wikilink::LinkResolver::from_files(conn)?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT c.file_path, c.content FROM chunks c
              WHERE c.file_path != ?1 AND c.content LIKE '%[[%]]%'
@@ -1426,15 +1574,14 @@ pub fn get_related_notes(
         )?;
         // The LIKE prefilter already discards chunks with no wikilink at all; this cap
         // keeps a very large vault from paying for a full scan on every note open.
+        // `c.file_path != ?1` is also what excludes self-links here, matching signals
+        // 1/1b/2 above and `notes_overview`'s self-relation skip.
         let rows = stmt.query_map(params![file_path, 5_000_i64], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for row in rows {
             let (src_path, content) = row?;
-            let cl = content.to_lowercase();
-            let hit = cl.contains(&format!("[[{}]]", title_lower))
-                || cl.contains(&format!("[[{}]]", file_stem));
-            if hit {
+            if resolver.content_links_to(&content, file_path) {
                 let e = agg.entry(src_path).or_default();
                 e.link = true;
             }
@@ -1848,9 +1995,194 @@ pub fn test_db_with_ranking_disagreement() -> Connection {
     conn
 }
 
-/// Integration tests for the *reranked* search wrappers. These are the tests the
-/// wiring work needs: proving that the `*_reranked` variants actually reorder
-/// under Tier 1 and are byte-identical to the plain functions under `Off`.
+/// 图谱缓存的失效判据 / Graph cache staleness — the contract `get_graph_data`
+/// guarantees now that the cache key is a content fingerprint instead of
+/// `COUNT(*) FROM files`.
+///
+/// Every test here proves the invalidation *observably*: the cached blob is
+/// poisoned with a sentinel node label, so a later call that still returns the
+/// sentinel was served from the cache and one that does not was rebuilt.
+/// Asserting on `computed_at` would be unreliable — `datetime('now')` has
+/// one-second resolution, so a recompute inside the same second is
+/// indistinguishable from a hit.
+#[cfg(test)]
+mod graph_cache_tests {
+    use super::*;
+
+    const SENTINEL: &str = "__POISONED__";
+
+    fn test_db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        conn
+    }
+
+    fn add_file(conn: &Connection, path: &str, title: &str) {
+        conn.execute(
+            "INSERT INTO files (path, hash, title) VALUES (?1, 'h', ?2)",
+            params![path, title],
+        )
+        .unwrap();
+    }
+
+    /// Mimics `sync_file`: a note edit deletes every chunk of the file and
+    /// re-inserts, so `chunks.id` values are re-minted (AUTOINCREMENT).
+    fn set_chunk(conn: &Connection, path: &str, body: &str) {
+        conn.execute("DELETE FROM chunks WHERE file_path = ?1", params![path]).unwrap();
+        conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, content, heading_hierarchy, marker_type)
+             VALUES (?1, 0, ?2, '', 'user')",
+            params![path, body],
+        )
+        .unwrap();
+    }
+
+    fn link_edges(graph: &GraphData) -> usize {
+        graph.edges.iter().filter(|e| e.edge_type == "link").count()
+    }
+
+    fn poisoned(graph: &GraphData) -> bool {
+        graph.nodes.iter().any(|n| n.label == SENTINEL)
+    }
+
+    /// Rewrite the cached blob only — `content_fingerprint` is left exactly as the
+    /// real code wrote it, so the staleness decision under test is untouched.
+    fn poison_cache(conn: &Connection) {
+        let blob: Vec<u8> = conn
+            .query_row("SELECT serialized_data FROM graph_cache WHERE id = 1", [], |r| r.get(0))
+            .expect("cache row must exist");
+        let mut graph: GraphData = serde_json::from_slice(&blob).unwrap();
+        assert!(!graph.nodes.is_empty(), "need a node to poison");
+        graph.nodes[0].label = SENTINEL.to_string();
+        let repacked = serde_json::to_vec(&graph).unwrap();
+        conn.execute(
+            "UPDATE graph_cache SET serialized_data = ?1 WHERE id = 1",
+            params![repacked],
+        )
+        .unwrap();
+    }
+
+    fn cached_fingerprint(conn: &Connection) -> Option<String> {
+        conn.query_row("SELECT content_fingerprint FROM graph_cache WHERE id = 1", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// Baseline: nothing changed between two calls ⇒ the second is a cache hit.
+    /// Proven by the sentinel surviving, and by the fingerprint being unchanged.
+    #[test]
+    fn unchanged_vault_hits_the_cache() {
+        let conn = test_db();
+        add_file(&conn, "a.md", "A");
+        add_file(&conn, "b.md", "B");
+        set_chunk(&conn, "a.md", "see [[B]]");
+
+        let first = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&first));
+        let fp1 = cached_fingerprint(&conn);
+        poison_cache(&conn);
+
+        let second = get_graph_data(&conn).unwrap();
+        assert!(poisoned(&second), "unchanged vault must be served from cache");
+        assert_eq!(cached_fingerprint(&conn), fp1, "fingerprint must not drift on a hit");
+    }
+
+    /// Pure content edit: add a wikilink to a chunk, file count unchanged. The
+    /// old `nodes.len() == COUNT(files)` check would have served the stale graph;
+    /// the fingerprint must force a rebuild and the new edge must appear.
+    #[test]
+    fn new_wikilink_in_chunk_invalidates_even_though_file_count_is_constant() {
+        let conn = test_db();
+        add_file(&conn, "a.md", "A");
+        add_file(&conn, "b.md", "B");
+        set_chunk(&conn, "a.md", "no links yet");
+
+        let before = get_graph_data(&conn).unwrap();
+        assert_eq!(link_edges(&before), 0);
+        poison_cache(&conn);
+
+        // Same two files; a.md now links to B.
+        set_chunk(&conn, "a.md", "now see [[B]]");
+        let after = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&after), "content edit must trigger a rebuild");
+        assert_eq!(after.nodes.len(), 2, "still two files");
+        assert_eq!(link_edges(&after), 1, "the new edge must be observable");
+    }
+
+    /// Pure `card_meta.links` edit: no file/chunk change at all. Adding a link to
+    /// the JSON array changes the fingerprint's `SUM(LENGTH(links))` component.
+    #[test]
+    fn card_meta_links_edit_invalidates() {
+        let conn = test_db();
+        add_file(&conn, "a.md", "A");
+        add_file(&conn, "b.md", "B");
+        set_chunk(&conn, "a.md", "body");
+
+        let before = get_graph_data(&conn).unwrap();
+        assert_eq!(link_edges(&before), 0);
+        poison_cache(&conn);
+
+        conn.execute(
+            "INSERT INTO card_meta (file_path, links) VALUES ('a.md', '[\"[[B]]\"]')",
+            [],
+        )
+        .unwrap();
+        let after = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&after), "card_meta.links edit must trigger a rebuild");
+        assert_eq!(link_edges(&after), 1, "explicit link edge must appear");
+    }
+
+    /// Adding and removing files must still invalidate — the behaviour the old
+    /// file-count check had, which we must not regress.
+    #[test]
+    fn adding_and_removing_files_still_invalidates() {
+        let conn = test_db();
+        add_file(&conn, "a.md", "A");
+        set_chunk(&conn, "a.md", "body");
+
+        let one = get_graph_data(&conn).unwrap();
+        assert_eq!(one.nodes.len(), 1);
+        poison_cache(&conn);
+
+        add_file(&conn, "b.md", "B");
+        set_chunk(&conn, "b.md", "body");
+        let two = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&two), "new file must trigger a rebuild");
+        assert_eq!(two.nodes.len(), 2);
+        poison_cache(&conn);
+
+        conn.execute("DELETE FROM chunks WHERE file_path = 'b.md'", []).unwrap();
+        conn.execute("DELETE FROM files WHERE path = 'b.md'", []).unwrap();
+        let back = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&back), "deletion must trigger a rebuild");
+        assert_eq!(back.nodes.len(), 1);
+    }
+
+    /// Old-DB scenario: a cache row whose `content_fingerprint` is NULL (written
+    /// by a build that predates the column). It must be treated as unknown ⇒
+    /// stale ⇒ recomputed once, never as a match, or an upgraded vault would keep
+    /// serving whatever it cached forever.
+    #[test]
+    fn null_fingerprint_is_treated_as_stale() {
+        let conn = test_db();
+        add_file(&conn, "a.md", "A");
+        add_file(&conn, "b.md", "B");
+        set_chunk(&conn, "a.md", "see [[B]]");
+
+        // Prime the cache, then simulate an old row: keep the (correct) blob but
+        // wipe the fingerprint back to NULL.
+        let _ = get_graph_data(&conn).unwrap();
+        poison_cache(&conn);
+        conn.execute("UPDATE graph_cache SET content_fingerprint = NULL WHERE id = 1", []).unwrap();
+        assert_eq!(cached_fingerprint(&conn), None);
+
+        let out = get_graph_data(&conn).unwrap();
+        assert!(!poisoned(&out), "NULL fingerprint must force a recompute");
+        assert!(cached_fingerprint(&conn).is_some(), "recompute must stamp a fingerprint");
+    }
+}
+
 #[cfg(test)]
 mod reranked_wrapper_tests {
     use super::*;
