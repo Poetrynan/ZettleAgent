@@ -240,6 +240,8 @@ pipeline_log::init(&app_data_dir);
             commands::save_image_to_vault,
             commands::agent_chat,
             commands::cancel_agent_turn,
+            // ── 批量 AI（体检台）──
+            commands::run_batch_agent,
             commands::get_edges_by_relation,
             // Related Notes panel (passive discovery while reading)
             commands::get_related_notes,
@@ -278,6 +280,11 @@ pipeline_log::init(&app_data_dir);
             commands::write_memory_file,
             // Bases (database view)
             commands::get_bases_data,
+            // ── Notes overview / 知识库体检台 ──
+            commands::get_notes_overview,
+            commands::list_saved_views,
+            commands::save_view,
+            commands::delete_saved_view,
             // Conflict detection and resolution
             commands::detect_file_conflicts,
             commands::resolve_conflict,

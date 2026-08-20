@@ -3,6 +3,13 @@ use crate::error::ZettelError;
 use serde::Serialize;
 use tauri::State;
 
+// The overview/saved-view data contracts live in `db/` next to the SQL that
+// builds them (same split as `review_store` / `review_commands`). Re-exported
+// here so callers of the command layer see one surface. `NoteRow` is reached
+// through `NotesOverview::rows` and needs no separate re-export.
+pub use crate::db::notes_overview::NotesOverview;
+pub use crate::db::saved_views::SavedView;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BasesEntry {
@@ -135,4 +142,61 @@ pub fn get_bases_data(
         all_tags,
         all_types,
     })
+}
+
+// ── Notes overview / 知识库体检台 ──────────────────────────────────────────
+//
+// `get_bases_data` above is kept as-is for existing callers. It returns seven
+// generic metadata columns, one of which (`confidence`) is永远为空 / always NULL:
+// nothing in the repo ever writes `card_meta.confidence` — the AI's per-link
+// confidence actually lands in `note_relations.confidence`. The commands below
+// replace that view with aggregated health signals instead.
+//
+// All four are thin: lock, delegate to `db::notes_overview` / `db::saved_views`,
+// return. `state.db.lock()?` works directly because `error.rs` implements
+// `From<PoisonError<_>>` for `ZettelError`.
+
+/// Every note under `vault_path` with its knowledge-base health signals.
+///
+/// `include_graph_signals` gates `pagerank`/`is_hub`, which are not persisted and
+/// can only come from a possibly-cold full graph rebuild. Pass `false` (the
+/// default the UI uses) for an interactive table load.
+#[tauri::command]
+pub fn get_notes_overview(
+    state: State<'_, AppState>,
+    vault_path: String,
+    include_graph_signals: bool,
+) -> Result<NotesOverview, ZettelError> {
+    let conn = state.db.lock()?;
+    // The only clock read in this feature, so the domain layer stays deterministic.
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    Ok(crate::db::notes_overview::build_overview(
+        &conn,
+        &vault_path,
+        include_graph_signals,
+        now_ms,
+    )?)
+}
+
+/// All saved Bases views, in the user's own order.
+#[tauri::command]
+pub fn list_saved_views(state: State<'_, AppState>) -> Result<Vec<SavedView>, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(crate::db::saved_views::list(&conn))
+}
+
+/// Create or replace a saved view, keyed by `id`.
+#[tauri::command]
+pub fn save_view(state: State<'_, AppState>, view: SavedView) -> Result<(), ZettelError> {
+    let conn = state.db.lock()?;
+    crate::db::saved_views::upsert(&conn, view)
+        .map_err(|e| ZettelError::System(format!("保存视图失败 / Failed to save view: {e}")))
+}
+
+/// Remove a saved view. Deleting a missing id succeeds.
+#[tauri::command]
+pub fn delete_saved_view(state: State<'_, AppState>, id: String) -> Result<(), ZettelError> {
+    let conn = state.db.lock()?;
+    crate::db::saved_views::delete(&conn, &id)
+        .map_err(|e| ZettelError::System(format!("删除视图失败 / Failed to delete view: {e}")))
 }
