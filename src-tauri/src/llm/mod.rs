@@ -228,6 +228,16 @@ pub enum AgentEvent {
     /// subsequent event carrying a different one.
     #[serde(rename = "run_started")]
     RunStarted { run_id: String },
+    /// Progress of a batch AI run (体检台批量). One event per note, twice:
+    /// `status: "start"` before the turn and `"ok"`/`"error"`/`"skipped"` after.
+    /// `index` is 1-based so the UI can render "3/12" without arithmetic.
+    #[serde(rename = "batch_progress")]
+    BatchProgress {
+        index: usize,
+        total: usize,
+        file_path: String,
+        status: String,
+    },
     /// Explicit lifecycle phase transition.
     #[serde(rename = "phase")]
     Phase {
@@ -385,6 +395,9 @@ pub fn format_agent_event(event: &AgentEvent) -> String {
         }
         AgentEvent::RunStarted { run_id } => {
             format!("run_started id={}", run_id)
+        }
+        AgentEvent::BatchProgress { index, total, file_path, status } => {
+            format!("batch_progress {}/{} {} {}", index, total, file_path, status)
         }
         AgentEvent::Phase { phase, label, .. } => {
             format!("phase {} — {}", phase.as_str(), label)

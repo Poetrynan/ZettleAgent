@@ -219,3 +219,50 @@ pub struct AgentChatRequest {
     #[serde(default)]
     pub supports_thinking: Option<bool>,
 }
+
+// ── 批量 AI（体检台）— Batch AI over selected notes ──────────────────
+//
+// The whole batch runs under ONE agent run_id, so `undo_agent_run` rolls back
+// all N notes as a single unit. That is the entire reason this is a backend
+// command instead of the frontend calling `agent_chat` N times.
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAgentRequest {
+    pub file_paths: Vec<String>,
+    /// 用户的自然语言指令，对每篇笔记各跑一次，注入为当轮 user message + current_file。
+    pub instruction: String,
+    pub vault_path: String,
+    pub model: Option<String>,
+    pub api_url: Option<String>,
+    /// See [`ChatRequest::api_key`] for why this is not an `Option<String>`.
+    #[serde(default)]
+    pub api_key: RequestApiKey,
+    pub provider_id: Option<String>,
+    pub methodology: Option<String>,
+    /// 单篇失败是否继续跑剩下的。默认 true（体检批处理里一篇挂了不该拖垮整批）。
+    pub continue_on_error: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAgentReport {
+    /// 整批共用的 run_id，用户据此一键撤销全部。
+    pub run_id: String,
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub items: Vec<BatchAgentItem>,
+    /// 用户中途取消时为 true，items 里未跑的标记为 skipped。
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAgentItem {
+    pub file_path: String,
+    /// "ok" | "error" | "skipped"
+    pub status: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}

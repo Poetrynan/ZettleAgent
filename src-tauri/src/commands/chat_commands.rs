@@ -12,12 +12,14 @@ pub async fn chat_with_llm(
     app: tauri::AppHandle,
     request: ChatRequest,
 ) -> Result<ChatResponse, ZettelError> {
+    // Cloned rather than moved out of `request`: the whole struct is handed to
+    // `run_agent_turn` below, which still needs `vault_path`, `messages`, etc.
     let config = LlmConfig {
-        api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
-        model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
-        provider_id: request.provider_id,
-        context_window: request.context_window,
+        api_url: request.api_url.clone().unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key.clone()),
+        model: request.model.clone().unwrap_or_else(|| "deepseek-v4".to_string()),
+        provider_id: request.provider_id.clone(),
+        supports_thinking: request.supports_thinking,
         ..Default::default()
     };
 
@@ -656,15 +658,38 @@ pub async fn agent_chat(
         "run_id": run_id,
     }));
 
+    // Clone the fields the config needs: `request` itself is handed whole to
+    // `run_agent_turn` below (it still needs messages, vault_path, current_file…),
+    // so we must not move individual fields out of it here.
     let config = LlmConfig {
-        api_url: request.api_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
-        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
-        model: request.model.unwrap_or_else(|| "deepseek-v4".to_string()),
-        provider_id: request.provider_id,
+        api_url: request.api_url.clone().unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key.clone()),
+        model: request.model.clone().unwrap_or_else(|| "deepseek-v4".to_string()),
+        provider_id: request.provider_id.clone(),
         supports_thinking: request.supports_thinking,
         ..Default::default()
     };
 
+    // A single-note turn is just the N=1 case of a batch, so the turn body lives
+    // in `run_agent_turn` and both callers share it. The run lifecycle stays
+    // *here* on purpose — see that function's doc comment.
+    run_agent_turn(&state, &app, config, request).await
+}
+
+/// One agent turn: everything after the run id has been minted.
+///
+/// Factored out of `agent_chat` so `run_batch_agent` can push N notes through
+/// the **same** run_id. It deliberately does **not** call `begin_agent_run()` —
+/// that would mint a fresh id per note and make `undo_agent_run` a per-note
+/// operation, which is exactly what the batch feature exists to avoid. The
+/// caller owns the run lifecycle; this function only consumes the ambient
+/// run_id that `tool_hooks` already carries.
+async fn run_agent_turn(
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+    config: LlmConfig,
+    request: super::AgentChatRequest,
+) -> Result<String, ZettelError> {
     let vault_path = request.vault_path.unwrap_or_default();
     // Build the complete list of vault paths (multi-vault support)
     let all_vault_paths: Vec<String> = {
@@ -905,7 +930,7 @@ pub async fn agent_chat(
         let content = crate::agents::fast_path::stream_natural_reply(
             &config,
             &greet_messages,
-            &app,
+            app,
             true,
         )
         .await
@@ -1009,7 +1034,7 @@ pub async fn agent_chat(
                     &user_query,
                     &chat_history,
                     &current_time,
-                    &app,
+                    app,
                 )
                 .await;
             }
@@ -1031,7 +1056,7 @@ pub async fn agent_chat(
                     vault_path.clone(),
                     all_vault_paths.clone(),
                     skill_dirs.clone(),
-                    &app,
+                    app,
                 )
                 .await;
             }
@@ -1116,13 +1141,13 @@ pub async fn agent_chat(
                 crate::tools::execute_tool(name, args, &db, &vault, &all_vaults, &config, &skill_dirs_inner).await
             })
         },
-        &app,
+        app,
     )
     .await;
 
     // A failed or cancelled turn still consumed tokens, so report accounting
     // before the error path short-circuits.
-    llm::emit_turn_token_usage(&app);
+    llm::emit_turn_token_usage(app);
 
     let result = result.map_err(|e| {
         crate::chat_file_log::log_agent(&format!("error orchestrator {}", e));
@@ -1164,6 +1189,257 @@ pub async fn agent_chat(
     }
 
     Ok(result)
+}
+
+// ── 批量 AI（体检台）— Batch AI over selected notes ──────────────────
+
+/// How much of a per-note AI reply is kept in the report.
+/// The report is a summary surface, not a transcript — full replies are already
+/// in `logs/agent.log` and in the events the frontend streamed.
+const BATCH_SUMMARY_CHARS: usize = 400;
+
+/// Truncate by **characters**, never bytes.
+///
+/// A byte slice at an arbitrary offset splits a multi-byte UTF-8 sequence and
+/// panics; every note in this vault is Chinese-first, so that is the common
+/// case, not the edge case.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(max).collect();
+    format!("{}…", head)
+}
+
+/// After the loop stops early (a `break` on fatal error, or a mid-batch cancel),
+/// every file that never got its own row is owed a `skipped` one, in order, so
+/// `report.items.len() == total` always holds and the UI can render one line
+/// per selected note.
+fn pad_skipped(items: &mut Vec<super::BatchAgentItem>, file_paths: &[String]) {
+    for file_path in file_paths.iter().skip(items.len()) {
+        items.push(super::BatchAgentItem {
+            file_path: file_path.clone(),
+            status: "skipped".to_string(),
+            summary: None,
+            error: None,
+        });
+    }
+}
+
+/// Resolve a selected note's path against the vault.
+///
+/// The frontend selection may carry either absolute paths or vault-relative
+/// ones depending on where the list came from, so accept both rather than
+/// forcing a convention the caller cannot always honour.
+fn resolve_note_path(vault_path: &str, file_path: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(file_path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(vault_path).join(p)
+    }
+}
+
+/// Run one AI instruction over N selected notes as a **single undoable unit**.
+///
+/// The whole point is the run id: `begin_agent_run()` is called exactly **once**
+/// here, and every note's turn reuses it, so all snapshots/journal rows land
+/// under one id and `undo_agent_run(run_id)` rolls the entire batch back. Doing
+/// this from the frontend by calling `agent_chat` N times would mint N run ids
+/// and force N undos.
+///
+/// **Serial on purpose.** Three reasons, all of them structural rather than
+/// stylistic: (1) the approval gate is a blocking human interaction, and
+/// concurrent turns would stack approval cards the user cannot attribute to a
+/// note; (2) the write path takes the single `Mutex<Connection>` per snapshot +
+/// journal row, so parallel turns would mostly queue on that lock anyway; and
+/// (3) cancellation and the run's `seq` ordering are process-global — undo
+/// replays in reverse `seq`, which is only meaningful if writes were ordered.
+#[tauri::command]
+pub async fn run_batch_agent(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    request: super::BatchAgentRequest,
+) -> Result<super::BatchAgentReport, ZettelError> {
+    let total = request.file_paths.len();
+    let continue_on_error = request.continue_on_error.unwrap_or(true);
+
+    // One run for the whole batch. This also resets the stop flag and the token
+    // accumulator once — deliberately NOT per note, because a per-note reset
+    // would silently swallow a cancellation issued during the previous note.
+    let run_id = llm::begin_agent_run();
+    let _ = app.emit("agent-event", serde_json::json!({
+        "type": "run_started",
+        "run_id": run_id,
+    }));
+    crate::chat_file_log::log_agent(&format!(
+        "batch_start run={} notes={} instruction={}",
+        run_id,
+        total,
+        crate::chat_file_log::trunc(&request.instruction, 240)
+    ));
+
+    // Resolved once: the precedence rule (request key wins, keychain fills the
+    // gap) is identical for every note, and re-reading the credential store N
+    // times would be pure overhead.
+    let config = LlmConfig {
+        api_url: request.api_url.clone().unwrap_or_else(|| "http://127.0.0.1:11434/v1/chat/completions".to_string()),
+        api_key: crate::secrets::resolve_api_key_with_override(&app, request.api_key),
+        model: request.model.clone().unwrap_or_else(|| "deepseek-v4".to_string()),
+        provider_id: request.provider_id.clone(),
+        ..Default::default()
+    };
+
+    let mut items: Vec<super::BatchAgentItem> = Vec::with_capacity(total);
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    let mut cancelled = false;
+
+    for (i, file_path) in request.file_paths.iter().enumerate() {
+        let index = i + 1;
+
+        // Cancellation is checked at the note boundary: the orchestrator already
+        // aborts mid-turn on the same flag, so by the time we get here the
+        // current note has stopped and everything after it is untouched.
+        if cancelled || llm::is_agent_cancelled() {
+            cancelled = true;
+            items.push(super::BatchAgentItem {
+                file_path: file_path.clone(),
+                status: "skipped".to_string(),
+                summary: None,
+                error: None,
+            });
+            emit_batch_progress(&app, index, total, file_path, "skipped");
+            continue;
+        }
+
+        emit_batch_progress(&app, index, total, file_path, "start");
+
+        // The note body is injected as attached_context, mirroring what the
+        // frontend pre-resolves for a single-note `agent_chat` turn.
+        let abs = resolve_note_path(&request.vault_path, file_path);
+        let note_body = match std::fs::read_to_string(&abs) {
+            Ok(body) => body,
+            Err(e) => {
+                failed += 1;
+                let msg = format!("无法读取笔记 / Cannot read note: {}", e);
+                items.push(super::BatchAgentItem {
+                    file_path: file_path.clone(),
+                    status: "error".to_string(),
+                    summary: None,
+                    error: Some(msg),
+                });
+                emit_batch_progress(&app, index, total, file_path, "error");
+                if continue_on_error {
+                    continue;
+                }
+                break;
+            }
+        };
+
+        let turn_request = super::AgentChatRequest {
+            // One fresh user turn per note — no cross-note history, so note #7
+            // cannot be contaminated by what the model decided about note #3.
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: request.instruction.clone(),
+                ..Default::default()
+            }],
+            api_url: request.api_url.clone(),
+            model: request.model.clone(),
+            // Unused downstream: `run_agent_turn` takes the already-resolved
+            // `config` above. Left at Default so no unresolved key can leak in.
+            api_key: Default::default(),
+            provider_id: request.provider_id.clone(),
+            vault_path: Some(request.vault_path.clone()),
+            vault_paths: None,
+            methodology: request.methodology.clone(),
+            // Batch runs never silently reach the internet.
+            web_search: Some(false),
+            current_file: Some(file_path.clone()),
+            attached_context: Some(note_body),
+            context_window: None,
+            supports_thinking: None,
+        };
+
+        match run_agent_turn(&state, &app, config.clone(), turn_request).await {
+            Ok(reply) => {
+                // A cancel that landed inside this turn: the turn may have
+                // returned a partial reply rather than an error. Report it as
+                // done (its writes are real and journaled) and stop the batch.
+                if llm::is_agent_cancelled() {
+                    cancelled = true;
+                }
+                succeeded += 1;
+                items.push(super::BatchAgentItem {
+                    file_path: file_path.clone(),
+                    status: "ok".to_string(),
+                    summary: Some(truncate_chars(&reply, BATCH_SUMMARY_CHARS)),
+                    error: None,
+                });
+                emit_batch_progress(&app, index, total, file_path, "ok");
+            }
+            Err(e) => {
+                if llm::is_agent_cancelled() {
+                    cancelled = true;
+                }
+                failed += 1;
+                items.push(super::BatchAgentItem {
+                    file_path: file_path.clone(),
+                    status: "error".to_string(),
+                    summary: None,
+                    error: Some(e.to_string()),
+                });
+                emit_batch_progress(&app, index, total, file_path, "error");
+                // 一篇挂了不该拖垮整批 / one bad note must not kill the batch.
+                if !continue_on_error && !cancelled {
+                    // Remaining notes are reported as skipped below.
+                    break;
+                }
+            }
+        }
+    }
+
+    // Anything left unvisited after a `break` is still owed a report row.
+    pad_skipped(&mut items, &request.file_paths);
+
+    // Release the run id. Without this, a plain editor save made after the batch
+    // finishes would be journaled under this batch's run and get rolled back by
+    // a later "undo this batch". `agent_chat` gets away with never clearing only
+    // because its next invocation overwrites the slot.
+    crate::llm::tool_hooks::clear_current_run_id();
+
+    crate::chat_file_log::log_agent(&format!(
+        "batch_complete run={} total={} ok={} err={} cancelled={}",
+        run_id, total, succeeded, failed, cancelled
+    ));
+
+    Ok(super::BatchAgentReport {
+        run_id,
+        total,
+        succeeded,
+        failed,
+        items,
+        cancelled,
+    })
+}
+
+/// Per-note progress so the UI can show 「正在处理 3/12：xxx.md」.
+/// Goes through `emit_agent_event` rather than a raw `app.emit` so the payload
+/// is run-id stamped exactly like every other agent event.
+fn emit_batch_progress(
+    app: &tauri::AppHandle,
+    index: usize,
+    total: usize,
+    file_path: &str,
+    status: &str,
+) {
+    llm::emit_agent_event(app, llm::AgentEvent::BatchProgress {
+        index,
+        total,
+        file_path: file_path.to_string(),
+        status: status.to_string(),
+    });
 }
 
 /// Cancel the currently-running agent turn.
@@ -1455,5 +1731,131 @@ mod rag_search_rerank_tests {
             plain.iter().map(|r| &r.file_path).collect::<Vec<_>>(),
             "Off must reproduce the plain FTS order for RAG"
         );
+    }
+}
+
+/// The batch command's pure pieces. The agent turn itself needs a live Tauri
+/// runtime and a reachable model, so it is verified by reading the code path;
+/// what *is* testable here is everything that can silently corrupt a report:
+/// UTF-8 truncation and the skipped/cancelled bookkeeping.
+#[cfg(test)]
+mod batch_agent_tests {
+    use super::*;
+
+    fn paths(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("笔记-{}.md", i)).collect()
+    }
+
+    fn ok_item(p: &str) -> super::super::BatchAgentItem {
+        super::super::BatchAgentItem {
+            file_path: p.to_string(),
+            status: "ok".to_string(),
+            summary: Some("已处理".to_string()),
+            error: None,
+        }
+    }
+
+    /// Byte-slicing a Chinese summary panics; char-slicing must not.
+    #[test]
+    fn summary_truncation_is_char_based_not_byte_based() {
+        // 10 chars, 30 bytes — a byte-based `&s[..4]` would split a codepoint.
+        let zh = "一二三四五六七八九十";
+        assert_eq!(truncate_chars(zh, 4), "一二三四…");
+        assert_eq!(truncate_chars(zh, 10), zh, "exactly at the limit must not gain an ellipsis");
+        assert_eq!(truncate_chars(zh, 99), zh);
+        assert_eq!(truncate_chars("", 5), "");
+
+        // The ellipsis is the only thing appended, so the kept prefix is exact.
+        let cut = truncate_chars(zh, 3);
+        assert_eq!(cut.chars().count(), 4);
+    }
+
+    /// A grapheme cluster made of multiple codepoints is still safe to cut —
+    /// the result may look odd but must never panic or emit invalid UTF-8.
+    #[test]
+    fn truncation_survives_multi_codepoint_content() {
+        let mixed = "note 混合 🇨🇳 内容";
+        for n in 0..mixed.chars().count() + 2 {
+            let out = truncate_chars(mixed, n);
+            assert!(out.is_char_boundary(out.len()));
+        }
+    }
+
+    /// Every selected note owes exactly one row, even when the loop broke early.
+    #[test]
+    fn pad_skipped_completes_the_report_after_an_early_break() {
+        let all = paths(5);
+        let mut items = vec![ok_item(&all[0]), ok_item(&all[1])];
+
+        pad_skipped(&mut items, &all);
+
+        assert_eq!(items.len(), all.len(), "one row per selected note");
+        assert_eq!(
+            items.iter().map(|i| i.status.as_str()).collect::<Vec<_>>(),
+            vec!["ok", "ok", "skipped", "skipped", "skipped"]
+        );
+        // Order must match the selection order so the UI can zip them.
+        assert_eq!(
+            items.iter().map(|i| i.file_path.clone()).collect::<Vec<_>>(),
+            all
+        );
+        // Skipped rows carry neither a summary nor an error.
+        for it in items.iter().skip(2) {
+            assert!(it.summary.is_none() && it.error.is_none());
+        }
+    }
+
+    /// Idempotent: a batch that ran to completion must not grow extra rows.
+    #[test]
+    fn pad_skipped_is_a_noop_when_every_note_already_reported() {
+        let all = paths(3);
+        let mut items: Vec<_> = all.iter().map(|p| ok_item(p)).collect();
+
+        pad_skipped(&mut items, &all);
+
+        assert_eq!(items.len(), 3);
+        assert!(items.iter().all(|i| i.status == "ok"));
+    }
+
+    /// An empty selection is a valid, non-error batch: zero rows, zero panics.
+    #[test]
+    fn pad_skipped_handles_an_empty_selection() {
+        let mut items: Vec<super::super::BatchAgentItem> = Vec::new();
+        pad_skipped(&mut items, &[]);
+        assert!(items.is_empty());
+    }
+
+    /// Absolute paths are honoured; relative ones resolve under the vault.
+    /// Getting this backwards would make the batch read the wrong note.
+    #[test]
+    fn note_paths_resolve_relative_to_the_vault_unless_absolute() {
+        let vault = if cfg!(windows) { r"D:\vault" } else { "/vault" };
+
+        let rel = resolve_note_path(vault, "子目录/笔记.md");
+        assert!(rel.starts_with(vault), "relative paths must land inside the vault");
+        assert!(rel.ends_with("笔记.md"));
+
+        let abs_input = if cfg!(windows) { r"E:\other\笔记.md" } else { "/other/笔记.md" };
+        let abs = resolve_note_path(vault, abs_input);
+        assert_eq!(abs, std::path::PathBuf::from(abs_input));
+        assert!(!abs.starts_with(vault));
+    }
+
+    /// The `batch_progress` payload is what drives 「正在处理 3/12」, so its
+    /// wire shape is part of the frontend contract.
+    #[test]
+    fn batch_progress_serializes_with_the_expected_wire_shape() {
+        let ev = llm::AgentEvent::BatchProgress {
+            index: 3,
+            total: 12,
+            file_path: "收件箱/笔记.md".to_string(),
+            status: "start".to_string(),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["type"], "batch_progress");
+        assert_eq!(v["index"], 3);
+        assert_eq!(v["total"], 12);
+        assert_eq!(v["file_path"], "收件箱/笔记.md");
+        assert_eq!(v["status"], "start");
     }
 }
