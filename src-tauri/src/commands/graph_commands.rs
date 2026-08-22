@@ -220,12 +220,12 @@ pub async fn explain_relationship(
         // Shared tags
         let mut shared = Vec::new();
         let tags_a: Option<String> = conn.query_row(
-            "SELECT tags_json FROM ai_note_metadata WHERE file_path = ?1",
+            "SELECT tags FROM card_meta WHERE file_path = ?1",
             rusqlite::params![note_a],
             |row| row.get(0),
         ).ok();
         let tags_b: Option<String> = conn.query_row(
-            "SELECT tags_json FROM ai_note_metadata WHERE file_path = ?1",
+            "SELECT tags FROM card_meta WHERE file_path = ?1",
             rusqlite::params![note_b],
             |row| row.get(0),
         ).ok();

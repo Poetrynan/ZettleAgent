@@ -14,8 +14,20 @@ const GREETINGS: &[&str] = &[
 /// model itself decides — so a friendly "你好" can never trigger a random
 /// tool call like `get_vault_stats` just because the tool was available.
 pub fn is_greeting_or_chitchat(query: &str) -> bool {
-    let lower = query.trim().to_lowercase();
-    GREETINGS.iter().any(|g| lower == *g || lower.starts_with(*g))
+    let trimmed = query.trim().to_lowercase();
+    GREETINGS.iter().any(|g| {
+        if trimmed == *g {
+            return true;
+        }
+        if let Some(rest) = trimmed.strip_prefix(*g) {
+            let rest = rest.trim();
+            rest.is_empty()
+                || rest.starts_with(['!', '?', '.', '~', '！', '？', '。', '～', '，', ',', '、', ' '])
+                    && !rest.chars().any(|c| c.is_alphanumeric() || c >= '\u{4e00}' && c <= '\u{9fa5}')
+        } else {
+            false
+        }
+    })
 }
 
 /// Classify whether a query is simple (can be answered directly) or complex (needs planning).

@@ -5,18 +5,21 @@
  */
 use super::{ChatMessage, LlmConfig, ToolDef};
 
-/// Estimate token count from text (rough heuristic: ~4 chars per token for English, ~2 for CJK).
+/// Estimate token count from text (rough heuristic: ~4 chars per token for English/ASCII, ~1.8 tokens per CJK char).
 pub fn estimate_tokens(text: &str) -> usize {
-    let mut tokens = 0;
+    if text.is_empty() {
+        return 0;
+    }
+    let mut tokens: f64 = 0.0;
     for ch in text.chars() {
         if ch.is_ascii() {
-            tokens += 1;
+            tokens += 0.25;
         } else {
-            tokens += 2; // CJK characters are roughly 2 tokens
+            tokens += 1.8;
         }
     }
     // Add overhead for message framing
-    tokens / 4 + 10
+    tokens.ceil() as usize + 4
 }
 
 // ── Budget accounting ──────────────────────────────────────────────

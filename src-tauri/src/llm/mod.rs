@@ -2476,7 +2476,7 @@ where
 
                 let needs_approval = decision == approval::ApprovalDecision::Ask;
                 let approval_id = if needs_approval {
-                    format!("approval-{}-{}", tc_name, std::time::SystemTime::now()
+                    format!("approval-{}-{}-{}", tc_name, tc_id, std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_millis())
