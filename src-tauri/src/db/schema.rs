@@ -251,6 +251,22 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // GraphRAG community summaries for global knowledge graph search
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS graph_communities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            community_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            keywords TEXT,
+            node_count INTEGER NOT NULL DEFAULT 0,
+            member_paths TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );",
+        [],
+    )?;
+
     // File-level mean-pooled embedding vectors for efficient KNN
     // Used by compute_and_store_semantic_edges to avoid O(n^2) brute-force
     conn.execute(

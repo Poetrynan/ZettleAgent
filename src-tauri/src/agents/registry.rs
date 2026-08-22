@@ -186,8 +186,8 @@ mod tests {
             assert!(!agent.allow_extension_tools, "{id} must stay closed");
         }
         // Sizes are asserted separately so a shrink shows up as its own failure.
-        assert_eq!(KNOWLEDGE_TOOLS.len(), 38);
-        assert_eq!(CREATOR_TOOLS.len(), 26);
-        assert_eq!(CURATOR_TOOLS.len(), 39);
+        assert_eq!(KNOWLEDGE_TOOLS.len(), 41);
+        assert_eq!(CREATOR_TOOLS.len(), 29);
+        assert_eq!(CURATOR_TOOLS.len(), 42);
     }
 }

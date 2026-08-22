@@ -424,14 +424,14 @@ pub(super) fn execute_search_by_tag(
 
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
 
-    // Search in ai_note_metadata.tags_json (stored as JSON array of strings)
+    // Search in card_meta.tags (stored as JSON array of strings)
     let pattern = format!("%{}%", escape_like_pattern(&tag.to_lowercase()));
     let mut stmt = conn.prepare(
         "SELECT am.file_path, COALESCE(f.title, '') as title, 
-                COALESCE(am.note_type, '') as note_type, am.tags_json
-         FROM ai_note_metadata am
+                COALESCE(am.note_type, '') as note_type, am.tags
+         FROM card_meta am
          LEFT JOIN files f ON f.path = am.file_path
-         WHERE LOWER(am.tags_json) LIKE ?1 ESCAPE '\'
+         WHERE LOWER(am.tags) LIKE ?1 ESCAPE '\\'
          ORDER BY f.title
          LIMIT 50"
     )?;

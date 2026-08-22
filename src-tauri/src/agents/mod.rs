@@ -34,6 +34,7 @@ pub const KNOWLEDGE_TOOLS: &[&str] = &[
     "explain_relationship",                       // LLM-powered relationship explanation
     "extract_facts", "query_temporal", "batch_link_notes", "compare_notes",
     "ocr_image",
+    "query_graph_communities", "generate_community_summaries", "compile_canvas_to_note",
 ];
 
 pub const CREATOR_TOOLS: &[&str] = &[
@@ -50,6 +51,7 @@ pub const CREATOR_TOOLS: &[&str] = &[
     "get_directory_tree",                         // Browse vault structure
     "resolve_wikilink",                           // Resolve links before creating
     "add_relation",                               // Create relations when adding notes
+    "generate_canvas_from_notes", "compile_canvas_to_note", "query_graph_communities",
 ];
 
 pub const CURATOR_TOOLS: &[&str] = &[
@@ -72,4 +74,5 @@ pub const CURATOR_TOOLS: &[&str] = &[
     "get_embedding_status", "trigger_sync", "rebuild_semantic_edges", // Index management
     "batch_link_notes", "compare_notes",
     "ocr_image",
+    "generate_community_summaries", "compile_canvas_to_note", "generate_canvas_from_notes",
 ];

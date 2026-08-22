@@ -1342,6 +1342,96 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
+        // Compile Canvas to Note (Bidirectional Compilation)
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "compile_canvas_to_note".to_string(),
+                description: "Compile a visual .canvas whiteboard file into a structured Markdown MOC note, preserving groups, card relationships, and DAG topological logic. Can write to an output note or return markdown directly.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "canvas_path": {
+                            "type": "string",
+                            "description": "Path to the source .canvas file"
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Optional path where the compiled .md note should be saved. If omitted, returns markdown text."
+                        }
+                    },
+                    "required": ["canvas_path"]
+                }),
+            },
+        },
+        // Generate Canvas from Notes (Bidirectional Compilation)
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "generate_canvas_from_notes".to_string(),
+                description: "Generate an interactive .canvas whiteboard from a list of notes or outline topics, calculating 2D spatial coordinates, color encoding, and semantic connections.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "canvas_path": {
+                            "type": "string",
+                            "description": "Path where the .canvas file will be created"
+                        },
+                        "notes": {
+                            "type": "array",
+                            "description": "Array of note file paths or objects with { 'file'?: string, 'text'?: string }",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "layout": {
+                            "type": "string",
+                            "enum": ["grid", "pipeline", "hierarchy"],
+                            "description": "Layout strategy: 'grid' (default), 'pipeline' (sequential reasoning), or 'hierarchy' (tree)"
+                        }
+                    },
+                    "required": ["canvas_path", "notes"]
+                }),
+            },
+        },
+        // GraphRAG Generate Community Summaries
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "generate_community_summaries".to_string(),
+                description: "Run community detection on the knowledge graph (topology + PageRank + tags) and generate/update global community summaries for macro-level knowledge discovery.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "min_community_size": {
+                            "type": "integer",
+                            "description": "Minimum number of notes required to form a community cluster (default: 2)"
+                        }
+                    }
+                }),
+            },
+        },
+        // GraphRAG Query Communities
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "query_graph_communities".to_string(),
+                description: "Query precomputed GraphRAG knowledge graph community summaries for macro-level topic synthesis and high-level conceptual overviews.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The macro topic or question to query across knowledge graph communities"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of community summaries to return (default: 5)"
+                        }
+                    }
+                }),
+            },
+        },
     ]
 }
 
@@ -1447,6 +1537,14 @@ pub async fn try_execute(
         "extract_pdf_text" => Some(note_ops::execute_extract_pdf_text(arguments, vault_path, all_vault_paths)),
         "get_note_history" => Some(note_ops::execute_get_note_history(arguments, db, vault_path, all_vault_paths)),
         "revert_note" => Some(note_ops::execute_revert_note(arguments, db, vault_path, all_vault_paths)),
+
+        // Canvas Bidirectional Compilation
+        "compile_canvas_to_note" => Some(canvas_ops::execute_compile_canvas_to_note(arguments, vault_path, db, all_vault_paths)),
+        "generate_canvas_from_notes" => Some(canvas_ops::execute_generate_canvas_from_notes(arguments, vault_path, all_vault_paths)),
+
+        // GraphRAG Communities
+        "generate_community_summaries" => Some(graph_ops::execute_generate_community_summaries(arguments, db)),
+        "query_graph_communities" => Some(graph_ops::execute_query_graph_communities(arguments, db)),
 
         _ => None,
     };

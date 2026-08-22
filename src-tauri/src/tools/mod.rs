@@ -62,6 +62,11 @@ pub const CORE_TOOLS: &[&str] = &[
     // leaving them out would only create an inconsistency.
     "web_search",            // internal_tools/web_ops.rs:6
     "fetch_web_content",     // internal_tools/web_ops.rs (execute_fetch_web_content)
+    // Canvas & GraphRAG (Phase 3 Core Capabilities)
+    "compile_canvas_to_note",
+    "generate_canvas_from_notes",
+    "query_graph_communities",
+    "generate_community_summaries",
     // Escape hatch — how the model reaches the other ~40 tools.
     LIST_AVAILABLE_TOOLS,
 ];

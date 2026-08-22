@@ -495,6 +495,10 @@ pub(super) fn execute_rename_note(
     if !is_path_in_any_vault(&old_canonical, vault_path, all_vault_paths) {
         anyhow::bail!("Access denied: source path is outside all vaults");
     }
+    let new_containment = resolve_for_containment(&new_full);
+    if !is_path_in_any_vault(&new_containment, vault_path, all_vault_paths) {
+        anyhow::bail!("Access denied: target path is outside all vaults");
+    }
 
     // Create parent dir for new path if needed
     if let Some(parent) = new_full.parent() {
@@ -832,6 +836,10 @@ pub(super) fn execute_move_note(
     // Try to resolve destination directory against all vaults
     let dest_dir = resolve_path_multi_vault(destination, vault_path, all_vault_paths)
         .unwrap_or_else(|_| std::path::PathBuf::from(vault_path).join(destination));
+    let dest_containment = resolve_for_containment(&dest_dir);
+    if !is_path_in_any_vault(&dest_containment, vault_path, all_vault_paths) {
+        anyhow::bail!("Access denied: destination directory is outside all vaults");
+    }
     // Create destination directory if needed
     std::fs::create_dir_all(&dest_dir)?;
 
@@ -1164,7 +1172,7 @@ pub(super) async fn execute_generate_structure_note(
             ).unwrap_or_default();
             
             let tags: String = conn.query_row(
-                "SELECT COALESCE(tags_json, '[]') FROM ai_note_metadata WHERE file_path = ?1",
+                "SELECT COALESCE(tags, '[]') FROM card_meta WHERE file_path = ?1",
                 rusqlite::params![r.file_path],
                 |row| row.get(0),
             ).unwrap_or_else(|_| "[]".to_string());

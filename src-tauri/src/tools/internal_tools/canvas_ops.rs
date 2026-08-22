@@ -948,3 +948,309 @@ pub(super) fn execute_arrange_canvas_by(
         "message": format!("Successfully arranged canvas using '{}' layout strategy", strategy)
     }).to_string())
 }
+
+// ── Canvas Bidirectional Compilation Operations ─────────────────────────
+
+pub(super) fn execute_compile_canvas_to_note(
+    arguments: &str,
+    vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
+    all_vault_paths: &[String],
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let canvas_path = args["canvas_path"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'canvas_path' parameter"))?;
+    let output_path = args["output_path"].as_str();
+
+    let canonical = resolve_canvas_path(canvas_path, vault_path, all_vault_paths)?;
+    if !canonical.exists() {
+        anyhow::bail!("Canvas file not found at {:?}", canonical);
+    }
+
+    let content = std::fs::read_to_string(&canonical)?;
+    let canvas: crate::canvas::Canvas = serde_json::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse canvas JSON: {}", e))?;
+
+    let mut doc = String::new();
+    let title = std::path::Path::new(canvas_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Canvas Synthesis");
+    
+    doc.push_str(&format!("# MOC: {}\n\n", title));
+    doc.push_str(&format!("> 💡 本笔记由白板 `{}` 自动编译生成，包含 {} 个节点和 {} 条语义关联。\n\n", canvas_path, canvas.nodes.len(), canvas.edges.len()));
+
+    // 1. Separate groups and loose nodes
+    let mut groups = Vec::new();
+    let mut non_groups = Vec::new();
+
+    for node in &canvas.nodes {
+        match node {
+            crate::canvas::Node::Group { id, x, y, width, height, label, .. } => {
+                groups.push((id.clone(), *x, *y, *width, *height, label.clone().unwrap_or_else(|| "分组".to_string())));
+            }
+            other => non_groups.push(other),
+        }
+    }
+
+    // 2. Map nodes into groups (by bounding box containment)
+    let mut group_members: std::collections::HashMap<String, Vec<&crate::canvas::Node>> = std::collections::HashMap::new();
+    let mut loose_nodes: Vec<&crate::canvas::Node> = Vec::new();
+
+    for node in &non_groups {
+        let (nx, ny, nw, nh) = match node {
+            crate::canvas::Node::File { x, y, width, height, .. } |
+            crate::canvas::Node::Text { x, y, width, height, .. } |
+            crate::canvas::Node::Link { x, y, width, height, .. } => (*x, *y, *width, *height),
+            _ => (0, 0, 0, 0),
+        };
+        let cx = nx + nw / 2;
+        let cy = ny + nh / 2;
+
+        let mut assigned = false;
+        for (gid, gx, gy, gw, gh, _) in &groups {
+            if cx >= *gx && cx <= (*gx + *gw) && cy >= *gy && cy <= (*gy + *gh) {
+                group_members.entry(gid.clone()).or_default().push(node);
+                assigned = true;
+                break;
+            }
+        }
+        if !assigned {
+            loose_nodes.push(node);
+        }
+    }
+
+    // 3. Render Groups
+    if !groups.is_empty() {
+        doc.push_str("## 结构化知识模块 (Groups)\n\n");
+        for (gid, _, _, _, _, label) in &groups {
+            doc.push_str(&format!("### {}\n\n", label));
+            if let Some(members) = group_members.get(gid) {
+                for m in members {
+                    match m {
+                        crate::canvas::Node::File { file, .. } => {
+                            let note_name = std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+                            doc.push_str(&format!("- **核心卡片**: [[{}]]\n", note_name));
+                        }
+                        crate::canvas::Node::Text { text, .. } => {
+                            doc.push_str(&format!("- **关键论点**: {}\n", text.replace('\n', " ")));
+                        }
+                        crate::canvas::Node::Link { url, .. } => {
+                            doc.push_str(&format!("- **参考外链**: [{}]({})\n", url, url));
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                doc.push_str("*（暂无卡片）*\n");
+            }
+            doc.push('\n');
+        }
+    }
+
+    // 4. Render Loose Nodes
+    if !loose_nodes.is_empty() {
+        doc.push_str("## 核心概念与原子卡片\n\n");
+        for node in &loose_nodes {
+            match node {
+                crate::canvas::Node::File { file, .. } => {
+                    let note_name = std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+                    doc.push_str(&format!("- [[{}]]\n", note_name));
+                }
+                crate::canvas::Node::Text { text, .. } => {
+                    doc.push_str(&format!("> {}\n\n", text));
+                }
+                crate::canvas::Node::Link { url, .. } => {
+                    doc.push_str(&format!("- 外链: [{}]({})\n", url, url));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 5. Render Relationships from Edges
+    if !canvas.edges.is_empty() {
+        doc.push_str("## 空间推理与逻辑链 (Relationships)\n\n");
+        let node_label_map: std::collections::HashMap<String, String> = canvas.nodes.iter().map(|n| {
+            let (id, lbl) = match n {
+                crate::canvas::Node::File { id, file, .. } => {
+                    let stem = std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+                    (id.clone(), format!("[[{}]]", stem))
+                }
+                crate::canvas::Node::Text { id, text, .. } => {
+                    let preview: String = text.chars().take(20).collect();
+                    (id.clone(), format!("\"{}\"", preview))
+                }
+                crate::canvas::Node::Link { id, url, .. } => (id.clone(), url.clone()),
+                crate::canvas::Node::Group { id, label, .. } => (id.clone(), format!("【{}】", label.as_deref().unwrap_or("分组"))),
+            };
+            (id, lbl)
+        }).collect();
+
+        for edge in &canvas.edges {
+            let from_lbl = node_label_map.get(&edge.from_node).cloned().unwrap_or_else(|| edge.from_node.clone());
+            let to_lbl = node_label_map.get(&edge.to_node).cloned().unwrap_or_else(|| edge.to_node.clone());
+            let rel_desc = edge.label.as_deref().unwrap_or("关联 / 衍生");
+            doc.push_str(&format!("- {} ───({})───► {}\n", from_lbl, rel_desc, to_lbl));
+        }
+        doc.push('\n');
+    }
+
+    // 6. Write output if requested
+    if let Some(out_rel) = output_path {
+        let out_canonical = super::helpers::resolve_path_multi_vault(out_rel, vault_path, all_vault_paths)
+            .unwrap_or_else(|_| std::path::PathBuf::from(vault_path).join(out_rel));
+        let out_containment = super::helpers::resolve_for_containment(&out_canonical);
+        if !super::helpers::is_path_in_any_vault(&out_containment, vault_path, all_vault_paths) {
+            anyhow::bail!("Access denied: output path is outside all vaults");
+        }
+        if let Some(parent) = out_canonical.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let snapshot_id = super::helpers::snapshot_before_write(db, &out_canonical).ok().flatten();
+        crate::file_lock::safe_write(&out_canonical, &doc)?;
+        super::helpers::journal_write(
+            db,
+            "compile_canvas_to_note",
+            "write",
+            &super::helpers::snapshot_path_key(&out_canonical),
+            None,
+            snapshot_id,
+            None,
+        );
+        return Ok(json!({
+            "success": true,
+            "canvas_path": canvas_path,
+            "output_path": out_rel,
+            "markdown_length": doc.len(),
+            "message": format!("Successfully compiled canvas to note at '{}'", out_rel)
+        }).to_string());
+    }
+
+    Ok(json!({
+        "success": true,
+        "canvas_path": canvas_path,
+        "markdown_content": doc
+    }).to_string())
+}
+
+pub(super) fn execute_generate_canvas_from_notes(
+    arguments: &str,
+    vault_path: &str,
+    all_vault_paths: &[String],
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let canvas_path = args["canvas_path"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'canvas_path' parameter"))?;
+    let notes = args["notes"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Missing 'notes' array parameter"))?;
+    let layout = args["layout"].as_str().unwrap_or("grid");
+
+    let canonical = resolve_canvas_path(canvas_path, vault_path, all_vault_paths)?;
+    if let Some(parent) = canonical.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let node_width = 320;
+    let node_height = 200;
+    let spacing_x = 80;
+    let spacing_y = 60;
+    let cols = match layout {
+        "pipeline" => 1,
+        "hierarchy" => 3,
+        _ => 4, // grid
+    };
+
+    let mut canvas_nodes = Vec::new();
+    let mut canvas_edges = Vec::new();
+    let mut prev_id: Option<String> = None;
+
+    for (idx, item) in notes.iter().enumerate() {
+        let id = format!("node-{}", uuid::Uuid::new_v4().simple());
+        let col = (idx % cols) as i32;
+        let row = (idx / cols) as i32;
+        let x = col * (node_width + spacing_x);
+        let y = row * (node_height + spacing_y);
+
+        if let Some(file_str) = item.as_str() {
+            canvas_nodes.push(crate::canvas::Node::File {
+                id: id.clone(),
+                x,
+                y,
+                width: node_width,
+                height: node_height,
+                file: file_str.to_string(),
+                subpath: None,
+                color: Some(match idx % 4 {
+                    0 => "1".to_string(),
+                    1 => "2".to_string(),
+                    2 => "4".to_string(),
+                    _ => "5".to_string(),
+                }),
+            });
+        } else if let Some(obj) = item.as_object() {
+            let text = obj.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let file = obj.get("file").and_then(|f| f.as_str());
+            if let Some(f) = file {
+                canvas_nodes.push(crate::canvas::Node::File {
+                    id: id.clone(),
+                    x,
+                    y,
+                    width: node_width,
+                    height: node_height,
+                    file: f.to_string(),
+                    subpath: None,
+                    color: Some("1".to_string()),
+                });
+            } else {
+                canvas_nodes.push(crate::canvas::Node::Text {
+                    id: id.clone(),
+                    x,
+                    y,
+                    width: node_width,
+                    height: node_height,
+                    text: text.to_string(),
+                    color: Some("3".to_string()),
+                });
+            }
+        }
+
+        // Connect sequential pipeline edges if in pipeline/hierarchy mode
+        if layout == "pipeline" || layout == "hierarchy" {
+            if let Some(ref pid) = prev_id {
+                canvas_edges.push(crate::canvas::Edge {
+                    id: format!("edge-{}", uuid::Uuid::new_v4().simple()),
+                    from_node: pid.clone(),
+                    from_side: Some("right".to_string()),
+                    from_end: None,
+                    to_node: id.clone(),
+                    to_side: Some("left".to_string()),
+                    to_end: None,
+                    color: None,
+                    label: Some(if layout == "pipeline" { "递进" } else { "推演" }.to_string()),
+                });
+            }
+        }
+        prev_id = Some(id);
+    }
+
+    let canvas = crate::canvas::Canvas {
+        nodes: canvas_nodes,
+        edges: canvas_edges,
+    };
+
+    let canvas_json = serde_json::to_string_pretty(&canvas)?;
+    crate::file_lock::safe_write(&canonical, &canvas_json)?;
+
+    Ok(json!({
+        "success": true,
+        "canvas_path": canvas_path,
+        "nodes_created": canvas.nodes.len(),
+        "edges_created": canvas.edges.len(),
+        "layout": layout,
+        "message": format!("Successfully generated canvas with {} nodes at '{}'", canvas.nodes.len(), canvas_path)
+    }).to_string())
+}

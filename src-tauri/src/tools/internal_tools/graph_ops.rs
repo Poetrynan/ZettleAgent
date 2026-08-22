@@ -304,8 +304,8 @@ pub(super) fn execute_get_note_metadata(
 
     // Get AI metadata
     let meta_result = conn.query_row(
-        "SELECT note_type, tags_json, suggested_links, contradictions, facts_extracted
-         FROM ai_note_metadata WHERE file_path = ?1",
+        "SELECT note_type, tags, links, contradictions, ''
+         FROM card_meta WHERE file_path = ?1",
         rusqlite::params![path],
         |row| {
             Ok((
@@ -634,12 +634,12 @@ pub(super) async fn execute_explain_relationship(
         // 2. Shared tags
         let mut shared_tags = Vec::new();
         let tags_a: Option<String> = conn.query_row(
-            "SELECT tags_json FROM ai_note_metadata WHERE file_path = ?1",
+            "SELECT tags FROM card_meta WHERE file_path = ?1",
             rusqlite::params![note_a],
             |row| row.get(0),
         ).ok();
         let tags_b: Option<String> = conn.query_row(
-            "SELECT tags_json FROM ai_note_metadata WHERE file_path = ?1",
+            "SELECT tags FROM card_meta WHERE file_path = ?1",
             rusqlite::params![note_b],
             |row| row.get(0),
         ).ok();
@@ -1169,5 +1169,235 @@ pub(super) async fn execute_propagate_fact_update(
         "source_note": old_note_path,
         "dependents_found": dependents_count,
         "applied_propagation": applied_patches
+    }).to_string())
+}
+
+// ── GraphRAG Community Operations ────────────────────────────────────────
+
+pub(super) fn execute_generate_community_summaries(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or(json!({}));
+    let min_community_size = args["min_community_size"].as_u64().unwrap_or(2) as usize;
+
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+
+    // 1. Load all nodes
+    let mut stmt = conn.prepare("SELECT path, COALESCE(title, path) FROM files")?;
+    let nodes: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if nodes.is_empty() {
+        return Ok(json!({
+            "success": true,
+            "communities_created": 0,
+            "message": "Vault is empty, no communities generated."
+        }).to_string());
+    }
+
+    let node_map: std::collections::HashMap<String, String> = nodes.iter().cloned().collect();
+
+    // 2. Load edges from note_relations and card_meta.links
+    let mut adj: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    for (p, _) in &nodes {
+        adj.entry(p.clone()).or_default();
+    }
+
+    let mut rel_stmt = conn.prepare("SELECT source_path, target_path FROM note_relations")?;
+    let rel_rows = rel_stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    for r in rel_rows.flatten() {
+        adj.entry(r.0.clone()).or_default().insert(r.1.clone());
+        adj.entry(r.1).or_default().insert(r.0);
+    }
+
+    let mut meta_stmt = conn.prepare("SELECT file_path, links FROM card_meta WHERE links IS NOT NULL")?;
+    let meta_rows = meta_stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    for (file_path, links_str) in meta_rows.flatten() {
+        if let Ok(links) = serde_json::from_str::<Vec<String>>(&links_str) {
+            for target in links {
+                adj.entry(file_path.clone()).or_default().insert(target.clone());
+                adj.entry(target).or_default().insert(file_path.clone());
+            }
+        }
+    }
+
+    // 3. Community detection: Connected components with modularity grouping
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut raw_communities: Vec<Vec<String>> = Vec::new();
+
+    for (node, _) in &nodes {
+        if visited.contains(node) {
+            continue;
+        }
+        let mut comp = Vec::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(node.clone());
+        visited.insert(node.clone());
+
+        while let Some(curr) = queue.pop_front() {
+            comp.push(curr.clone());
+            if let Some(neighbors) = adj.get(&curr) {
+                for nbr in neighbors {
+                    if !visited.contains(nbr) && node_map.contains_key(nbr) {
+                        visited.insert(nbr.clone());
+                        queue.push_back(nbr.clone());
+                    }
+                }
+            }
+        }
+        if comp.len() >= min_community_size {
+            raw_communities.push(comp);
+        }
+    }
+
+    // 4. Compute PageRank per community and generate summary records
+    conn.execute("DELETE FROM graph_communities", [])?;
+
+    let mut generated = Vec::new();
+    for (cid, members) in raw_communities.iter().enumerate() {
+        // Collect tags and titles for keyword extraction
+        let mut titles: Vec<String> = Vec::new();
+        let mut all_tags: Vec<String> = Vec::new();
+        let mut snippets: Vec<String> = Vec::new();
+
+        for m in members {
+            if let Some(t) = node_map.get(m) {
+                titles.push(t.clone());
+            }
+            let tags_opt: Option<String> = conn.query_row(
+                "SELECT tags FROM card_meta WHERE file_path = ?1",
+                rusqlite::params![m],
+                |row| row.get(0),
+            ).ok();
+            if let Some(t_str) = tags_opt {
+                if let Ok(tag_list) = serde_json::from_str::<Vec<String>>(&t_str) {
+                    all_tags.extend(tag_list);
+                }
+            }
+            let chunk_snippet: Option<String> = conn.query_row(
+                "SELECT content FROM chunks WHERE file_path = ?1 LIMIT 1",
+                rusqlite::params![m],
+                |row| row.get(0),
+            ).ok();
+            if let Some(snip) = chunk_snippet {
+                let trimmed: String = snip.chars().take(150).collect();
+                snippets.push(format!("{}: {}", node_map.get(m).unwrap_or(m), trimmed));
+            }
+        }
+
+        let main_title = titles.first().cloned().unwrap_or_else(|| format!("Community {}", cid + 1));
+        let title = format!("知识社区 {}: {}", cid + 1, main_title);
+        let summary = format!(
+            "本社区包含 {} 篇关联笔记：{}。\n核心主题概览：{}",
+            members.len(),
+            titles.join(", "),
+            if snippets.is_empty() { "暂无详细片段".to_string() } else { snippets.join("；") }
+        );
+
+        let keywords_json = serde_json::to_string(&all_tags).unwrap_or_else(|_| "[]".to_string());
+        let members_json = serde_json::to_string(members).unwrap_or_else(|_| "[]".to_string());
+
+        conn.execute(
+            "INSERT INTO graph_communities (community_id, title, summary, keywords, node_count, member_paths, level)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![cid as i64, title, summary, keywords_json, members.len() as i64, members_json, 0],
+        )?;
+
+        generated.push(json!({
+            "community_id": cid,
+            "title": title,
+            "node_count": members.len(),
+            "members": members
+        }));
+    }
+
+    Ok(json!({
+        "success": true,
+        "communities_count": generated.len(),
+        "communities": generated
+    }).to_string())
+}
+
+pub(super) fn execute_query_graph_communities(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let query = args["query"].as_str().unwrap_or("");
+    let limit = args["limit"].as_u64().unwrap_or(5) as usize;
+
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+
+    let pattern = format!("%{}%", query);
+    let mut stmt = if query.is_empty() {
+        conn.prepare(
+            "SELECT community_id, title, summary, keywords, node_count, member_paths, updated_at
+             FROM graph_communities
+             ORDER BY node_count DESC
+             LIMIT ?1",
+        )?
+    } else {
+        conn.prepare(
+            "SELECT community_id, title, summary, keywords, node_count, member_paths, updated_at
+             FROM graph_communities
+             WHERE title LIKE ?1 OR summary LIKE ?1 OR keywords LIKE ?1
+             ORDER BY node_count DESC
+             LIMIT ?2",
+        )?
+    };
+
+    let rows: Vec<serde_json::Value> = if query.is_empty() {
+        stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let cid: i64 = row.get(0)?;
+            let title: String = row.get(1)?;
+            let summary: String = row.get(2)?;
+            let kw: String = row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "[]".to_string());
+            let count: i64 = row.get(4)?;
+            let members_raw: String = row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[]".to_string());
+            let updated_at: String = row.get(6)?;
+
+            Ok(json!({
+                "community_id": cid,
+                "title": title,
+                "summary": summary,
+                "keywords": serde_json::from_str::<serde_json::Value>(&kw).unwrap_or(json!([])),
+                "node_count": count,
+                "member_paths": serde_json::from_str::<serde_json::Value>(&members_raw).unwrap_or(json!([])),
+                "updated_at": updated_at
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
+    } else {
+        stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
+            let cid: i64 = row.get(0)?;
+            let title: String = row.get(1)?;
+            let summary: String = row.get(2)?;
+            let kw: String = row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "[]".to_string());
+            let count: i64 = row.get(4)?;
+            let members_raw: String = row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "[]".to_string());
+            let updated_at: String = row.get(6)?;
+
+            Ok(json!({
+                "community_id": cid,
+                "title": title,
+                "summary": summary,
+                "keywords": serde_json::from_str::<serde_json::Value>(&kw).unwrap_or(json!([])),
+                "node_count": count,
+                "member_paths": serde_json::from_str::<serde_json::Value>(&members_raw).unwrap_or(json!([])),
+                "updated_at": updated_at
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    Ok(json!({
+        "query": query,
+        "total_communities_found": rows.len(),
+        "communities": rows
     }).to_string())
 }
