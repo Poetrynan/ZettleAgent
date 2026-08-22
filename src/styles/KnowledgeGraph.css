@@ -174,10 +174,11 @@
   box-shadow: var(--kg-shadow-sm), inset 0 1px 0 var(--kg-glass-highlight, rgba(255, 255, 255, 0.08));
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--kg-text);
-  width: 520px;
-  max-width: calc(100% - 24px);
+  width: auto;
+  min-width: 380px;
+  max-width: min(640px, calc(100% - 24px));
   z-index: 10;
   overflow: hidden;
   transition: width 0.25s ease, max-width 0.25s ease;
@@ -188,8 +189,9 @@
 }
 
 .kg-bottom-panel--collapsed {
-  width: 120px;
-  max-width: 120px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
 }
 
 /* ── HUD Toggle Header ──────────────────────────────────────────────── */
@@ -1176,6 +1178,122 @@
   flex-direction: column;
   gap: 12px;
   animation: kg-bubble-pop 180ms ease-out forwards;
+}
+
+/* ── Island Bar Main Row ────────────────────────────────────────────── */
+.kg-island-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.kg-stat-capsule {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--kg-text);
+  background: var(--kg-chip-bg);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--kg-border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.kg-stat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.kg-stat-dot--notes {
+  background: #3B82F6;
+}
+.kg-stat-dot--links {
+  background: #10B981;
+}
+.kg-stat-dot--semantic {
+  background: #8B5CF6;
+}
+
+.kg-stat-sep {
+  opacity: 0.35;
+  font-size: 10px;
+  margin: 0 1px;
+}
+
+.kg-island-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.kg-ai-explain-btn--global {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(59, 130, 246, 0.18)) !important;
+  border-color: rgba(139, 92, 246, 0.35) !important;
+  color: #8b5cf6 !important;
+}
+.dark .kg-ai-explain-btn--global {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(59, 130, 246, 0.28)) !important;
+  color: #c084fc !important;
+}
+
+/* ── Tabbed Settings Popover ────────────────────────────────────────── */
+.kg-settings-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--kg-chip-bg);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid var(--kg-border);
+}
+
+.kg-settings-tab-btn {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--kg-text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.kg-settings-tab-btn:hover {
+  color: var(--kg-text);
+  background: var(--kg-hover);
+}
+
+.kg-settings-tab-btn.active {
+  color: var(--kg-text);
+  font-weight: 600;
+  background: var(--kg-surface-solid);
+  box-shadow: var(--kg-shadow-sm);
+}
+
+.kg-settings-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: kg-tab-fade 150ms ease-out forwards;
+}
+
+@keyframes kg-tab-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .kg-settings-popover-title {

@@ -174,6 +174,7 @@ export function GraphHud({
   const inlinePaths = hasMore ? state.vaultPaths.slice(0, MAX_INLINE) : (state.vaultPaths || []);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'filter' | 'legend' | 'forces'>('filter');
   const [showHelp, setShowHelp] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -244,33 +245,32 @@ export function GraphHud({
   };
 
   const handleExplainCluster = async () => {
-    if (selectedCluster === null || isSummarizing) return;
-    
-    // Find active notes in the cluster
-    const clusterNodes = rawGraphData.nodes.filter(
-      n => n.cluster === selectedCluster
-    );
-    
-    if (clusterNodes.length === 0) {
-      setAiSummary(isZh ? "当前聚类没有活跃笔记。" : "No active notes in this cluster.");
-      return;
-    }
-    
+    if (isSummarizing) return;
     setIsSummarizing(true);
     setAiSummary(null);
-    
-    const clusterInfo = clusterNodes.map(n => ({
-      title: n.label,
-      type: n.note_type || 'unknown',
-      importance: Math.round((n.pagerank ?? 0) * 100) / 100,
-    })).slice(0, 30);
-    const methodology = state.methodology || 'zettelkasten';
-    const hubNode = clusterInfo.reduce((max, n) => n.importance > max.importance ? n : max, clusterInfo[0]);
-    const typeBreakdown = clusterInfo.reduce((acc, n) => { acc[n.type] = (acc[n.type] || 0) + 1; return acc; }, {} as Record<string, number>);
-    const typeSummary = Object.entries(typeBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t}:${c}`).join(', ');
 
-    const prompt = isZh
-      ? `你是一个${methodology.toUpperCase()}知识管理体系的专家。以下是知识图谱中一个聚类（第${selectedCluster}簇）的笔记信息：
+    const methodology = state.methodology || 'zettelkasten';
+    const nodes = rawGraphData.nodes || [];
+
+    if (selectedCluster !== null) {
+      // ── Specific Cluster Interpretation ──
+      const clusterNodes = nodes.filter(n => n.cluster === selectedCluster);
+      if (clusterNodes.length === 0) {
+        setAiSummary(isZh ? "当前聚类没有活跃笔记。" : "No active notes in this cluster.");
+        setIsSummarizing(false);
+        return;
+      }
+      const clusterInfo = clusterNodes.map(n => ({
+        title: n.label,
+        type: n.note_type || 'unknown',
+        importance: Math.round((n.pagerank ?? 0) * 100) / 100,
+      })).slice(0, 30);
+      const hubNode = clusterInfo.reduce((max, n) => n.importance > max.importance ? n : max, clusterInfo[0]);
+      const typeBreakdown = clusterInfo.reduce((acc, n) => { acc[n.type] = (acc[n.type] || 0) + 1; return acc; }, {} as Record<string, number>);
+      const typeSummary = Object.entries(typeBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${t}:${c}`).join(', ');
+
+      const prompt = isZh
+        ? `你是一个${methodology.toUpperCase()}知识管理体系的专家。以下是知识图谱中第${selectedCluster}簇的笔记信息：
 
 笔记列表（共${clusterInfo.length}篇）：
 ${clusterInfo.map(n => `- 《${n.title}》类型:${n.type} 重要度:${n.importance}`).join('\n')}
@@ -279,7 +279,7 @@ ${clusterInfo.map(n => `- 《${n.title}》类型:${n.type} 重要度:${n.importa
 核心枢纽：《${hubNode.title}》（重要度最高）
 
 请用简短精炼的语言（不超过60字）概括这个聚类的核心主题，并指出最关键的枢纽笔记和一条拓展建议。格式：核心主题｜枢纽：《标题》｜建议：一句话。不要包含前导词。`
-      : `You are an expert in the ${methodology.toUpperCase()} knowledge management system. Below is a cluster (#${selectedCluster}) from the knowledge graph:
+        : `You are an expert in the ${methodology.toUpperCase()} knowledge management system. Below is cluster #${selectedCluster}:
 
 Notes (${clusterInfo.length} total):
 ${clusterInfo.map(n => `- "${n.title}" type:${n.type} importance:${n.importance}`).join('\n')}
@@ -289,21 +289,59 @@ Hub node: "${hubNode.title}" (highest importance)
 
 In under 25 words, summarize this cluster's core theme, identify the hub note, and suggest one expansion direction. Format: Theme | Hub: "title" | Suggestion: one sentence. No introductory words.`;
 
-    try {
-      const response = await chatWithLlm({
-        messages: [{ role: 'user', content: prompt }],
-        apiUrl: state.llmConfig?.apiUrl,
-        apiKey: state.llmConfig?.apiKey,
-        model: state.llmConfig?.model,
-        providerId: state.llmConfig?.providerId,
-      });
-      
-      setAiSummary(response.content.trim());
-    } catch (err) {
-      console.error("AI cluster explanation failed:", err);
-      setAiSummary(isZh ? "AI 智能解读失败，请检查模型配置。" : "AI explanation failed. Please check LLM configuration.");
-    } finally {
-      setIsSummarizing(false);
+      try {
+        const response = await chatWithLlm({
+          messages: [{ role: 'user', content: prompt }],
+          apiUrl: state.llmConfig?.apiUrl,
+          apiKey: state.llmConfig?.apiKey,
+          model: state.llmConfig?.model,
+          providerId: state.llmConfig?.providerId,
+        });
+        setAiSummary(response.content.trim());
+      } catch (err) {
+        console.error("AI cluster explanation failed:", err);
+        setAiSummary(isZh ? "AI 智能解读失败，请检查模型配置。" : "AI explanation failed. Please check LLM configuration.");
+      } finally {
+        setIsSummarizing(false);
+      }
+    } else {
+      // ── Whole Vault Graph Bird's-Eye Synthesis ──
+      if (nodes.length === 0) {
+        setAiSummary(isZh ? "当前知识图谱为空。" : "Graph is currently empty.");
+        setIsSummarizing(false);
+        return;
+      }
+      const sortedNodes = [...nodes].sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0));
+      const topHubs = sortedNodes.slice(0, 5).map(n => `《${n.label}》`);
+      const clustersCount = rawGraphData.clusters?.length || 0;
+
+      const prompt = isZh
+        ? `你是一个${methodology.toUpperCase()}知识管理体系专家。请对当前全库知识图谱进行宏观鸟瞰解读：
+- 节点总数：${nodes.length}篇，双链数：${linkCount}条，语义关联：${semanticCount}条，知识聚类：${clustersCount}个
+- 核心枢纽笔记TOP5：${topHubs.join('、')}
+
+请用精炼语言（不超过70字）输出：知识库宏观架构概览、核心知识支柱及下一步知识图谱演进建议。格式：核心主题｜枢纽：${topHubs.slice(0, 2).join('、')}｜建议：演进建议。不要包含前导词。`
+        : `You are a PKM expert. Provide a bird's-eye macro summary of this knowledge graph:
+- Total nodes: ${nodes.length}, links: ${linkCount}, semantic links: ${semanticCount}, clusters: ${clustersCount}
+- Top hub notes: ${topHubs.join(', ')}
+
+In under 30 words, provide: Macro Theme | Hub: Top hubs | Suggestion: network evolution advice. No introductory words.`;
+
+      try {
+        const response = await chatWithLlm({
+          messages: [{ role: 'user', content: prompt }],
+          apiUrl: state.llmConfig?.apiUrl,
+          apiKey: state.llmConfig?.apiKey,
+          model: state.llmConfig?.model,
+          providerId: state.llmConfig?.providerId,
+        });
+        setAiSummary(response.content.trim());
+      } catch (err) {
+        console.error("AI global graph explanation failed:", err);
+        setAiSummary(isZh ? "AI 全局图谱解读失败，请检查模型配置。" : "AI global graph explanation failed. Please check LLM configuration.");
+      } finally {
+        setIsSummarizing(false);
+      }
     }
   };
 
@@ -418,7 +456,7 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
         </div>
       )}
 
-      {/* Main HUD Controls */}
+      {/* Main HUD Controls (Upgraded Island Bar Layout) */}
       <div className={`kg-hud kg-bottom-panel ${hudCollapsed ? 'kg-bottom-panel--collapsed' : ''}`}>
         <div
           className="kg-hud-toggle"
@@ -436,326 +474,364 @@ In under 25 words, summarize this cluster's core theme, identify the hub note, a
               <polyline points="6 9 12 15 18 9" />
             </svg>
             <span className="kg-hud-toggle-label">
-              {isZh ? '图谱控制面板' : 'Graph Controls'}
+              {isZh ? '图谱控制' : 'Graph Controls'}
             </span>
           </div>
         </div>
 
         <div ref={hudBodyRef} className={`kg-hud-body ${hudCollapsed ? 'kg-hud-body--collapsed' : ''}`}>
-          {/* Row 1: Graph Info & AI Semantic Slider */}
-          <div className="kg-panel-row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-            <div className="kg-stat-group">
-              <div className="kg-stat-badge kg-stat-badge--notes">
-                <span>{rawGraphData.nodes.length}</span>
-                <span style={{ opacity: 0.75, fontWeight: 500 }}>{t('graph.notes')}</span>
-              </div>
-              <div className="kg-stat-badge kg-stat-badge--links">
-                <span>{linkCount}</span>
-                <span style={{ opacity: 0.75, fontWeight: 500 }}>{t('graph.links')}</span>
-              </div>
-              <div className="kg-stat-badge kg-stat-badge--semantic">
-                <span>{semanticCount}</span>
-                <span style={{ opacity: 0.75, fontWeight: 500 }}>{t('graph.semantic')}</span>
-              </div>
+          <div className="kg-island-main-row">
+            {/* Left: Compact Stats Capsule */}
+            <div
+              className="kg-stat-capsule"
+              title={isZh ? `笔记 ${rawGraphData.nodes.length} 篇 · 双链 ${linkCount} 条 · 语义 ${semanticCount} 条` : `${rawGraphData.nodes.length} notes, ${linkCount} links, ${semanticCount} semantic links`}
+            >
+              <span className="kg-stat-dot kg-stat-dot--notes" />
+              <span>{rawGraphData.nodes.length}</span>
+              <span className="kg-stat-sep">/</span>
+              <span className="kg-stat-dot kg-stat-dot--links" />
+              <span>{linkCount}</span>
+              <span className="kg-stat-sep">/</span>
+              <span className="kg-stat-dot kg-stat-dot--semantic" />
+              <span>{semanticCount}</span>
             </div>
 
-            {/* AI Semantic Slider */}
-            <div className="kg-slider-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div className="kg-similarity-badge">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ verticalAlign: 'middle', marginRight: 3 }}>
-                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-                  <circle cx="12" cy="12" r="3" />
-                  <line x1="12" y1="2" x2="12" y2="22" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                </svg>
-                <span>{isZh ? '关联度' : 'Similarity'}</span>
-                <span>{Math.round(semanticThreshold * 100)}%</span>
-              </div>
-              {(() => {
-                const pct = ((semanticThreshold - 0.50) / 0.45) * 100;
-                return (
-                  <input
-                    type="range"
-                    min="0.50"
-                    max="0.95"
-                    step="0.05"
-                    value={semanticThreshold}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      handleFilterSwitch(() => setSemanticThreshold(val));
-                    }}
-                    className="kg-slider"
-                    style={{ ['--kg-slider-pct' as string]: `${pct}%` }}
-                  />
-                );
-              })()}
-            </div>
-          </div>
-
-          {/* Row 2: Clusters Selection & AI Summary Button */}
-          <div className="kg-panel-row kg-panel-row--divider" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div className={`kg-cluster-container-wrapper ${clustersOverflowing ? 'has-overflow' : ''}`} ref={clusterWrapperRef}>
-                <div className="kg-cluster-container" ref={clusterContainerRef}>
+            {/* Center: Clusters Selection */}
+            <div className={`kg-cluster-container-wrapper ${clustersOverflowing ? 'has-overflow' : ''}`} ref={clusterWrapperRef}>
+              <div className="kg-cluster-container" ref={clusterContainerRef}>
                 <div
                   className={`kg-cluster-chip ${selectedCluster === null ? 'active-all' : ''}`}
                   onClick={() => handleFilterSwitch(() => setSelectedCluster(null))}
                 >
                   <span className="kg-legend-dot" style={{ background: 'linear-gradient(135deg, #10B981, #3B82F6)', width: 6, height: 6 }} />
-                  <span>{isZh ? '全部' : 'All'}</span>
+                  <span>{isZh ? '全库' : 'All'}</span>
                 </div>
-                {(rawGraphData.clusters || []).map((cluster, index) => {
+                {(rawGraphData.clusters || []).map((cluster) => {
                   const isActive = selectedCluster === cluster.id;
-                  const isTruncated = cluster.label.length > 15;
+                  const isTruncated = cluster.label.length > 12;
                   return (
                     <div
                       key={cluster.id}
                       className={`kg-cluster-chip ${isActive ? 'active-custom' : ''}`}
                       title={isTruncated ? cluster.label : undefined}
                       style={{
-                        background: isActive ? `${cluster.color}12` : undefined,
-                        borderColor: isActive ? `${cluster.color}35` : undefined,
+                        background: isActive ? `${cluster.color}18` : undefined,
+                        borderColor: isActive ? `${cluster.color}45` : undefined,
                         color: isActive ? cluster.color : undefined,
                       }}
                       onClick={() => handleFilterSwitch(() => {
                         setSelectedCluster(isActive ? null : cluster.id);
-                        setAiSummary(null); // Clear previous summary when switching
+                        setAiSummary(null);
                       })}
                     >
                       <span className="kg-legend-dot" style={{ background: cluster.color, width: 6, height: 6 }} />
                       <span>
-                        {isTruncated ? cluster.label.slice(0, 15) + '...' : cluster.label}
+                        {isTruncated ? cluster.label.slice(0, 12) + '...' : cluster.label}
                         <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '3px' }}>({cluster.node_count})</span>
                       </span>
                     </div>
                   );
                 })}
-                </div>
-                {(rawGraphData.clusters || []).length > 3 && (
-                  <div className="kg-cluster-hint" style={{ fontSize: 9, color: 'var(--kg-text-faint, var(--text-tertiary))', marginTop: 2, whiteSpace: 'nowrap' }}>
-                    {isZh ? '滑轮滚动查看更多' : 'Scroll for more'}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                {selectedCluster !== null && (
-                  <button
-                    className="kg-ai-explain-btn"
-                    onClick={handleExplainCluster}
-                    disabled={isSummarizing}
-                    style={{ margin: 0 }}
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isSummarizing ? 'spin' : ''}>
-                      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-                    </svg>
-                    <span>{isZh ? 'AI 解读' : 'Explain'}</span>
-                  </button>
-                )}
-
-                {/* Settings Trigger Icon (Compact ⚙️ button at the bottom right) */}
-                <div
-                  ref={settingsBtnRef}
-                  className={`kg-settings-trigger ${showSettings ? 'active' : ''}`}
-                  onClick={() => setShowSettings(p => !p)}
-                  title={isZh ? '图谱高级配置' : 'Graph Settings'}
-                  style={{ margin: 0 }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                  </svg>
-                </div>
               </div>
             </div>
 
-          {/* Render the floating popover settings */}
+            {/* Right: Actions & Settings */}
+            <div className="kg-island-actions">
+              {/* AI Insight Button (Prominent) */}
+              <button
+                className={`kg-ai-explain-btn ${selectedCluster === null ? 'kg-ai-explain-btn--global' : ''}`}
+                onClick={handleExplainCluster}
+                disabled={isSummarizing}
+                title={isZh ? (selectedCluster !== null ? '解读当前专题聚类' : '全局宏观图谱概览') : (selectedCluster !== null ? 'Explain Cluster' : 'Global Graph Overview')}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isSummarizing ? 'spin' : ''}>
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+                </svg>
+                <span>{isZh ? (selectedCluster !== null ? '专题解读' : 'AI 洞察') : (selectedCluster !== null ? 'Explain' : 'AI Insights')}</span>
+              </button>
+
+              {/* Settings Trigger Icon */}
+              <div
+                ref={settingsBtnRef}
+                className={`kg-settings-trigger ${showSettings ? 'active' : ''}`}
+                onClick={() => setShowSettings(p => !p)}
+                title={isZh ? '图谱配置与图例' : 'Graph Settings & Legend'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          {/* Render the clean tabbed popover settings */}
           {showSettings && (
             <div ref={settingsPopoverRef} className="kg-settings-popover">
-               <div className="kg-settings-popover-title">{isZh ? '图谱高级配置' : 'Advanced Graph Settings'}</div>
-               
-               {/* 1. Classification Legend (Types) */}
-               {selectedCluster === null && (
-                 <div className="kg-settings-section">
-                   <div className="kg-settings-section-label">{isZh ? '分类图例' : 'Legend'}</div>
-                   <div className="kg-panel-items" style={{ gap: 8 }}>
-                     {METHODOLOGY_TYPES[state.methodology || 'generic'].map((type) => (
-                       <span key={type} className="kg-legend-item">
+              {/* Tab Header */}
+              <div className="kg-settings-tabs">
+                <button
+                  className={`kg-settings-tab-btn ${activeSettingsTab === 'filter' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('filter')}
+                >
+                  {isZh ? '🎛️ 过滤与视图' : 'Filters'}
+                </button>
+                <button
+                  className={`kg-settings-tab-btn ${activeSettingsTab === 'legend' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('legend')}
+                >
+                  {isZh ? '🏷️ 图例' : 'Legend'}
+                </button>
+                <button
+                  className={`kg-settings-tab-btn ${activeSettingsTab === 'forces' ? 'active' : ''}`}
+                  onClick={() => setActiveSettingsTab('forces')}
+                >
+                  {isZh ? '⚙️ 力学' : 'Physics'}
+                </button>
+              </div>
+
+              {/* Tab 1: Filters & View */}
+              {activeSettingsTab === 'filter' && (
+                <div className="kg-settings-tab-content">
+                  {/* Local graph toggle */}
+                  <div className="kg-settings-section">
+                    <div className="kg-panel-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="kg-settings-section-label" style={{ margin: 0 }}>{isZh ? '局部图谱 (Local Mode)' : 'Local Graph'}</span>
+                      <button
+                        className={`kg-toggle-switch ${isLocalMode ? 'active' : ''}`}
+                        onClick={() => {
+                          const next = !isLocalMode;
+                          setIsLocalMode(next);
+                          if (next) {
+                            setFocusNodeId(state.currentFile || rawGraphData.nodes[0]?.id || null);
+                          }
+                          handleFilterSwitch(() => {});
+                        }}
+                        aria-label="Local Graph Mode"
+                        role="switch"
+                        aria-checked={isLocalMode}
+                      >
+                        <span className="kg-toggle-thumb" />
+                      </button>
+                    </div>
+                    {isLocalMode && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                        <span className="kg-depth-label-sm">{isZh ? '深度' : 'Depth'}</span>
+                        {[1, 2, 3].map(d => (
+                          <span
+                            key={d}
+                            className={`kg-chip kg-depth-chip-sm ${localDepth === d ? 'active kg-chip-active-canvas' : ''}`}
+                            style={localDepth !== d ? { minWidth: 22 } : undefined}
+                            onClick={() => { setLocalDepth(d); handleFilterSwitch(() => {}); }}
+                          >
+                            {d}
+                          </span>
+                        ))}
+                        {focusNodeId && (
+                          <span className="kg-focus-label-sm" title={focusNodeId} style={{ marginLeft: 4 }}>
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                            {(focusNodeId.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/, '') || focusNodeId)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AI Semantic Slider */}
+                  <div className="kg-settings-section">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="kg-settings-section-label">{isZh ? '语义相似度阈值' : 'Semantic Similarity'}</span>
+                      <span className="kg-force-slider-val">{Math.round(semanticThreshold * 100)}%</span>
+                    </div>
+                    {(() => {
+                      const pct = ((semanticThreshold - 0.50) / 0.45) * 100;
+                      return (
+                        <input
+                          type="range"
+                          min="0.50"
+                          max="0.95"
+                          step="0.05"
+                          value={semanticThreshold}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            handleFilterSwitch(() => setSemanticThreshold(val));
+                          }}
+                          className="kg-slider"
+                          style={{ ['--kg-slider-pct' as string]: `${pct}%` }}
+                        />
+                      );
+                    })()}
+                  </div>
+
+                  {/* Relations filter */}
+                  <div className="kg-settings-section">
+                    <div className="kg-settings-section-label">{isZh ? '关系筛选' : 'Relations'}</div>
+                    <div className="kg-panel-items" style={{ gap: 5 }}>
+                      {relationFilterConfig.map((rf) => (
+                        <span
+                          key={rf.key}
+                          className={`kg-chip kg-settings-chip ${relationFilter === rf.key ? 'active' : ''}`}
+                          style={relationFilter === rf.key ? { background: `${rf.color}15`, border: `1px solid ${rf.color}35`, color: rf.color } : {}}
+                          onClick={() => handleFilterSwitch(() => setRelationFilter(rf.key))}
+                        >
+                          {rf.key !== 'all' && <span className="kg-legend-dot" style={{ width: 5, height: 5, background: rf.color }} />}
+                          {isZh ? rf.labelZh : rf.labelEn}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Orphans filter */}
+                  <div className="kg-settings-section">
+                    <div className="kg-settings-section-label">{isZh ? '孤立节点' : 'Orphans'}</div>
+                    <div className="kg-panel-items" style={{ gap: 6 }}>
+                      <div
+                        className={`kg-chip kg-settings-chip ${!hideOrphans ? 'active kg-chip-active-info' : ''}`}
+                        onClick={() => handleFilterSwitch(() => setHideOrphans(false))}
+                      >
+                        {isZh ? '显示' : 'Show'}
+                      </div>
+                      <div
+                        className={`kg-chip kg-settings-chip ${hideOrphans ? 'active kg-chip-active-danger' : ''}`}
+                        onClick={() => handleFilterSwitch(() => setHideOrphans(true))}
+                      >
+                        {isZh ? '隐藏' : 'Hide'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: Legend */}
+              {activeSettingsTab === 'legend' && (
+                <div className="kg-settings-tab-content">
+                  <div className="kg-settings-section">
+                    <div className="kg-settings-section-label">{isZh ? '笔记类型' : 'Note Types'}</div>
+                    <div className="kg-panel-items" style={{ gap: 8 }}>
+                      {METHODOLOGY_TYPES[state.methodology || 'generic'].map((type) => (
+                        <span key={type} className="kg-legend-item">
                           <span className="kg-legend-dot" style={{ background: noteColors[type] }} />
-                         <span className="kg-legend-text">{t(`type.${type}` as any)}</span>
-                       </span>
-                     ))}
-                   </div>
-                 </div>
-               )}
+                          <span className="kg-legend-text">{t(`type.${type}` as any)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
 
-               {/* 2. Relations filter */}
-               <div className="kg-settings-section">
-                 <div className="kg-settings-section-label">{isZh ? '关系筛选' : 'Relations'}</div>
-                 <div className="kg-panel-items" style={{ gap: 5 }}>
-                   {relationFilterConfig.map((rf) => (
-                     <span
-                       key={rf.key}
-                       className={`kg-chip kg-settings-chip ${relationFilter === rf.key ? 'active' : ''}`}
-                       style={relationFilter === rf.key ? { background: `${rf.color}15`, border: `1px solid ${rf.color}35`, color: rf.color } : {}}
-                       onClick={() => handleFilterSwitch(() => setRelationFilter(rf.key))}
-                     >
-                       {rf.key !== 'all' && <span className="kg-legend-dot" style={{ width: 5, height: 5, background: rf.color }} />}
-                       {isZh ? rf.labelZh : rf.labelEn}
-                     </span>
-                   ))}
-                 </div>
-               </div>
+                  <div className="kg-settings-section" style={{ marginTop: 8 }}>
+                    <div className="kg-settings-section-label">{isZh ? '连线关系' : 'Relation Edges'}</div>
+                    <div className="kg-panel-items" style={{ gap: 8 }}>
+                      <span className="kg-legend-item">
+                        <span className="kg-legend-dot" style={{ background: relColor('wikilink') }} />
+                        <span className="kg-legend-text">{isZh ? '双向链 (Wikilink)' : 'Wikilink'}</span>
+                      </span>
+                      <span className="kg-legend-item">
+                        <span className="kg-legend-dot" style={{ background: relColor('semantic') }} />
+                        <span className="kg-legend-text">{isZh ? '语义边 (Semantic)' : 'Semantic'}</span>
+                      </span>
+                      <span className="kg-legend-item">
+                        <span className="kg-legend-dot" style={{ background: relColor('supports') }} />
+                        <span className="kg-legend-text">{isZh ? '支撑/论据 (Supports)' : 'Supports'}</span>
+                      </span>
+                      <span className="kg-legend-item">
+                        <span className="kg-legend-dot" style={{ background: relColor('contradicts') }} />
+                        <span className="kg-legend-text">{isZh ? '矛盾/冲突 (Contradicts)' : 'Contradicts'}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-               {/* 3. Local graph toggle */}
-               <div className="kg-settings-section">
-                 <div className="kg-panel-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                   <span className="kg-settings-section-label" style={{ margin: 0 }}>{isZh ? '局部图谱' : 'Local Graph'}</span>
-                   <button
-                     className={`kg-toggle-switch ${isLocalMode ? 'active' : ''}`}
-                     onClick={() => {
-                       const next = !isLocalMode;
-                       setIsLocalMode(next);
-                       if (next) {
-                         setFocusNodeId(state.currentFile || rawGraphData.nodes[0]?.id || null);
-                       }
-                       handleFilterSwitch(() => {});
-                     }}
-                     aria-label="Local Graph Mode"
-                     role="switch"
-                     aria-checked={isLocalMode}
-                   >
-                     <span className="kg-toggle-thumb" />
-                   </button>
-                 </div>
-                 {isLocalMode && (
-                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                     <span className="kg-depth-label-sm">{isZh ? '深度' : 'Depth'}</span>
-                     {[1, 2, 3].map(d => (
-                       <span
-                         key={d}
-                         className={`kg-chip kg-depth-chip-sm ${localDepth === d ? 'active kg-chip-active-canvas' : ''}`}
-                         style={localDepth !== d ? { minWidth: 22 } : undefined}
-                         onClick={() => { setLocalDepth(d); handleFilterSwitch(() => {}); }}
-                       >
-                         {d}
-                       </span>
-                     ))}
-                     {focusNodeId && (
-                       <span className="kg-focus-label-sm" title={focusNodeId} style={{ marginLeft: 4 }}>
-                         <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-                         {(focusNodeId.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/, '') || focusNodeId)}
-                       </span>
-                     )}
-                   </div>
-                 )}
-               </div>
+              {/* Tab 3: Physics Forces */}
+              {activeSettingsTab === 'forces' && (
+                <div className="kg-settings-tab-content">
+                  <div className="kg-settings-section">
+                    <div className="kg-settings-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{isZh ? '力学参数 (Forces)' : 'Force Parameters'}</span>
+                      <button
+                        className="btn btn-xs btn-ghost"
+                        style={{ fontSize: 9, padding: '1px 6px' }}
+                        onClick={() => {
+                          setLocalCenterStrength(DEFAULT_FORCE_PARAMS.centerStrength);
+                          setLocalChargeStrength(DEFAULT_FORCE_PARAMS.chargeStrength);
+                          setLocalLinkStrength(DEFAULT_FORCE_PARAMS.linkStrength);
+                          setLocalLinkDistance(DEFAULT_FORCE_PARAMS.linkDistance);
+                          setForceParams(DEFAULT_FORCE_PARAMS);
+                        }}
+                      >
+                        {isZh ? '重置默认' : 'Reset'}
+                      </button>
+                    </div>
 
-               {/* 4. Orphans filter */}
-               <div className="kg-settings-section">
-                 <div className="kg-settings-section-label">{isZh ? '孤立节点' : 'Orphans'}</div>
-                 <div className="kg-panel-items" style={{ gap: 6 }}>
-                   <div
-                     className={`kg-chip kg-settings-chip ${!hideOrphans ? 'active kg-chip-active-info' : ''}`}
-                     onClick={() => handleFilterSwitch(() => setHideOrphans(false))}
-                   >
-                     {isZh ? '显示' : 'Show'}
-                   </div>
-                   <div
-                     className={`kg-chip kg-settings-chip ${hideOrphans ? 'active kg-chip-active-danger' : ''}`}
-                     onClick={() => handleFilterSwitch(() => setHideOrphans(true))}
-                   >
-                     {isZh ? '隐藏' : 'Hide'}
-                   </div>
-                 </div>
-               </div>
+                    {/* Center force */}
+                    <div className="kg-force-slider-row">
+                      <span className="kg-force-slider-label">{isZh ? '中心引力' : 'Center'}</span>
+                      <input
+                        type="range" min="0" max="0.2" step="0.005"
+                        value={localCenterStrength}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLocalCenterStrength(val);
+                          updateParentParams({ centerStrength: val });
+                        }}
+                        className="kg-slider"
+                        style={{ ['--kg-slider-pct' as string]: `${(localCenterStrength / 0.2) * 100}%` }}
+                      />
+                      <span className="kg-force-slider-val">{localCenterStrength.toFixed(3)}</span>
+                    </div>
 
-               {/* 5. Force Parameters (Obsidian-style sliders) */}
-               <div className="kg-settings-section">
-                 <div className="kg-settings-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                   <span>{isZh ? '力学参数' : 'Forces'}</span>
-                   <button
-                     className="btn btn-xs btn-ghost"
-                     style={{ fontSize: 9, padding: '1px 6px' }}
-                     onClick={() => {
-                       setLocalCenterStrength(DEFAULT_FORCE_PARAMS.centerStrength);
-                       setLocalChargeStrength(DEFAULT_FORCE_PARAMS.chargeStrength);
-                       setLocalLinkStrength(DEFAULT_FORCE_PARAMS.linkStrength);
-                       setLocalLinkDistance(DEFAULT_FORCE_PARAMS.linkDistance);
-                       setForceParams(DEFAULT_FORCE_PARAMS);
-                     }}
-                   >
-                     {isZh ? '重置' : 'Reset'}
-                   </button>
-                 </div>
+                    {/* Repel force */}
+                    <div className="kg-force-slider-row">
+                      <span className="kg-force-slider-label">{isZh ? '排斥力' : 'Repel'}</span>
+                      <input
+                        type="range" min="0" max="2500" step="50"
+                        value={Math.abs(localChargeStrength)}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLocalChargeStrength(-val);
+                          updateParentParams({ chargeStrength: -val });
+                        }}
+                        className="kg-slider"
+                        style={{ ['--kg-slider-pct' as string]: `${(Math.abs(localChargeStrength) / 2500) * 100}%` }}
+                      />
+                      <span className="kg-force-slider-val">{Math.abs(localChargeStrength)}</span>
+                    </div>
 
-                 {/* Center force */}
-                 <div className="kg-force-slider-row">
-                   <span className="kg-force-slider-label">{isZh ? '中心引力' : 'Center'}</span>
-                   <input
-                     type="range" min="0" max="0.2" step="0.005"
-                     value={localCenterStrength}
-                     onChange={(e) => {
-                       const val = parseFloat(e.target.value);
-                       setLocalCenterStrength(val);
-                       updateParentParams({ centerStrength: val });
-                     }}
-                     className="kg-slider"
-                     style={{ ['--kg-slider-pct' as string]: `${(localCenterStrength / 0.2) * 100}%` }}
-                   />
-                   <span className="kg-force-slider-val">{localCenterStrength.toFixed(3)}</span>
-                 </div>
+                    {/* Link force */}
+                    <div className="kg-force-slider-row">
+                      <span className="kg-force-slider-label">{isZh ? '连线拉力' : 'Link'}</span>
+                      <input
+                        type="range" min="0" max="1.0" step="0.02"
+                        value={localLinkStrength}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLocalLinkStrength(val);
+                          updateParentParams({ linkStrength: val });
+                        }}
+                        className="kg-slider"
+                        style={{ ['--kg-slider-pct' as string]: `${localLinkStrength * 100}%` }}
+                      />
+                      <span className="kg-force-slider-val">{localLinkStrength.toFixed(2)}</span>
+                    </div>
 
-                 {/* Repel force (display absolute value) */}
-                 <div className="kg-force-slider-row">
-                   <span className="kg-force-slider-label">{isZh ? '排斥力' : 'Repel'}</span>
-                   <input
-                     type="range" min="0" max="2500" step="50"
-                     value={Math.abs(localChargeStrength)}
-                     onChange={(e) => {
-                       const val = parseFloat(e.target.value);
-                       setLocalChargeStrength(-val);
-                       updateParentParams({ chargeStrength: -val });
-                     }}
-                     className="kg-slider"
-                     style={{ ['--kg-slider-pct' as string]: `${(Math.abs(localChargeStrength) / 2500) * 100}%` }}
-                   />
-                   <span className="kg-force-slider-val">{Math.abs(localChargeStrength)}</span>
-                 </div>
-
-                 {/* Link force */}
-                 <div className="kg-force-slider-row">
-                    <span className="kg-force-slider-label">{isZh ? '连线拉力' : 'Link'}</span>
-                    <input
-                      type="range" min="0" max="1.0" step="0.02"
-                      value={localLinkStrength}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setLocalLinkStrength(val);
-                        updateParentParams({ linkStrength: val });
-                      }}
-                      className="kg-slider"
-                      style={{ ['--kg-slider-pct' as string]: `${localLinkStrength * 100}%` }}
-                    />
-                    <span className="kg-force-slider-val">{localLinkStrength.toFixed(2)}</span>
-                 </div>
-
-                 {/* Link distance */}
-                 <div className="kg-force-slider-row">
-                   <span className="kg-force-slider-label">{isZh ? '连线距离' : 'Distance'}</span>
-                   <input
-                     type="range" min="50" max="500" step="10"
-                     value={localLinkDistance}
-                     onChange={(e) => {
-                       const val = parseFloat(e.target.value);
-                       setLocalLinkDistance(val);
-                       updateParentParams({ linkDistance: val });
-                     }}
-                     className="kg-slider"
-                     style={{ ['--kg-slider-pct' as string]: `${((localLinkDistance - 50) / 450) * 100}%` }}
-                   />
-                   <span className="kg-force-slider-val">{localLinkDistance}</span>
-                 </div>
-               </div>
+                    {/* Link distance */}
+                    <div className="kg-force-slider-row">
+                      <span className="kg-force-slider-label">{isZh ? '连线距离' : 'Distance'}</span>
+                      <input
+                        type="range" min="50" max="500" step="10"
+                        value={localLinkDistance}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setLocalLinkDistance(val);
+                          updateParentParams({ linkDistance: val });
+                        }}
+                        className="kg-slider"
+                        style={{ ['--kg-slider-pct' as string]: `${((localLinkDistance - 50) / 450) * 100}%` }}
+                      />
+                      <span className="kg-force-slider-val">{localLinkDistance}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -164,16 +164,20 @@
   justify-content: center;
   gap: var(--space-4);
   padding: var(--space-12);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-align: center;
   animation: fadeIn var(--duration-slow) var(--ease-out);
 }
 
-.empty-state > svg {
+.empty-state > svg,
+.empty-state-badge {
+  box-sizing: content-box;
   padding: var(--space-4);
-  background: linear-gradient(135deg, rgba(22, 163, 74, 0.04), rgba(59, 130, 246, 0.04));
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1));
+  border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: var(--radius-full);
-  animation: breathe 4s ease-in-out infinite;
+  color: var(--accent-primary, #6366f1);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08);
 }
 
 .empty-state-title {

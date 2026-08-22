@@ -67,7 +67,7 @@ export class WebGLRenderer {
     this.app = new PIXI.Application();
     
     await this.app.init({
-      view: canvas,
+      canvas: canvas,
       width: canvas.clientWidth,
       height: canvas.clientHeight,
       backgroundColor: 0x0f172a,
@@ -115,6 +115,10 @@ export class WebGLRenderer {
   setViewport(viewport: Viewport): void {
     const zoomChanged = Math.abs(this.viewport.zoom - viewport.zoom) > 0.001;
     this.viewport = viewport;
+    if (this.app) {
+      this.app.stage.position.set(viewport.x, viewport.y);
+      this.app.stage.scale.set(viewport.zoom);
+    }
     if (zoomChanged) {
       this.currentLOD = this.getLODLevel(viewport.zoom, this.nodes.length);
       this.invalidateCache();

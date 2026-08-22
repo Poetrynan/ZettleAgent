@@ -404,8 +404,11 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       app.stage.on('pointerup', onPointerUp);
       app.stage.on('pointerupoutside', onPointerUp);
 
-      // wheel 缩放
-      app.canvas.addEventListener('wheel', onWheel, { passive: false });
+      // wheel 缩放 & contextmenu
+      if (app.canvas) {
+        app.canvas.addEventListener('wheel', onWheel, { passive: false });
+        app.canvas.addEventListener('contextmenu', onContextMenu);
+      }
 
       // 创建 Worker:d3-force 物理仿真在 worker 线程跑,主线程零阻塞
       const worker = new Worker(new URL('./forceWorker.ts', import.meta.url), { type: 'module' });
@@ -461,7 +464,10 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       }
       const app = appRef.current;
       if (app) {
-        app.canvas.removeEventListener('wheel', onWheel);
+        if (app.canvas) {
+          app.canvas.removeEventListener('wheel', onWheel);
+          app.canvas.removeEventListener('contextmenu', onContextMenu);
+        }
         app.stage?.removeAllListeners();
         app.destroy(true, { children: true, texture: true, textureSource: true });
       }
@@ -1472,12 +1478,13 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     e.preventDefault();
     const world = worldRef.current;
     const app = appRef.current;
-    if (!world || !app) return;
+    if (!world || !app || !app.canvas) return;
     let rect = canvasRectRef.current;
     if (!rect) {
       rect = app.canvas.getBoundingClientRect();
       canvasRectRef.current = rect;
     }
+    if (!rect) return;
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
@@ -1577,15 +1584,6 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     };
     requestAnimationFrame(animate);
   }
-
-  // 绑定 contextmenu
-  useEffect(() => {
-    const app = appRef.current;
-    if (!app) return;
-    app.canvas.addEventListener('contextmenu', onContextMenu);
-    return () => app.canvas.removeEventListener('contextmenu', onContextMenu);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData]);
 
   return <div ref={containerRef} className="pixi-graph-host" style={{ width: '100%', height: '100%' }} />;
 });

@@ -123,9 +123,15 @@ export class Canvas2DRenderer {
     // 获取可见节点和边
     this.updateVisibleCache();
 
+    ctx.save();
+    ctx.translate(this.viewport.x, this.viewport.y);
+    ctx.scale(this.viewport.zoom, this.viewport.zoom);
+
     // 绘制顺序: 边 -> 节点 -> 标签
     this.renderEdges(ctx, this.visibleEdgesCache);
     this.renderNodes(ctx, this.visibleNodesCache, this.currentLOD);
+
+    ctx.restore();
 
     // 更新统计
     this.stats.renderedNodes = this.visibleNodesCache.length;

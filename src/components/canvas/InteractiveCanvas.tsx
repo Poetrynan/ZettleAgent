@@ -376,7 +376,10 @@ function CanvasInner() {
   const pendingAutoSaveRef = useRef(false);
 
   useEffect(() => {
-    if (isUndoRedoRef.current) return;
+    if (isUndoRedoRef.current) {
+      isUndoRedoRef.current = false;
+      return;
+    }
     // 性能优化: 拖拽期间不推送历史记录，拖拽结束后再推送
     if (isDraggingNodeRef.current) {
       pendingHistoryPushRef.current = true;
