@@ -1116,6 +1116,8 @@ export const en = {
     'review.empty.desc': 'Add notes to the review deck and they will come back here on schedule.',
     'review.emptyDeck.title': 'The review deck is empty',
     'review.emptyDeck.desc': 'Use "Add to review" on a note to start building your deck.',
+    'review.browseNotes': 'Go to Notes',
+    'review.refreshDeck': 'Refresh Deck',
     'review.capReached': "Today's allowance is used up ({0} new, {1} reviews). The remaining {2} card(s) roll over to tomorrow.",
     'review.sessionDone': 'Session complete — {0} card(s) reviewed.',
     'review.openNote': 'Open note',

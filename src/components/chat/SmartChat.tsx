@@ -1723,6 +1723,24 @@ export function SmartChat() {
                 <IconGlobe size={12} />
                 <span>{isZh ? '联网' : 'Web'}</span>
               </button>
+              {input.trim().length > 0 && (
+                <span
+                  style={{
+                    fontSize: '11px',
+                    color: 'var(--text-tertiary)',
+                    padding: '2px 6px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '4px',
+                    fontFamily: 'monospace',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                  title={isZh ? '预计输入 Token 消耗' : 'Estimated Input Tokens'}
+                >
+                  ~{Math.ceil(Array.from(input).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0))} tok
+                </span>
+              )}
             </div>
             <div className="chat-input-bar-right">
               {isLoading ? (

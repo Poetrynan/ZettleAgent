@@ -1114,6 +1114,8 @@ export const zh = {
     'review.empty.desc': '把笔记加入复习队列，之后它们会按排程回到这里。',
     'review.emptyDeck.title': '复习队列还是空的',
     'review.emptyDeck.desc': '在笔记页点「加入复习」，就能开始建立你的复习卡组。',
+    'review.browseNotes': '前往笔记库',
+    'review.refreshDeck': '刷新卡组',
     'review.capReached': '今天的额度已用完（新卡 {0}，复习 {1}）。剩下的 {2} 张会留到明天。',
     'review.sessionDone': '本轮完成，共复习 {0} 张。',
     'review.openNote': '打开笔记',

@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { t, tf } from '../../lib/i18n';
-import { IconBrain, IconSync, IconCheck, IconTrash, IconWarning } from '../icons';
+import { IconBrain, IconSync, IconCheck, IconTrash, IconWarning, IconNote } from '../icons';
 import { MarkdownRenderer } from '../editor/MarkdownRenderer';
 import {
   getReviewQueue, gradeCard, readMarkdownFile, suspendCard, removeCardFromReview,
@@ -196,7 +196,21 @@ export function ReviewSession() {
     const finishedASession = graded > 0;
     return (
       <div className="empty-state" data-testid={deckIsEmpty ? 'review-empty-deck' : 'review-empty-due'}>
-        <IconBrain size={24} />
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.12))',
+          border: '1px solid rgba(99, 102, 241, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--accent-primary, #6366f1)',
+          boxShadow: '0 4px 16px rgba(99, 102, 241, 0.1)',
+          marginBottom: 4,
+        }}>
+          <IconBrain size={28} />
+        </div>
         <div className="empty-state-title">
           {deckIsEmpty ? t('review.emptyDeck.title') : t('review.empty.title')}
         </div>
@@ -216,9 +230,16 @@ export function ReviewSession() {
             )}
           </div>
         )}
-        <button type="button" className="btn btn-sm" onClick={() => void load()} data-testid="review-refresh">
-          <IconSync size={14} /> {t('review.startSession')}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          {deckIsEmpty && (
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setView('bases')}>
+              <IconNote size={14} /> {t('review.browseNotes')}
+            </button>
+          )}
+          <button type="button" className="btn btn-sm" onClick={() => void load()} data-testid="review-refresh">
+            <IconSync size={14} /> {deckIsEmpty ? t('review.refreshDeck') : t('review.startSession')}
+          </button>
+        </div>
       </div>
     );
   }
