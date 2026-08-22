@@ -98,43 +98,13 @@ export function GraphHud({
   }, [forceParams]);
 
   const debounceTimerRef = useRef<any>(null);
-  const clusterWrapperRef = useRef<HTMLDivElement>(null);
-  const clusterContainerRef = useRef<HTMLDivElement>(null);
   const hudBodyRef = useRef<HTMLDivElement>(null);
-  const [clustersOverflowing, setClustersOverflowing] = useState(false);
 
-  // Check if clusters overflow to show fade indicator
-  useEffect(() => {
-    const checkOverflow = () => {
-      const el = clusterContainerRef.current;
-      if (el) {
-        setClustersOverflowing(el.scrollWidth > el.clientWidth + 1);
-      }
-    };
-    checkOverflow();
-    window.addEventListener('resize', checkOverflow);
-    return () => window.removeEventListener('resize', checkOverflow);
-  }, [rawGraphData.clusters]);
+  // The cluster list used to live inline in the island row, which made the bar
+  // grow with the number of clusters and needed its own overflow detection plus
+  // a wheel-to-horizontal-scroll shim. It now lives in a popover, so the bar has
+  // a fixed set of controls and none of that machinery is required.
 
-  // Convert vertical wheel to horizontal scroll for cluster container when HUD panel is hovered
-  useEffect(() => {
-    const hudBody = hudBodyRef.current;
-    const clusterContainer = clusterContainerRef.current;
-    if (!hudBody || !clusterContainer) return;
-    const handleWheel = (e: WheelEvent) => {
-      // Only intercept if cluster container is overflowing
-      if (clusterContainer.scrollWidth <= clusterContainer.clientWidth) return;
-      // Don't interfere with settings popover scrolling
-      const target = e.target as Node;
-      if (settingsPopoverRef.current && settingsPopoverRef.current.contains(target)) return;
-      if (e.deltaY !== 0) {
-        e.preventDefault();
-        clusterContainer.scrollLeft += e.deltaY;
-      }
-    };
-    hudBody.addEventListener('wheel', handleWheel, { passive: false });
-    return () => hudBody.removeEventListener('wheel', handleWheel);
-  }, []);
   const updateParentParams = useCallback((newParams: Partial<ForceParams>) => {
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
@@ -174,6 +144,7 @@ export function GraphHud({
   const inlinePaths = hasMore ? state.vaultPaths.slice(0, MAX_INLINE) : (state.vaultPaths || []);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showClusterPicker, setShowClusterPicker] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'filter' | 'legend' | 'forces'>('filter');
   const [showHelp, setShowHelp] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -181,6 +152,8 @@ export function GraphHud({
 
   const settingsBtnRef = useRef<HTMLDivElement>(null);
   const settingsPopoverRef = useRef<HTMLDivElement>(null);
+  const clusterBtnRef = useRef<HTMLDivElement>(null);
+  const clusterPopoverRef = useRef<HTMLDivElement>(null);
 
   // Close popovers on click outside
   useEffect(() => {
@@ -192,6 +165,13 @@ export function GraphHud({
           !settingsBtnRef.current.contains(e.target as Node)) {
         setShowSettings(false);
       }
+      if (showClusterPicker &&
+          clusterPopoverRef.current &&
+          clusterBtnRef.current &&
+          !clusterPopoverRef.current.contains(e.target as Node) &&
+          !clusterBtnRef.current.contains(e.target as Node)) {
+        setShowClusterPicker(false);
+      }
       if (showHelp) {
         const helpEl = document.querySelector('.kg-help-popover');
         const target = e.target as Node;
@@ -202,7 +182,7 @@ export function GraphHud({
     };
     document.addEventListener('mousedown', handleGlobalClick);
     return () => document.removeEventListener('mousedown', handleGlobalClick);
-  }, [showSettings, showHelp]);
+  }, [showSettings, showHelp, showClusterPicker]);
 
   const toggleFolder = (vp: string) => {
     handleFilterSwitch(() => {
@@ -344,6 +324,12 @@ In under 30 words, provide: Macro Theme | Hub: Top hubs | Suggestion: network ev
       }
     }
   };
+
+  const clusterList = rawGraphData.clusters || [];
+  const clusterCount = clusterList.length;
+  const activeCluster = selectedCluster === null
+    ? null
+    : clusterList.find(c => c.id === selectedCluster) ?? null;
 
   return (
     <>
@@ -496,58 +482,105 @@ In under 30 words, provide: Macro Theme | Hub: Top hubs | Suggestion: network ev
               <span>{semanticCount}</span>
             </div>
 
-            {/* Center: Clusters Selection */}
-            <div className={`kg-cluster-container-wrapper ${clustersOverflowing ? 'has-overflow' : ''}`} ref={clusterWrapperRef}>
-              <div className="kg-cluster-container" ref={clusterContainerRef}>
-                <div
-                  className={`kg-cluster-chip ${selectedCluster === null ? 'active-all' : ''}`}
-                  onClick={() => handleFilterSwitch(() => setSelectedCluster(null))}
+            {/* Center: current cluster. The full list lives in a popover so the
+                bar width no longer grows with the number of clusters. */}
+            <div className="kg-cluster-select">
+              <div
+                ref={clusterBtnRef}
+                className={`kg-cluster-trigger ${showClusterPicker ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-haspopup="true"
+                aria-expanded={showClusterPicker}
+                onClick={() => setShowClusterPicker(p => !p)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowClusterPicker(p => !p); }
+                }}
+                title={activeCluster ? activeCluster.label : (isZh ? '选择知识聚类' : 'Select a cluster')}
+              >
+                <span
+                  className="kg-legend-dot"
+                  style={{ background: activeCluster ? activeCluster.color : 'var(--kg-text-muted)', width: 6, height: 6 }}
+                />
+                <span className="kg-cluster-trigger-label">
+                  {activeCluster ? activeCluster.label : (isZh ? '全库' : 'All notes')}
+                </span>
+                <span className="kg-cluster-trigger-count">
+                  {activeCluster ? activeCluster.node_count : clusterCount}
+                </span>
+                <svg
+                  width="8" height="8" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="3" aria-hidden="true"
+                  style={{ transition: 'transform 180ms ease', transform: showClusterPicker ? 'rotate(180deg)' : 'none' }}
                 >
-                  <span className="kg-legend-dot" style={{ background: 'linear-gradient(135deg, #10B981, #3B82F6)', width: 6, height: 6 }} />
-                  <span>{isZh ? '全库' : 'All'}</span>
-                </div>
-                {(rawGraphData.clusters || []).map((cluster) => {
-                  const isActive = selectedCluster === cluster.id;
-                  const isTruncated = cluster.label.length > 12;
-                  return (
-                    <div
-                      key={cluster.id}
-                      className={`kg-cluster-chip ${isActive ? 'active-custom' : ''}`}
-                      title={isTruncated ? cluster.label : undefined}
-                      style={{
-                        background: isActive ? `${cluster.color}18` : undefined,
-                        borderColor: isActive ? `${cluster.color}45` : undefined,
-                        color: isActive ? cluster.color : undefined,
-                      }}
-                      onClick={() => handleFilterSwitch(() => {
-                        setSelectedCluster(isActive ? null : cluster.id);
-                        setAiSummary(null);
-                      })}
-                    >
-                      <span className="kg-legend-dot" style={{ background: cluster.color, width: 6, height: 6 }} />
-                      <span>
-                        {isTruncated ? cluster.label.slice(0, 12) + '...' : cluster.label}
-                        <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '3px' }}>({cluster.node_count})</span>
-                      </span>
-                    </div>
-                  );
-                })}
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </div>
+
+              {showClusterPicker && (
+                <div ref={clusterPopoverRef} className="kg-cluster-popover">
+                  <div className="kg-cluster-popover-head">
+                    <span>{isZh ? '知识聚类' : 'Clusters'}</span>
+                    <span className="kg-cluster-popover-count">{clusterCount}</span>
+                  </div>
+                  <div className="kg-cluster-grid">
+                    <button
+                      type="button"
+                      className={`kg-cluster-option ${selectedCluster === null ? 'active' : ''}`}
+                      onClick={() => {
+                        handleFilterSwitch(() => { setSelectedCluster(null); setAiSummary(null); });
+                        setShowClusterPicker(false);
+                      }}
+                    >
+                      <span className="kg-legend-dot" style={{ background: 'var(--kg-text-muted)', width: 6, height: 6 }} />
+                      <span className="kg-cluster-option-label">{isZh ? '全库' : 'All notes'}</span>
+                      <span className="kg-cluster-option-count">{rawGraphData.nodes.length}</span>
+                    </button>
+                    {(rawGraphData.clusters || []).map((cluster) => {
+                      const isActive = selectedCluster === cluster.id;
+                      return (
+                        <button
+                          type="button"
+                          key={cluster.id}
+                          className={`kg-cluster-option ${isActive ? 'active' : ''}`}
+                          title={cluster.label}
+                          style={isActive ? { borderColor: `${cluster.color}55`, color: cluster.color } : undefined}
+                          onClick={() => {
+                            handleFilterSwitch(() => {
+                              setSelectedCluster(isActive ? null : cluster.id);
+                              setAiSummary(null);
+                            });
+                            setShowClusterPicker(false);
+                          }}
+                        >
+                          <span className="kg-legend-dot" style={{ background: cluster.color, width: 6, height: 6 }} />
+                          <span className="kg-cluster-option-label">{cluster.label}</span>
+                          <span className="kg-cluster-option-count">{cluster.node_count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right: Actions & Settings */}
             <div className="kg-island-actions">
-              {/* AI Insight Button (Prominent) */}
+              {/* AI insight. The scope is already shown by the cluster trigger to
+                  the left, so the label no longer switches between two strings —
+                  that only made the bar jitter as the selection changed. */}
               <button
-                className={`kg-ai-explain-btn ${selectedCluster === null ? 'kg-ai-explain-btn--global' : ''}`}
+                className="kg-ai-explain-btn"
                 onClick={handleExplainCluster}
                 disabled={isSummarizing}
-                title={isZh ? (selectedCluster !== null ? '解读当前专题聚类' : '全局宏观图谱概览') : (selectedCluster !== null ? 'Explain Cluster' : 'Global Graph Overview')}
+                title={activeCluster
+                  ? (isZh ? `解读聚类「${activeCluster.label}」` : `Explain cluster "${activeCluster.label}"`)
+                  : (isZh ? '全局宏观图谱概览' : 'Whole-graph overview')}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isSummarizing ? 'spin' : ''}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isSummarizing ? 'spin' : ''} aria-hidden="true">
                   <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
                 </svg>
-                <span>{isZh ? (selectedCluster !== null ? '专题解读' : 'AI 洞察') : (selectedCluster !== null ? 'Explain' : 'AI Insights')}</span>
+                <span>{isZh ? 'AI 洞察' : 'AI Insights'}</span>
               </button>
 
               {/* Settings Trigger Icon */}

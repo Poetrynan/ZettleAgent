@@ -177,8 +177,11 @@
   border-radius: 10px;
   color: var(--kg-text);
   width: auto;
-  min-width: 380px;
-  max-width: min(640px, calc(100% - 24px));
+  /* The bar holds a fixed set of controls now (stats, cluster trigger, AI, gear),
+     so it no longer needs a 380px floor or a 640px ceiling to absorb a
+     variable-length cluster strip. */
+  min-width: 0;
+  max-width: min(420px, calc(100% - 24px));
   z-index: 10;
   overflow: hidden;
   transition: width 0.25s ease, max-width 0.25s ease;
@@ -924,29 +927,48 @@
   cursor: pointer;
 }
 
-/* AI Explanation Button */
+/* AI Explanation Button.
+   Single-hue tint on the surface rather than a green-to-blue gradient: two-hue
+   diagonal gradients read as generated decoration and fight the cluster colours,
+   which are the only place in this view where hue carries meaning. */
 .kg-ai-explain-btn {
   display: flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.12));
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(13, 124, 94, 0.10);
+  border: 1px solid rgba(13, 124, 94, 0.28);
   border-radius: 6px;
   color: #0D7C5E;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease;
   margin-left: auto;
   user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .kg-ai-explain-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(59, 130, 246, 0.18));
-  border-color: rgba(16, 185, 129, 0.4);
-  transform: translateY(-0.5px);
-  box-shadow: 0 2px 5px rgba(16, 185, 129, 0.08);
+  background: rgba(13, 124, 94, 0.16);
+  border-color: rgba(13, 124, 94, 0.42);
+}
+
+.kg-ai-explain-btn:focus-visible {
+  outline: 2px solid #0D7C5E;
+  outline-offset: 1px;
+}
+
+.dark .kg-ai-explain-btn {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.30);
+  color: #6EE7B7;
+}
+
+.dark .kg-ai-explain-btn:hover:not(:disabled) {
+  background: rgba(52, 211, 153, 0.20);
+  border-color: rgba(52, 211, 153, 0.45);
 }
 
 .kg-ai-explain-btn:disabled {
@@ -992,7 +1014,7 @@
   overflow: hidden;
 }
 
-/* Decorative left accent line */
+/* Decorative left accent line. One hue, not a green-blue-purple ramp. */
 .kg-ai-summary-bubble::before {
   content: '';
   position: absolute;
@@ -1001,7 +1023,11 @@
   bottom: 14px;
   width: 3px;
   border-radius: 3px;
-  background: linear-gradient(180deg, #22c55e, #3b82f6, #a855f7);
+  background: rgba(13, 124, 94, 0.45);
+}
+
+.dark .kg-ai-summary-bubble::before {
+  background: rgba(52, 211, 153, 0.45);
 }
 
 @keyframes kg-bubble-pop {
@@ -1230,16 +1256,6 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-
-.kg-ai-explain-btn--global {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(59, 130, 246, 0.18)) !important;
-  border-color: rgba(139, 92, 246, 0.35) !important;
-  color: #8b5cf6 !important;
-}
-.dark .kg-ai-explain-btn--global {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(59, 130, 246, 0.28)) !important;
-  color: #c084fc !important;
 }
 
 /* ── Tabbed Settings Popover ────────────────────────────────────────── */
@@ -1483,72 +1499,152 @@
   user-select: none;
 }
 
-.kg-cluster-container-wrapper {
-  flex: 1;
+/* ── Cluster selector (trigger in the bar, list in a popover) ─────────
+   The cluster list used to sit inline in the bar, which is what made the HUD
+   grow wider than the graph deserved. The bar now shows only the current
+   selection; the full list opens upward in a popover. */
+.kg-cluster-select {
   position: relative;
+  flex: 1;
   min-width: 0;
 }
 
-.kg-cluster-container {
+.kg-cluster-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  scroll-behavior: smooth;
-}
-
-.kg-cluster-container::-webkit-scrollbar {
-  display: none;
-}
-
-/* Right fade indicator when cluster list overflows */
-.kg-cluster-container-wrapper::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 24px;
-  background: linear-gradient(to right, transparent, var(--kg-panel-bg, var(--bg-primary)));
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.kg-cluster-container-wrapper.has-overflow::after {
-  opacity: 1;
-}
-
-.kg-cluster-chip {
-  flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  user-select: none;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
   border: 1px solid var(--kg-divider);
   background: var(--kg-chip-bg);
   color: var(--kg-text-subtle);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 
-.kg-cluster-chip:hover {
+.kg-cluster-trigger:hover,
+.kg-cluster-trigger.active {
   background: var(--kg-hover-md);
-  transform: translateY(-0.5px);
+  border-color: var(--kg-border);
+  color: var(--kg-text);
 }
 
-.kg-cluster-chip.active-all {
-  background: rgba(37, 99, 235, 0.08) !important;
-  border: 1px solid rgba(37, 99, 235, 0.18) !important;
-  color: #2563EB !important;
-  font-weight: 600 !important;
+.kg-cluster-trigger:focus-visible {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+.kg-cluster-trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.kg-cluster-trigger-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--kg-text-muted);
+  background: var(--kg-hover);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.kg-cluster-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 268px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--kg-surface);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--kg-border);
+  border-radius: 10px;
+  box-shadow: var(--kg-shadow-lg);
+  z-index: 20;
+}
+
+.kg-cluster-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--kg-text-muted);
+}
+
+.kg-cluster-popover-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.kg-cluster-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kg-cluster-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--kg-text-subtle);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.kg-cluster-option:hover {
+  background: var(--kg-hover-md);
+  color: var(--kg-text);
+}
+
+.kg-cluster-option:focus-visible {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: -2px;
+}
+
+.kg-cluster-option.active {
+  background: var(--kg-hover-md);
+  color: var(--kg-text);
+  font-weight: 600;
+}
+
+.kg-cluster-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kg-cluster-option-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--kg-text-muted);
 }
 
 /* ── Help popover & button ── */

@@ -196,21 +196,7 @@ export function ReviewSession() {
     const finishedASession = graded > 0;
     return (
       <div className="empty-state" data-testid={deckIsEmpty ? 'review-empty-deck' : 'review-empty-due'}>
-        <div style={{
-          width: 56,
-          height: 56,
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.12))',
-          border: '1px solid rgba(99, 102, 241, 0.25)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--accent-primary, #6366f1)',
-          boxShadow: '0 4px 16px rgba(99, 102, 241, 0.1)',
-          marginBottom: 4,
-        }}>
-          <IconBrain size={28} />
-        </div>
+        <IconBrain size={48} />
         <div className="empty-state-title">
           {deckIsEmpty ? t('review.emptyDeck.title') : t('review.empty.title')}
         </div>
