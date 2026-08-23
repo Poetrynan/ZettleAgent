@@ -457,11 +457,10 @@ impl ContextPackage {
         })
     }
 
-    fn all_items(&self) -> impl Iterator<Item = &ContextItem> {
-        self.all_items_with_section().map(|(_, item)| item)
-    }
-
-    /// 同一个遍历顺序，但带上条目来自哪个桶。
+    /// 遍历所有进包条目，带上它来自哪个桶。
+    ///
+    /// 顺序就是 `render()` 写进 prompt 的顺序，所以 Inspector 列出的次序和模型读到
+    /// 的次序一致。
     fn all_items_with_section(&self) -> impl Iterator<Item = (&'static str, &ContextItem)> {
         self.current_object
             .iter()

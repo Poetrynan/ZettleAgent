@@ -2239,6 +2239,64 @@ export async function forgetMemory(memoryId: string): Promise<MemoryItem> {
   return invoke<MemoryItem>('knowledge_memory_forget', { memoryId });
 }
 
+// ── Memory Center ───────────────────────────────────────────────────────────
+//
+// Inbox 只回答"有什么等我裁决"。Memory Center 要回答"你到底记住了我什么"——所以它
+// 看的是全部生命周期，包括已生效的、被取代的、我否掉过的。
+
+/** 列表筛选。字段全部可省，省略即"不筛"。 */
+export interface MemoryListQuery {
+  lifecycles?: MemoryLifecycle[];
+  kinds?: MemoryKind[];
+  scope?: string;
+  /** 对 claim 的搜索，与去重同一套归一化（大小写/标点无关）。 */
+  search?: string;
+  limit?: number;
+}
+
+/** 列出记忆（全生命周期）。空数组等于不筛，不是"什么都不要"。 */
+export async function listMemories(query?: MemoryListQuery): Promise<MemoryItem[]> {
+  return invoke<MemoryItem[]>('knowledge_memory_list', { query });
+}
+
+/**
+ * 一条记忆的全部来历。
+ *
+ * `supersededBy` 有值说明这条已经是历史；`evidence` 为空说明它无法对着原文验证，
+ * 界面必须如实这么说，而不是留白。
+ */
+export interface MemoryDetail {
+  item: MemoryItem;
+  supersedes: MemoryItem | null;
+  supersededBy: MemoryItem | null;
+  conflictsWith: MemoryItem | null;
+  evidence: EvidenceRecord[];
+}
+
+export async function getMemoryDetail(memoryId: string): Promise<MemoryDetail | null> {
+  return invoke<MemoryDetail | null>('knowledge_memory_detail', { memoryId });
+}
+
+/**
+ * 改写一条记忆。
+ *
+ * 后端不原地覆盖，而是新提一条取代旧的——旧说法留在链上可查。所以返回的是**新的**
+ * 那一条，id 会变，调用方要刷新列表而不是原地改。
+ */
+export async function editMemory(memoryId: string, claim: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_edit', { memoryId, claim });
+}
+
+/**
+ * 撤回一次拒绝或遗忘。
+ *
+ * 回到候选状态，也就是回到收件箱等你裁决——不会替你恢复成"已确认"，因为当初是什么
+ * 状态没人存下来。
+ */
+export async function restoreMemory(memoryId: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_restore', { memoryId });
+}
+
 /** 一次 `memory.md` 回流的结果。 */
 export interface MemoryFileSync {
   /** 文件里新出现、因此被采纳为用户事实的条数。 */

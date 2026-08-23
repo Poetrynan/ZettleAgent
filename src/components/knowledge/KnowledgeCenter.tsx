@@ -4,7 +4,8 @@ import type { TranslationKey } from '../../lib/i18n';
 import { useApp } from '../../contexts/AppContext';
 import { KnowledgeInbox } from './KnowledgeInbox';
 import { AgentActivity } from './AgentActivity';
-import { ChangesTab, HealthTab, MemoryTab, TasksTab } from '../chat/KnowledgePanel';
+import { MemoryCenter } from './MemoryCenter';
+import { ChangesTab, HealthTab, TasksTab } from '../chat/KnowledgePanel';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import '../../styles/knowledge-center.css';
@@ -105,8 +106,11 @@ export function KnowledgeCenter() {
               onOpenChat={state.isChatOpen ? undefined : toggleChat}
             />
           )}
-          {/* 这四块是 Chat 侧栏那四块的同一份实现，不是复制品。 */}
-          {page === 'memory' && <MemoryTab isZh={isZh} vaultPath={vaultPath} />}
+          {/* 记忆有了完整页面（全生命周期 + 改写 + 来历）；变更/任务/健康这三块仍是
+              Chat 侧栏那同一份实现，不是复制品，后续批次会一起升级。 */}
+          {page === 'memory' && (
+            <MemoryCenter vaultPath={vaultPath} onChanged={refresh} />
+          )}
           {page === 'changes' && <ChangesTab isZh={isZh} />}
           {page === 'tasks' && <TasksTab isZh={isZh} />}
           {page === 'health' && <HealthTab isZh={isZh} />}

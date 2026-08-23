@@ -2968,6 +2968,255 @@ fn confirming_a_memory_appends_it_to_the_core_memory_file() {
     assert_eq!(report.forgotten, 0);
 }
 
+// ── Memory Center：全量视图与用户改写 / the whole memory, and user edits ─────
+
+/// 三种生命周期各来一条 / one memory in each of three lifecycle states.
+fn three_lifecycles(conn: &Connection) -> (MemoryItem, MemoryItem, MemoryItem) {
+    let active = memory::propose(conn, ask_to_remember("回复一律使用中文")).unwrap();
+
+    let mut pending = MemoryProposal::new(MemoryKind::Profile, "用户是产品经理", "d:/vault");
+    pending.confidence = 0.9;
+    let candidate = memory::propose(conn, pending).unwrap();
+
+    let mut bad = MemoryProposal::new(MemoryKind::Profile, "用户讨厌中文", "d:/vault");
+    bad.confidence = 0.9;
+    let rejected = memory::propose(conn, bad).unwrap();
+    memory::reject(conn, &rejected.id).unwrap();
+
+    (active, candidate, rejected)
+}
+
+/// Inbox 只答"等我裁决什么"，Center 要答"你到底记住了我什么"。
+#[test]
+fn the_memory_center_lists_every_lifecycle_not_just_the_inbox() {
+    let conn = migrated_db();
+    let (active, candidate, rejected) = three_lifecycles(&conn);
+
+    let all = memory::list(&conn, &memory::MemoryFilter::default()).unwrap();
+    let ids: Vec<&str> = all.iter().map(|m| m.id.as_str()).collect();
+    assert!(ids.contains(&active.id.as_str()));
+    assert!(ids.contains(&candidate.id.as_str()));
+    assert!(
+        ids.contains(&rejected.id.as_str()),
+        "被否掉的那条也要能看见——否则用户无从知道自己拒绝过什么"
+    );
+    assert_eq!(memory::inbox(&conn, 50).unwrap().len(), 1, "Inbox 仍然只有候选那一条");
+
+    let only_candidates = memory::list(
+        &conn,
+        &memory::MemoryFilter {
+            lifecycles: vec![MemoryLifecycle::Candidate],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(only_candidates.len(), 1);
+    assert_eq!(only_candidates[0].id, candidate.id);
+}
+
+/// 空筛选是"全部"，不是"没有" / an empty filter means everything, not nothing.
+///
+/// 前端取消勾选后传来的就是空数组。把它读成"什么都不要"会让列表凭空变空，用户只会
+/// 以为记忆丢了。
+#[test]
+fn an_empty_filter_list_means_no_filtering() {
+    let conn = migrated_db();
+    three_lifecycles(&conn);
+
+    let empty_vectors = memory::list(
+        &conn,
+        &memory::MemoryFilter {
+            lifecycles: Vec::new(),
+            kinds: Vec::new(),
+            scope: None,
+            search: Some("   ".into()),
+            limit: 0,
+        },
+    )
+    .unwrap();
+    assert_eq!(empty_vectors.len(), 3, "空数组、空搜索、limit 0 都不该筛掉东西");
+}
+
+/// 搜索用的是和去重同一套归一化 / search normalises exactly like dedupe does.
+///
+/// 大小写、空格、句末标点不同必须仍然算命中；SQL 的 `LIKE` 做不到这一点，于是"我明
+/// 明记得有这条"会变成搜不到。
+#[test]
+fn searching_memories_ignores_punctuation_and_case_like_dedupe_does() {
+    let conn = migrated_db();
+    memory::propose(&conn, ask_to_remember("回复一律使用中文")).unwrap();
+
+    let hit = memory::list(
+        &conn,
+        &memory::MemoryFilter {
+            search: Some("回复一律使用中文。".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(hit.len(), 1);
+
+    let miss = memory::list(
+        &conn,
+        &memory::MemoryFilter {
+            search: Some("量子色动力学".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(miss.is_empty());
+}
+
+/// 取代链两头都要能读到 / both ends of a supersession are reachable.
+#[test]
+fn the_memory_detail_shows_both_ends_of_a_supersession_and_its_evidence() {
+    let conn = migrated_db();
+    let old = memory::propose(&conn, ask_to_remember("用户住在北京")).unwrap();
+    let mut newer = ask_to_remember("用户住在上海");
+    newer.supersedes_id = Some(old.id.clone());
+    let candidate = memory::propose(&conn, newer).unwrap();
+    memory::confirm(&conn, &candidate.id, "user").unwrap();
+
+    let old_detail = memory::detail(&conn, &old.id).unwrap().unwrap();
+    assert_eq!(
+        old_detail.superseded_by.as_ref().map(|m| m.claim.as_str()),
+        Some("用户住在上海"),
+        "看一条历史记忆时，要能读到是哪条替换了它"
+    );
+    assert!(old_detail.supersedes.is_none());
+    assert!(
+        !old_detail.evidence.is_empty(),
+        "记忆的证据要能和它一起取出来，否则界面上无从验证"
+    );
+
+    let new_detail = memory::detail(&conn, &candidate.id).unwrap().unwrap();
+    assert_eq!(
+        new_detail.supersedes.as_ref().map(|m| m.claim.as_str()),
+        Some("用户住在北京")
+    );
+    assert!(new_detail.superseded_by.is_none());
+
+    assert!(memory::detail(&conn, "不存在的id").unwrap().is_none());
+}
+
+/// 冲突对也一起给 / the conflicting counterpart comes with the detail.
+#[test]
+fn the_memory_detail_carries_the_conflicting_counterpart() {
+    let conn = migrated_db();
+    let a = memory::propose(&conn, ask_to_remember("项目截止日是三月")).unwrap();
+    let b = memory::propose(&conn, ask_to_remember("项目截止日是五月")).unwrap();
+    memory::mark_conflict(&conn, &a.id, &b.id).unwrap();
+
+    let detail = memory::detail(&conn, &a.id).unwrap().unwrap();
+    assert_eq!(
+        detail.conflicts_with.as_ref().map(|m| m.claim.as_str()),
+        Some("项目截止日是五月")
+    );
+}
+
+/// 改写不覆盖，而是留一条链 / editing supersedes instead of overwriting.
+#[test]
+fn editing_a_memory_keeps_the_old_claim_readable_and_takes_effect_at_once() {
+    let conn = migrated_db();
+    let old = memory::propose(&conn, ask_to_remember("用户住在北京")).unwrap();
+
+    let edited = memory::edit(&conn, &old.id, "  用户住在上海  ", "user").unwrap();
+
+    assert_ne!(edited.id, old.id, "改写落地成新的一条，不是原地覆盖");
+    assert_eq!(edited.claim, "用户住在上海", "前后空白被裁掉");
+    assert_eq!(
+        edited.lifecycle,
+        MemoryLifecycle::Active,
+        "用户自己写的不该再要求他确认一遍"
+    );
+    assert_eq!(edited.confirmed_by.as_deref(), Some("user"));
+
+    let old_after = memory::get(&conn, &old.id).unwrap().unwrap();
+    assert_eq!(old_after.lifecycle, MemoryLifecycle::Superseded);
+    assert_eq!(old_after.claim, "用户住在北京", "旧说法仍然可查");
+
+    assert_eq!(
+        legacy_rows(&conn),
+        vec!["用户住在上海".to_string()],
+        "生效的只有新说法"
+    );
+    let hits = memory::recall(&conn, "用户住在哪里", Some("d:/vault"), 5).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].item.claim, "用户住在上海");
+}
+
+/// 改成同一句话什么都不做 / an edit that changes nothing writes nothing.
+#[test]
+fn editing_to_the_same_claim_does_not_add_a_link_to_the_chain() {
+    let conn = migrated_db();
+    let item = memory::propose(&conn, ask_to_remember("回复一律使用中文")).unwrap();
+
+    // 只差一个句末标点——按去重的归一化规则这是同一条。
+    let same = memory::edit(&conn, &item.id, "回复一律使用中文。", "user").unwrap();
+    assert_eq!(same.id, item.id);
+
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1, "链上不该多出一条毫无信息量的记录");
+}
+
+/// 空内容不是一次改写 / an empty claim is refused.
+#[test]
+fn editing_a_memory_to_nothing_is_refused() {
+    let conn = migrated_db();
+    let item = memory::propose(&conn, ask_to_remember("回复一律使用中文")).unwrap();
+
+    assert!(memory::edit(&conn, &item.id, "   ", "user").is_err());
+    let after = memory::get(&conn, &item.id).unwrap().unwrap();
+    assert_eq!(after.lifecycle, MemoryLifecycle::Active, "拒绝之后原样不动");
+}
+
+/// 撤回拒绝把它放回收件箱 / undoing a rejection returns it to the inbox.
+///
+/// 刻意不恢复成 active：当初是什么状态没有存下来，猜一个"已生效"等于替用户做了一次
+/// 他没做过的确认。
+#[test]
+fn restoring_a_rejected_memory_puts_it_back_in_the_inbox() {
+    let conn = migrated_db();
+    let mut p = MemoryProposal::new(MemoryKind::Profile, "用户是产品经理", "d:/vault");
+    p.confidence = 0.9;
+    let candidate = memory::propose(&conn, p).unwrap();
+    memory::reject(&conn, &candidate.id).unwrap();
+    assert!(memory::inbox(&conn, 10).unwrap().is_empty());
+
+    let restored = memory::restore(&conn, &candidate.id).unwrap();
+    assert_eq!(restored.lifecycle, MemoryLifecycle::Candidate);
+    assert!(restored.requires_user_confirmation);
+    assert!(restored.confirmed_by.is_none());
+    assert_eq!(memory::inbox(&conn, 10).unwrap().len(), 1);
+    assert!(
+        legacy_rows(&conn).is_empty(),
+        "回到候选不等于生效，别投影进 legacy 记忆"
+    );
+}
+
+/// 只有被拒绝/遗忘的能撤回 / only a rejected or forgotten memory can be restored.
+#[test]
+fn restoring_something_that_was_never_rejected_is_refused() {
+    let conn = migrated_db();
+    let active = memory::propose(&conn, ask_to_remember("回复一律使用中文")).unwrap();
+
+    assert!(
+        memory::restore(&conn, &active.id).is_err(),
+        "生效中的记忆没有「撤回」这个语义"
+    );
+    assert!(memory::restore(&conn, "不存在的id").is_err());
+
+    let forgotten = memory::propose(&conn, ask_to_remember("用户的生日是三月一日")).unwrap();
+    memory::forget(&conn, &forgotten.id).unwrap();
+    assert_eq!(
+        memory::restore(&conn, &forgotten.id).unwrap().lifecycle,
+        MemoryLifecycle::Candidate,
+        "遗忘也是可以撤回的"
+    );
+}
+
 
 
 

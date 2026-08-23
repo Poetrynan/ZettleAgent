@@ -626,6 +626,233 @@ pub fn list_by_lifecycle(
     rows.into_iter().collect()
 }
 
+// ── Memory Center：全量视图 / the whole memory, not just the inbox ───────────
+
+/// 列表筛选条件 / what the Memory Center is asking for.
+///
+/// 空的 `lifecycles` 表示"全部生命周期"，而不是"没有"：Memory Center 的默认视图就
+/// 是全部，用户勾选之后才收窄。
+#[derive(Debug, Clone, Default)]
+pub struct MemoryFilter {
+    pub lifecycles: Vec<MemoryLifecycle>,
+    pub kinds: Vec<MemoryKind>,
+    pub scope: Option<String>,
+    /// 对 claim 的子串匹配，归一化后比较（大小写/标点无关）。
+    pub search: Option<String>,
+    pub limit: usize,
+}
+
+/// 列出记忆 / list memories under a filter.
+///
+/// `lifecycle` / `kind` 用 SQL 过滤，`search` 在 Rust 里按归一化文本比对——归一化
+/// 规则（`memory_store::normalize`）和去重、取代解析用的是同一套，所以搜索结果和
+/// "这两条算不算同一条"的判断不会打架。SQL 的 `LIKE` 做不到这一点。
+pub fn list(conn: &Connection, filter: &MemoryFilter) -> ObjectResult<Vec<MemoryItem>> {
+    let mut sql = format!("SELECT {MEMORY_COLUMNS} FROM memory_items WHERE 1 = 1");
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if !filter.lifecycles.is_empty() {
+        let marks = placeholders(filter.lifecycles.len(), args.len());
+        sql.push_str(&format!(" AND lifecycle IN ({marks})"));
+        for l in &filter.lifecycles {
+            args.push(Box::new(l.as_str().to_string()));
+        }
+    }
+    if !filter.kinds.is_empty() {
+        let marks = placeholders(filter.kinds.len(), args.len());
+        sql.push_str(&format!(" AND kind IN ({marks})"));
+        for k in &filter.kinds {
+            args.push(Box::new(k.as_str().to_string()));
+        }
+    }
+    if let Some(scope) = filter.scope.as_ref().filter(|s| !s.is_empty()) {
+        args.push(Box::new(scope.clone()));
+        sql.push_str(&format!(" AND scope = ?{}", args.len()));
+    }
+    sql.push_str(" ORDER BY updated_at_ms DESC");
+
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
+    let rows: Vec<_> = stmt
+        .query_map(params.as_slice(), |row| Ok(map_memory(row)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let needle = filter
+        .search
+        .as_ref()
+        .map(|s| crate::db::memory_store::normalize(s))
+        .filter(|s| !s.trim().is_empty());
+
+    let limit = if filter.limit == 0 { 100 } else { filter.limit };
+    let mut out = Vec::new();
+    for row in rows {
+        let item = row?;
+        if let Some(needle) = &needle {
+            if !crate::db::memory_store::normalize(&item.claim).contains(needle.as_str()) {
+                continue;
+            }
+        }
+        out.push(item);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// `?n, ?n+1, …` —— 从 `offset` 之后接着编号。
+fn placeholders(count: usize, offset: usize) -> String {
+    (1..=count)
+        .map(|i| format!("?{}", i + offset))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// 一条记忆的完整来历 / one memory with everything that explains it.
+///
+/// 取代链和冲突对必须和记忆本身一起给：用户看到"这条替换了那条"时要能立刻读到被
+/// 替换的原文，否则那句话是无法验证的断言。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryDetail {
+    pub item: MemoryItem,
+    /// 它取代掉的那条（更旧）。
+    pub supersedes: Option<MemoryItem>,
+    /// 取代了它的那条（更新）。为 `Some` 说明这条已经是历史。
+    pub superseded_by: Option<MemoryItem>,
+    pub conflicts_with: Option<MemoryItem>,
+    /// 挂在它对象上的证据。没有对象或没有证据都会是空——UI 据此说"无法验证"。
+    pub evidence: Vec<Evidence>,
+}
+
+/// 取一条记忆的全部来历 / fetch one memory plus its chain and evidence.
+pub fn detail(conn: &Connection, id: &str) -> ObjectResult<Option<MemoryDetail>> {
+    let Some(item) = get(conn, id)? else {
+        return Ok(None);
+    };
+
+    let supersedes = match &item.supersedes_id {
+        Some(old) => get(conn, old)?,
+        None => None,
+    };
+    let conflicts_with = match &item.conflicts_with_id {
+        Some(other) => get(conn, other)?,
+        None => None,
+    };
+    // 反向找：谁的 `supersedes_id` 指着我。取最新的一条——理论上只会有一条，但真
+    // 出现多条时显示最新的比随机挑一条可解释。
+    let sql = format!(
+        "SELECT {MEMORY_COLUMNS} FROM memory_items
+         WHERE supersedes_id = ?1 ORDER BY created_at_ms DESC LIMIT 1"
+    );
+    let superseded_by = conn
+        .query_row(&sql, params![id], |row| Ok(map_memory(row)))
+        .optional()?
+        .transpose()?;
+
+    let evidence = match &item.object_id {
+        Some(object_id) => super::evidence::evidence_for_object(conn, object_id)?
+            .into_iter()
+            .map(|(e, _role, _confidence)| e)
+            .collect(),
+        None => Vec::new(),
+    };
+
+    Ok(Some(MemoryDetail {
+        item,
+        supersedes,
+        superseded_by,
+        conflicts_with,
+        evidence,
+    }))
+}
+
+/// 改写一条记忆 / rewrite a memory's claim.
+///
+/// **不原地改 `claim`。** 改成新提一条用户亲笔的记忆去取代旧的：
+///
+/// - 旧那条的原文还在，`superseded_by` 能一路读回去。原地覆盖等于把"Agent 原本记
+///   的是什么"这段历史抹掉，而那恰恰是用户日后想核对的东西。
+/// - 新那条 `user_requested = true`，所以它不需要再确认——本来就是用户写的。
+/// - 证据不继承：旧证据支撑的是旧说法。新说法的来源是"用户在 Memory Center 里改
+///   的"，如实记成 `user_edit`。
+pub fn edit(conn: &Connection, id: &str, new_claim: &str, by: &str) -> ObjectResult<MemoryItem> {
+    let claim = new_claim.trim();
+    if claim.is_empty() {
+        return Err(ObjectError::Invalid(
+            "记忆内容不能为空 / claim cannot be empty".to_string(),
+        ));
+    }
+    let Some(old) = get(conn, id)? else {
+        return Err(ObjectError::NotFound(id.to_string()));
+    };
+    if crate::db::memory_store::normalize(&old.claim) == crate::db::memory_store::normalize(claim) {
+        // 没有实质变化就什么都不做，别在链上留一条毫无信息量的记录。
+        return Ok(old);
+    }
+
+    let proposal = MemoryProposal {
+        kind: old.kind,
+        claim: claim.to_string(),
+        scope: old.scope.clone(),
+        confidence: 1.0,
+        importance: old.importance,
+        source: Some(SourceRef {
+            source_type: "user_edit".to_string(),
+            source_id: old.id.clone(),
+        }),
+        section: old.section.clone(),
+        ttl_days: None,
+        supersedes_id: Some(old.id.clone()),
+        user_requested: true,
+        from_untrusted_source: false,
+        extraction_model: None,
+        pipeline_version: None,
+        excerpt: None,
+        locator: None,
+    };
+    let fresh = propose(conn, proposal)?;
+    // `propose` 对"取代已有记忆"一律要求确认——那条规则防的是模型悄悄改写用户说过
+    // 的话。但这一条正是用户自己写下的，所以立刻按 `by` 记成已确认：否则他改完之
+    // 后旧说法还在生效，新说法却要等他再点一次确认自己刚写的东西，而这中间记忆层
+    // 处于"两条都不作数"的状态。`confirm` 顺手闭合取代链并更新投影。
+    if fresh.lifecycle == MemoryLifecycle::Candidate {
+        return confirm(conn, &fresh.id, by);
+    }
+    Ok(fresh)
+}
+
+/// 撤回一次拒绝或遗忘 / undo a reject/forget decision.
+///
+/// `reject` / `forget` 都只改生命周期、不删行，所以撤回是可能的：把它放回
+/// `candidate` 并重新要求确认，也就是回到"等你裁决"的状态。
+///
+/// 刻意**不**恢复成 `active`：我们没有存"当初是什么状态"，猜一个 active 等于替用户
+/// 做了一个他没做过的确认。回到收件箱是唯一如实的落点。
+pub fn restore(conn: &Connection, id: &str) -> ObjectResult<MemoryItem> {
+    let Some(item) = get(conn, id)? else {
+        return Err(ObjectError::NotFound(id.to_string()));
+    };
+    if !matches!(
+        item.lifecycle,
+        MemoryLifecycle::Archived | MemoryLifecycle::Forgotten
+    ) {
+        return Err(ObjectError::Invalid(
+            "只有被拒绝或遗忘的记忆可以撤回 / only a rejected or forgotten memory can be restored"
+                .to_string(),
+        ));
+    }
+    conn.execute(
+        "UPDATE memory_items
+         SET lifecycle = 'candidate', requires_user_confirmation = 1,
+             confirmed_by = NULL, confirmed_at_ms = NULL, updated_at_ms = ?2
+         WHERE id = ?1",
+        params![id, now_ms()],
+    )?;
+    get(conn, id)?.ok_or_else(|| ObjectError::NotFound(id.to_string()))
+}
+
+
 // ── memory.md 手工编辑回流 / hand edits to memory.md ────────────────────────
 
 /// `memory.md` 在 vault 里的位置 / where the projection lives.

@@ -780,5 +780,111 @@
   overflow-wrap: anywhere;
 }
 
+/* ── Memory Center ────────────────────────────────────────────────── */
+
+.kc-memory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.kc-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 180px;
+}
+
+.kc-field-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.kc-input {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.kc-input:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.kc-textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.kc-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kc-chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.kc-chipset > legend {
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+/*
+   勾选状态不只靠颜色：选中的 chip 同时换边框、加粗字重，并且原生 checkbox 仍在
+   DOM 里（只是视觉上藏起来），所以键盘和读屏都照常工作。
+*/
+.kc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.kc-chip.active {
+  border-color: var(--accent-secondary);
+  background: var(--accent-secondary-bg);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.kc-chip-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kc-chip:focus-within {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
 
 

@@ -7,7 +7,7 @@
 //!   而不是发一个请求然后等一个不知道多久的批处理；
 //! - 读命令返回 `null`/空数组而不是伪造对象，backfill 没跑到的笔记就是还没有对象。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::ZettelError;
@@ -321,6 +321,92 @@ pub async fn knowledge_memory_recall(
     let conn = state.db.lock()?;
     let limit = limit.unwrap_or(memory::RECALL_LIMIT).clamp(1, 50);
     Ok(memory::recall(&conn, &query, scope.as_deref(), limit)?)
+}
+
+// ── Memory Center ───────────────────────────────────────────────────────────
+//
+// Inbox 只回答"有什么等我裁决"。Memory Center 要回答"你到底记住了我什么"——那就必
+// 须能看到已生效的、已被取代的、被我否掉的，也就是全部生命周期，而不只是候选。
+
+/// 列表筛选 / what the Memory Center is asking for.
+///
+/// 全部字段可省：不传就是"全部"。空数组和 `None` 在这里同义（都表示不筛），因为
+/// 前端取消勾选后自然会传空数组，把它解释成"什么都不要"会让列表凭空变空。
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryListQuery {
+    pub lifecycles: Option<Vec<String>>,
+    pub kinds: Option<Vec<String>>,
+    pub scope: Option<String>,
+    pub search: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// 列出记忆（全生命周期）/ list memories across every lifecycle state.
+///
+/// 无法识别的枚举字符串会被**忽略**而不是报错：筛选条件来自 UI，多一个前端还没跟
+/// 上的值不该让整个列表读不出来。
+#[tauri::command]
+pub async fn knowledge_memory_list(
+    state: State<'_, AppState>,
+    query: Option<MemoryListQuery>,
+) -> Result<Vec<types::MemoryItem>, ZettelError> {
+    let query = query.unwrap_or_default();
+    let filter = memory::MemoryFilter {
+        lifecycles: query
+            .lifecycles
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| types::MemoryLifecycle::parse(s))
+            .collect(),
+        kinds: query
+            .kinds
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| types::MemoryKind::parse(s))
+            .collect(),
+        scope: query.scope,
+        search: query.search,
+        limit: query.limit.unwrap_or(100).clamp(1, 500),
+    };
+    let conn = state.db.lock()?;
+    Ok(memory::list(&conn, &filter)?)
+}
+
+/// 一条记忆的全部来历 / one memory plus its chain, conflict and evidence.
+#[tauri::command]
+pub async fn knowledge_memory_detail(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> Result<Option<memory::MemoryDetail>, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(memory::detail(&conn, &memory_id)?)
+}
+
+/// 用户改写一条记忆 / the user rewrites a memory.
+///
+/// 落地方式是"新提一条取代旧的"，不是原地覆盖——旧说法留在链上可查。返回的是新那
+/// 一条，所以 UI 拿到的 id 会变，刷新列表即可。
+#[tauri::command]
+pub async fn knowledge_memory_edit(
+    state: State<'_, AppState>,
+    memory_id: String,
+    claim: String,
+) -> Result<types::MemoryItem, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(memory::edit(&conn, &memory_id, &claim, "user")?)
+}
+
+/// 撤回一次拒绝或遗忘 / undo a reject/forget.
+///
+/// 回到候选状态，也就是回到收件箱等你裁决。不会替用户恢复成"已确认"。
+#[tauri::command]
+pub async fn knowledge_memory_restore(
+    state: State<'_, AppState>,
+    memory_id: String,
+) -> Result<types::MemoryItem, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(memory::restore(&conn, &memory_id)?)
 }
 
 // ── ChangeSet ───────────────────────────────────────────────────────────────

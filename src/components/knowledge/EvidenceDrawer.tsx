@@ -51,17 +51,40 @@ export function EvidenceDrawer({
         <KcLoading rows={2} />
       ) : (
         <div className="kc-drawer-body" aria-busy={busy}>
-          {missing > 0 && (
-            <div className="kc-warn" role="status">
-              {tf('knowledge.evidence.missing', missing)}
-            </div>
-          )}
-          {data.map(ev => (
-            <EvidenceCard key={ev.id} ev={ev} onOpenSource={onOpenSource} />
-          ))}
+          <EvidenceList items={data} missing={missing} onOpenSource={onOpenSource} />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 一组证据 / a list of evidence records.
+ *
+ * 单独拆出来是因为有两个调用方：抽屉按 id 现取，而 Memory Center 的详情里证据是跟
+ * 着 `MemoryDetail` 一起回来的，不该为了显示再发一次请求。
+ */
+export function EvidenceList({
+  items,
+  missing = 0,
+  onOpenSource,
+}: {
+  items: EvidenceRecord[];
+  /** id 还在、库里已经没有的条数。0 就不提。 */
+  missing?: number;
+  onOpenSource?: (locator: string) => void;
+}) {
+  return (
+    <>
+      {missing > 0 && (
+        <div className="kc-warn" role="status">
+          {tf('knowledge.evidence.missing', missing)}
+        </div>
+      )}
+      {items.map(ev => (
+        <EvidenceCard key={ev.id} ev={ev} onOpenSource={onOpenSource} />
+      ))}
+    </>
   );
 }
 

@@ -39,6 +39,13 @@ pub enum ObjectError {
     #[error("unknown enum value {value:?} in column {column}")]
     UnknownEnum { column: &'static str, value: String },
 
+    /// 调用方给的参数本身不成立：空内容，或当前状态不允许这个操作。
+    ///
+    /// 与 `NotFound` 分开是因为处置不同——那个是"东西不在了"，这个是"这么做不合
+    /// 法"，UI 该说的话完全不一样。
+    #[error("{0}")]
+    Invalid(String),
+
     /// `db::search` 用 `anyhow`，本层用具体错误类型。检索失败不是对象层的问题，
     /// 但调用方需要一个统一的 `Result`，所以在边界上转成这一个变体。
     #[error("retrieval failed: {0}")]
