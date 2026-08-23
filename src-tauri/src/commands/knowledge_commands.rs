@@ -543,3 +543,447 @@ pub struct CommitmentScan {
     pub created: usize,
 }
 
+// ── 统一收件箱 / the unified inbox ──────────────────────────────────────────
+//
+// 四种"等用户判断的东西"本来分散在四张表里，用户得点四个地方才知道有没有活。这两个
+// 命令把它们合成一条流，但**不**在这里新增业务语义：每一项都还是原表的那一行，动作
+// 也还是原来那几个命令。这里只做汇总和排序。
+//
+// 文案不在这里。返回的是稳定的 `reason`/`actions` 代码，中英文由前端 i18n 映射——
+// 后端硬编码中文会让英文界面缺一半信息。
+//
+// `active` 承诺不进收件箱：它已经被接受了，属于 Task Center 的工作量，不是待裁决项。
+
+/// 各类待处理数量 / how much is waiting, by kind.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxCounts {
+    /// 等确认的候选记忆。
+    pub memory: i64,
+    /// 还没落地的变更批次。
+    pub changes: i64,
+    /// 等裁决的承诺（只有 `proposed`）。
+    pub tasks: i64,
+    /// 需要人管的索引故障。
+    pub health: i64,
+    pub total: i64,
+}
+
+/// 角标要的那个数 / the number behind the nav badge.
+///
+/// 单独于 `knowledge_index_health` 存在，因为角标会被轮询：这里只有四个 `COUNT(*)`，
+/// 不刷新投影健康、不写任何表。
+#[tauri::command]
+pub async fn knowledge_inbox_counts(
+    state: State<'_, AppState>,
+) -> Result<InboxCounts, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(inbox_counts(&conn)?)
+}
+
+fn inbox_counts(conn: &rusqlite::Connection) -> rusqlite::Result<InboxCounts> {
+    let count = |sql: &str| -> rusqlite::Result<i64> { conn.query_row(sql, [], |r| r.get(0)) };
+
+    let memory = count(
+        "SELECT COUNT(*) FROM memory_items
+         WHERE requires_user_confirmation = 1 AND lifecycle = 'candidate'",
+    )?;
+    let changes = count(
+        "SELECT COUNT(*) FROM changesets
+         WHERE state IN ('proposed', 'previewed', 'awaiting_approval', 'approved')",
+    )?;
+    let tasks = count("SELECT COUNT(*) FROM task_commitments WHERE status = 'proposed'")?;
+    let health = count("SELECT COUNT(*) FROM ingestion_jobs WHERE status = 'failed'")?;
+
+    Ok(InboxCounts { memory, changes, tasks, health, total: memory + changes + tasks + health })
+}
+
+/// 收件箱里的一项 / one thing waiting on the user.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItem {
+    /// 原表主键。动作命令要用它，所以不能改写。
+    pub id: String,
+    /// `memory` / `change` / `task` / `health`。
+    pub kind: String,
+    pub title: String,
+    /// 一句人话摘要。空字符串表示没有比标题更多的信息。
+    pub summary: String,
+    /// 原表的状态值，给高级详情看的。
+    pub status: String,
+    pub risk: Option<String>,
+    pub source_type: Option<String>,
+    pub source_id: Option<String>,
+    /// 为什么需要现在处理，稳定代码，前端翻译。
+    pub reason: String,
+    /// 可用动作的稳定代码。
+    pub actions: Vec<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// 排序权重 / how urgent this kind is, for the merged sort.
+///
+/// 索引故障排最前：它会让后面所有判断都基于不完整的知识库。
+fn inbox_weight(kind: &str) -> u8 {
+    match kind {
+        "health" => 0,
+        "change" => 1,
+        "memory" => 2,
+        _ => 3,
+    }
+}
+
+/// 合并后的收件箱 / the merged inbox.
+///
+/// 每类各取 `limit`，合并后再截到 `limit`——所以一类爆量不会把其他类挤出视野之外的
+/// 顺序，但总数仍然有界。
+#[tauri::command]
+pub async fn knowledge_inbox(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<InboxItem>, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(build_inbox(&conn, limit.unwrap_or(50).clamp(1, 200))?)
+}
+
+/// 收件箱的全部逻辑 / everything the inbox actually decides.
+///
+/// 与命令分开是为了能测：它只要一个 `Connection`，不需要 Tauri 的 `State`。
+fn build_inbox(
+    conn: &rusqlite::Connection,
+    per_kind: usize,
+) -> Result<Vec<InboxItem>, ZettelError> {
+    let mut items = Vec::new();
+
+
+    for m in memory::inbox(&conn, per_kind)? {
+        let reason = if m.conflicts_with_id.is_some() {
+            "memory_conflicts"
+        } else if m.supersedes_id.is_some() {
+            "memory_supersedes"
+        } else if m.source.as_ref().is_some_and(|s| s.source_type == "web" || s.source_type == "mcp")
+        {
+            "memory_external_source"
+        } else if m.confidence < 0.7 {
+            "memory_low_confidence"
+        } else {
+            "memory_unconfirmed"
+        };
+        items.push(InboxItem {
+            id: m.id,
+            kind: "memory".into(),
+            title: m.claim,
+            summary: String::new(),
+            status: m.lifecycle.as_str().to_string(),
+            risk: None,
+            source_type: m.source.as_ref().map(|s| s.source_type.clone()),
+            source_id: m.source.as_ref().map(|s| s.source_id.clone()),
+            reason: reason.into(),
+            // 只列出现在真的有命令支撑的动作。写一个还没有后端的按钮，用户点一次就
+            // 学会不再信任这个界面。
+            actions: vec!["confirm".into(), "reject".into(), "forget".into()],
+            created_at_ms: m.created_at_ms,
+            updated_at_ms: m.updated_at_ms,
+        });
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.actor, c.intent, c.state, c.risk, c.commit_error,
+                c.created_at_ms, c.updated_at_ms,
+                (SELECT COUNT(*) FROM changeset_ops o WHERE o.changeset_id = c.id)
+         FROM changesets c
+         WHERE c.state IN ('proposed', 'previewed', 'awaiting_approval', 'approved')
+         ORDER BY c.updated_at_ms DESC
+         LIMIT ?1",
+    )?;
+    let changes = stmt
+        .query_map([per_kind as i64], |r| {
+            let state: String = r.get(3)?;
+            let commit_error: Option<String> = r.get(5)?;
+            let ops: i64 = r.get(8)?;
+            let reason = if commit_error.is_some() {
+                "change_failed"
+            } else if state == "approved" {
+                "change_approved_pending_write"
+            } else {
+                "change_awaiting_approval"
+            };
+            Ok(InboxItem {
+                id: r.get(0)?,
+                kind: "change".into(),
+                title: r.get::<_, Option<String>>(2)?.unwrap_or_else(|| {
+                    r.get::<_, String>(1).unwrap_or_else(|_| "change set".into())
+                }),
+                summary: ops.to_string(),
+                status: state,
+                risk: r.get(4)?,
+                source_type: None,
+                source_id: None,
+                reason: reason.into(),
+                // 不在收件箱里直接给"批准"：批准的前置条件是看过 dry-run 的逐行
+                // 改动，而那是变更页的事。一个不看 diff 就能点的批准按钮，等于
+                // 把审批降级成走过场。
+                actions: vec!["preview".into()],
+                created_at_ms: r.get(6)?,
+                updated_at_ms: r.get(7)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    items.extend(changes);
+
+    let now = types::now_ms();
+    for c in commitments::inbox(&conn, per_kind)? {
+        // `active` 已经被接受过一次了，它属于 Task Center 的待办，不是待裁决项。
+        if !matches!(c.status, types::CommitmentStatus::Proposed) {
+            continue;
+        }
+        let reason = match c.due_at_ms {
+            Some(due) if due < now => "task_overdue",
+            Some(due) if due - now < 86_400_000 => "task_due_soon",
+            _ => "task_proposed",
+        };
+        items.push(InboxItem {
+            id: c.id,
+            kind: "task".into(),
+            title: c.title,
+            summary: String::new(),
+            status: c.status.as_str().to_string(),
+            risk: None,
+            source_type: c.source.as_ref().map(|s| s.source_type.clone()),
+            source_id: c.source.as_ref().map(|s| s.source_id.clone()),
+            reason: reason.into(),
+            actions: vec![
+                "activate".into(),
+                "snooze".into(),
+                "complete".into(),
+                "dismiss".into(),
+            ],
+            created_at_ms: c.created_at_ms,
+            updated_at_ms: c.updated_at_ms,
+        });
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT id, job_type, source_id, last_error, attempt, created_at_ms, updated_at_ms
+         FROM ingestion_jobs
+         WHERE status = 'failed'
+         ORDER BY updated_at_ms DESC
+         LIMIT ?1",
+    )?;
+    let jobs = stmt
+        .query_map([per_kind as i64], |r| {
+            Ok(InboxItem {
+                id: r.get(0)?,
+                kind: "health".into(),
+                title: r.get(1)?,
+                // 失败原因是这一项唯一有用的内容，所以它就是摘要。
+                summary: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                status: "failed".into(),
+                risk: None,
+                source_type: Some("file".into()),
+                source_id: r.get(2)?,
+                reason: "health_job_failed".into(),
+                // 重试单个 job 还没有命令，所以这里只给"打开健康页"。
+                actions: vec!["open_health".into()],
+                created_at_ms: r.get(5)?,
+                updated_at_ms: r.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    items.extend(jobs);
+
+    items.sort_by(|a, b| {
+        inbox_weight(&a.kind)
+            .cmp(&inbox_weight(&b.kind))
+            .then(b.updated_at_ms.cmp(&a.updated_at_ms))
+    });
+    items.truncate(per_kind);
+    Ok(items)
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::*;
+    use rusqlite::{params, Connection};
+
+    /// 与生产同一条建库路径 / the same schema path production runs.
+    fn db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        crate::knowledge::migration::run_knowledge_migrations(&conn).unwrap();
+        conn
+    }
+
+    fn add_candidate(conn: &Connection, id: &str, claim: &str, confidence: f64, at: i64) {
+        conn.execute(
+            "INSERT INTO memory_items
+                (id, kind, lifecycle, claim, scope, confidence, importance,
+                 requires_user_confirmation, created_at_ms, updated_at_ms)
+             VALUES (?1, 'semantic', 'candidate', ?2, 'global', ?3, 1.0, 1, ?4, ?4)",
+            params![id, claim, confidence, at],
+        )
+        .unwrap();
+    }
+
+    fn add_changeset(conn: &Connection, id: &str, state: &str, at: i64) {
+        conn.execute(
+            "INSERT INTO changesets (id, actor, intent, state, risk, created_at_ms, updated_at_ms)
+             VALUES (?1, 'agent', 'tidy the note', ?2, 'low', ?3, ?3)",
+            params![id, state, at],
+        )
+        .unwrap();
+    }
+
+    fn add_commitment(conn: &Connection, id: &str, status: &str, due: Option<i64>, at: i64) {
+        conn.execute(
+            "INSERT INTO task_commitments
+                (id, commitment_type, title, status, priority, due_at_ms, dedupe_key,
+                 created_at_ms, updated_at_ms)
+             VALUES (?1, 'commitment', 'ship the thing', ?2, 0, ?3, ?1, ?4, ?4)",
+            params![id, status, due, at],
+        )
+        .unwrap();
+    }
+
+    fn add_failed_job(conn: &Connection, id: &str, error: &str, at: i64) {
+        conn.execute(
+            "INSERT INTO ingestion_jobs
+                (id, idempotency_key, job_type, source_type, source_id, status,
+                 last_error, created_at_ms, updated_at_ms)
+             VALUES (?1, ?1, 'objectify', 'file', 'notes/a.md', 'failed', ?2, ?3, ?3)",
+            params![id, error, at],
+        )
+        .unwrap();
+    }
+
+    /// 空库不撒谎 / an empty database reports zero, not a placeholder.
+    #[test]
+    fn inbox_counts_are_zero_on_a_fresh_database() {
+        let conn = db();
+        let counts = inbox_counts(&conn).unwrap();
+        assert_eq!(
+            counts,
+            InboxCounts { memory: 0, changes: 0, tasks: 0, health: 0, total: 0 }
+        );
+        assert!(build_inbox(&conn, 50).unwrap().is_empty());
+    }
+
+    /// 角标数就是四类之和 / the badge number is the sum of the four kinds.
+    #[test]
+    fn inbox_counts_sum_the_four_kinds() {
+        let conn = db();
+        add_candidate(&conn, "m1", "prefers conclusions first", 0.5, 1_000);
+        add_changeset(&conn, "c1", "awaiting_approval", 2_000);
+        add_commitment(&conn, "t1", "proposed", None, 3_000);
+        add_failed_job(&conn, "j1", "embedding model unavailable", 4_000);
+
+        let counts = inbox_counts(&conn).unwrap();
+        assert_eq!(
+            counts,
+            InboxCounts { memory: 1, changes: 1, tasks: 1, health: 1, total: 4 }
+        );
+    }
+
+    /// 已经落地或已经被接受的东西不再占用收件箱。
+    ///
+    /// `committed` 变更、`active` 承诺、非 candidate 记忆都是"处理过了"，如果它们
+    /// 继续留在收件箱里，角标就永远清不掉，用户会学会忽略角标。
+    #[test]
+    fn inbox_excludes_settled_and_already_accepted_work() {
+        let conn = db();
+        add_changeset(&conn, "c-done", "committed", 1_000);
+        add_changeset(&conn, "c-open", "proposed", 2_000);
+        add_commitment(&conn, "t-active", "active", None, 3_000);
+        add_commitment(&conn, "t-new", "proposed", None, 4_000);
+        conn.execute(
+            "INSERT INTO memory_items
+                (id, kind, lifecycle, claim, scope, confidence, importance,
+                 requires_user_confirmation, created_at_ms, updated_at_ms)
+             VALUES ('m-active', 'semantic', 'active', 'already confirmed', 'global',
+                     0.9, 1.0, 0, 5000, 5000)",
+            [],
+        )
+        .unwrap();
+
+        let counts = inbox_counts(&conn).unwrap();
+        assert_eq!(counts.changes, 1);
+        assert_eq!(counts.tasks, 1);
+        assert_eq!(counts.memory, 0);
+
+        let ids: Vec<String> = build_inbox(&conn, 50).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec!["c-open".to_string(), "t-new".to_string()]);
+    }
+
+    /// 索引故障排在最前 / a broken index outranks everything else.
+    ///
+    /// 它不是"又一条待办"：知识库不完整的时候，用户对其他每一项的判断都建立在
+    /// 缺失的信息上。
+    #[test]
+    fn inbox_puts_index_failures_first() {
+        let conn = db();
+        add_candidate(&conn, "m1", "a claim", 0.5, 9_000);
+        add_commitment(&conn, "t1", "proposed", None, 8_000);
+        add_changeset(&conn, "c1", "previewed", 7_000);
+        add_failed_job(&conn, "j1", "checksum mismatch", 1_000);
+
+        let kinds: Vec<String> =
+            build_inbox(&conn, 50).unwrap().into_iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, vec!["health", "change", "memory", "task"]);
+    }
+
+    /// 每一项都要说清"为什么现在需要你" / every item carries its own reason.
+    #[test]
+    fn inbox_reasons_describe_why_the_item_needs_a_human() {
+        let conn = db();
+        add_candidate(&conn, "m-low", "a guess", 0.4, 1_000);
+        conn.execute(
+            "INSERT INTO memory_items
+                (id, kind, lifecycle, claim, scope, confidence, importance,
+                 requires_user_confirmation, conflicts_with_id, created_at_ms, updated_at_ms)
+             VALUES ('m-conflict', 'semantic', 'candidate', 'contradicts', 'global',
+                     0.9, 1.0, 1, 'm-low', 2000, 2000)",
+            [],
+        )
+        .unwrap();
+        let now = crate::knowledge::types::now_ms();
+        add_commitment(&conn, "t-late", "proposed", Some(now - 60_000), 3_000);
+        add_failed_job(&conn, "j1", "boom", 4_000);
+
+        let items = build_inbox(&conn, 50).unwrap();
+        let reason = |id: &str| {
+            items.iter().find(|i| i.id == id).map(|i| i.reason.clone()).unwrap_or_default()
+        };
+        assert_eq!(reason("m-low"), "memory_low_confidence");
+        assert_eq!(reason("m-conflict"), "memory_conflicts");
+        assert_eq!(reason("t-late"), "task_overdue");
+        assert_eq!(reason("j1"), "health_job_failed");
+
+        // 失败原因就是那一项的摘要，否则用户得再点一次才知道坏在哪。
+        let job = items.iter().find(|i| i.id == "j1").unwrap();
+        assert_eq!(job.summary, "boom");
+    }
+
+    /// 一类爆量不能把其他类挤掉 / one noisy kind cannot starve the others.
+    #[test]
+    fn inbox_keeps_every_kind_visible_under_a_small_limit() {
+        let conn = db();
+        for i in 0..40 {
+            add_candidate(&conn, &format!("m{i}"), "noise", 0.5, 1_000 + i);
+        }
+        add_changeset(&conn, "c1", "proposed", 500);
+        add_failed_job(&conn, "j1", "boom", 400);
+
+        let items = build_inbox(&conn, 3).unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].kind, "health");
+        assert_eq!(items[1].kind, "change");
+        assert_eq!(items[2].kind, "memory");
+    }
+}
+
+

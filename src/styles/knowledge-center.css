@@ -1,0 +1,541 @@
+/* ── Knowledge Center ────────────────────────────────────────────────
+   Agent 自己的工作台。三段式：左侧页面导航、中间列表、卡片内的折叠技术详情。
+
+   这里不新增任何颜色、间距或圆角常量——全部走 theme-tokens.css 和 index.css 的
+   token，否则深色主题下会出现一块自成一派的浅色区域。
+   ------------------------------------------------------------------ */
+
+.kc-root {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ── 页面导航 ─────────────────────────────────────────────────────── */
+
+.kc-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 176px;
+  flex-shrink: 0;
+  padding: var(--space-4) var(--space-2);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+}
+
+.kc-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  /* 36px 的点击区：再矮就开始误触相邻项。 */
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast, 120ms) ease;
+}
+
+.kc-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.kc-nav-item.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.kc-nav-item:focus-visible,
+.kc-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* ── 页面 ─────────────────────────────────────────────────────────── */
+
+.kc-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.kc-page-head {
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.kc-page-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.kc-page-hint {
+  margin: var(--space-1) 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.kc-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+}
+
+/* ── 列表与卡片 ───────────────────────────────────────────────────── */
+
+.kc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 680px;
+}
+
+.kc-card {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+
+.kc-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.kc-card-time {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.kc-card-title {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+
+.kc-card-summary {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.kc-card-summary-bad {
+  color: var(--danger);
+  word-break: break-word;
+}
+
+.kc-card-why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.kc-card-why-label,
+.kc-card-source-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  flex-shrink: 0;
+}
+
+.kc-card-source {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.kc-card-source-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.kc-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────────────── */
+
+.kc-btn {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast, 120ms) ease;
+}
+
+.kc-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.kc-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 每个区域只有一个 primary。 */
+.kc-btn-primary {
+  border-color: transparent;
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+}
+
+.kc-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: var(--accent-primary);
+}
+
+/* 破坏性动作用明确文字 + 危险色描边，不用一个孤立的 ×。 */
+.kc-btn-danger {
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.kc-btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+/* ── 状态标 ───────────────────────────────────────────────────────── */
+
+.kc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* 形状随语义变，所以色盲用户也能区分三个警示级别，而不是只能靠颜色。 */
+.kc-pill-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+
+.kc-pill-info {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.kc-pill-success {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.kc-pill-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.kc-pill-warning .kc-pill-mark {
+  border-radius: 1px;
+}
+
+.kc-pill-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.kc-pill-danger .kc-pill-mark {
+  border-radius: 0;
+  transform: rotate(45deg);
+}
+
+/* ── 计数角标 ─────────────────────────────────────────────────────── */
+
+.kc-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/*
+   顶栏窄容器下 `toolbar.css` 会把 `.toolbar-nav-btn span` 整体隐藏（只留图标）。
+   角标不能跟着消失——图标缩成一个图标恰恰是最需要"这里有 3 件事"这个信号的时候。
+   用更高的选择器权重把它留下，而不是 !important。
+*/
+.toolbar-nav-group .toolbar-nav-btn span.kc-count {
+  display: inline-block;
+}
+
+/* Chat 侧栏跳知识中心的入口。侧栏放得下摘要，放不下筛选、批量和历史。 */
+.knowledge-panel-open-center {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.knowledge-panel-open-center:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+
+/* ── 四种状态 ─────────────────────────────────────────────────────── */
+
+.kc-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 680px;
+}
+
+.kc-skeleton-row {
+  height: 64px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-tertiary);
+  /* 动画只是"在读"的提示，不是装饰：减少动效偏好下直接静止。 */
+  animation: kc-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes kc-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-skeleton-row {
+    animation: none;
+  }
+}
+
+.kc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 520px;
+  padding: var(--space-6) 0;
+}
+
+.kc-empty-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.kc-empty-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.kc-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 680px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--danger-bg);
+}
+
+.kc-failed-text {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.kc-note {
+  max-width: 680px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius-md);
+  background: var(--info-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ── 技术详情折叠区 ───────────────────────────────────────────────── */
+
+.kc-details {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+}
+
+.kc-details > summary {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.kc-pre {
+  margin: var(--space-2) 0 0;
+  max-height: 160px;
+  overflow: auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kc-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+}
+
+.kc-kv dt {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.kc-kv dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* ── 活动页 ───────────────────────────────────────────────────────── */
+
+.kc-path-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kc-path {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.kc-table {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.kc-table td {
+  padding: 3px var(--space-2) 3px 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+
+.kc-table-event {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.kc-table-ok {
+  color: var(--success);
+}
+
+.kc-table-bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.kc-table-time {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── 窄窗口 ───────────────────────────────────────────────────────── */
+/*
+   360px 下侧栏 176px 会把内容挤成一条。改成上方横向滚动的一排 tab：导航仍然完整
+   可见，内容拿回整个宽度。
+*/
+@media (max-width: 720px) {
+  .kc-root {
+    flex-direction: column;
+  }
+
+  .kc-nav {
+    flex-direction: row;
+    width: auto;
+    overflow-x: auto;
+    padding: var(--space-2);
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .kc-nav-item {
+    white-space: nowrap;
+  }
+
+  .kc-page-head,
+  .kc-page-body {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+}
+
+
+

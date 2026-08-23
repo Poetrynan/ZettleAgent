@@ -26,11 +26,14 @@ import {
 import { getLang } from '../../lib/i18n';
 
 /**
- * 知识层面板 / the knowledge layer's one visible surface.
+ * 知识层面板 / the knowledge layer's in-chat surface.
  *
- * 六块内容合成一个面板而不是六个孤立入口：它们讲的是同一件事——这一轮 Agent 看到了
- * 什么、记住了什么、打算改什么、答应了什么、索引还欠多少。散落成六个抽屉，用户就
- * 永远拼不出全貌。
+ * 定位是 **This Turn Inspector**：回答"这一轮 Agent 依据什么"。全局的记忆、变更、
+ * 承诺、健康管理属于知识中心（`KnowledgeCenter`），不属于一条 360px 宽的侧栏——
+ * 那里放得下的只有摘要，放不下筛选、批量和历史。
+ *
+ * 五个 tab 保留为兼容入口：老用户的肌肉记忆还在这里，而且看完上下文顺手处理一条
+ * 候选记忆是合理的动线。但每个 tab 都提供"在知识中心打开"，侧栏不再是唯一入口。
  *
  * 每一块都读真实命令。没有一个数字是写死的，拿不到数据就说拿不到，不显示占位。
  */
@@ -38,7 +41,7 @@ import { getLang } from '../../lib/i18n';
 type TabKey = 'context' | 'memory' | 'changes' | 'tasks' | 'health';
 
 const TABS: { key: TabKey; label: string; labelZh: string }[] = [
-  { key: 'context', label: 'Context', labelZh: '上下文' },
+  { key: 'context', label: 'This Turn', labelZh: '这一轮' },
   { key: 'memory', label: 'Memory', labelZh: '记忆' },
   { key: 'changes', label: 'Changes', labelZh: '变更' },
   { key: 'tasks', label: 'Tasks', labelZh: '承诺' },
@@ -52,12 +55,23 @@ interface KnowledgePanelProps {
   runId: string | null;
   /** 当前 vault，`memory.md` 回流需要它。没有 vault 时该入口不出现。 */
   vaultPath: string | null;
+  /** 跳到知识中心的对应页面。没传就不显示跳转入口。 */
+  onOpenCenter?: (page: 'inbox' | 'memory' | 'changes' | 'tasks' | 'health') => void;
   onClose: () => void;
 }
 
-export function KnowledgePanel({ contextPackage, runId, vaultPath, onClose }: KnowledgePanelProps) {
+export function KnowledgePanel({
+  contextPackage,
+  runId,
+  vaultPath,
+  onOpenCenter,
+  onClose,
+}: KnowledgePanelProps) {
   const isZh = getLang() === 'zh';
   const [tab, setTab] = useState<TabKey>('context');
+
+  // 上下文是这一轮的事，只在侧栏有意义；其余四个 tab 在知识中心都有完整版。
+  const centerPage = tab === 'context' ? 'inbox' : tab;
 
   return (
     <div className="knowledge-panel">
@@ -75,6 +89,16 @@ export function KnowledgePanel({ contextPackage, runId, vaultPath, onClose }: Kn
             </button>
           ))}
         </div>
+        {onOpenCenter && (
+          <button
+            className="knowledge-panel-open-center"
+            onClick={() => onOpenCenter(centerPage)}
+            title={isZh ? '在知识中心打开完整视图' : 'Open the full view in the Knowledge Center'}
+            aria-label={isZh ? '在知识中心打开完整视图' : 'Open the full view in the Knowledge Center'}
+          >
+            {isZh ? '知识中心' : 'Knowledge Center'}
+          </button>
+        )}
         <button
           className="knowledge-panel-close"
           onClick={onClose}
@@ -84,6 +108,7 @@ export function KnowledgePanel({ contextPackage, runId, vaultPath, onClose }: Kn
           ×
         </button>
       </div>
+
 
       <div className="knowledge-panel-body">
         {tab === 'context' && (
@@ -310,7 +335,7 @@ function AuditList({ runId, isZh }: { runId: string; isZh: boolean }) {
  * 这一块是"不得让未经确认的 LLM 推断伪装成用户事实"在界面上的落点。确认是唯一会写
  * `confirmed_by` 的路径，所以它必须是用户点出来的。
  */
-function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: string | null }) {
+export function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: string | null }) {
   const { data, error, busy, reload } = useLoader<MemoryItem[]>(() => getMemoryInbox(50), []);
   const [acting, setActing] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -439,7 +464,7 @@ function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: string | nul
  * 展开一个批次会真的跑一次预演（只读），所以显示的 before/after 是当下的现状算出来
  * 的，不是提议那一刻的缓存。有冲突时批准按钮就不该给——那份 diff 是基于旧版本算的。
  */
-function ChangesTab({ isZh }: { isZh: boolean }) {
+export function ChangesTab({ isZh }: { isZh: boolean }) {
   const { data, error, busy, reload } = useLoader<PendingChangeSet[]>(
     () => getPendingChangeSets(50),
     [],
@@ -566,7 +591,7 @@ function ChangesTab({ isZh }: { isZh: boolean }) {
  * "完成"必须带一句说明：后端会把它登记成完成证据并绑回源笔记。没有说明的完成会被
  * 拒——只把状态改成 done 的任务列表干净得毫无意义。
  */
-function TasksTab({ isZh }: { isZh: boolean }) {
+export function TasksTab({ isZh }: { isZh: boolean }) {
   const { data, error, busy, reload } = useLoader<TaskCommitment[]>(
     () => getCommitmentInbox(50),
     [],
@@ -730,7 +755,7 @@ function TasksTab({ isZh }: { isZh: boolean }) {
  * 每个数字都来自后端的 `COUNT(*)`。这里不允许出现"看起来一切正常"的固定值——一个
  * 骗人的健康面板比没有面板更糟，它会让人不去查真正的问题。
  */
-function HealthTab({ isZh }: { isZh: boolean }) {
+export function HealthTab({ isZh }: { isZh: boolean }) {
   const { data, error, busy, reload } = useLoader<KnowledgeIndexHealth>(
     () => getKnowledgeIndexHealth(),
     [],

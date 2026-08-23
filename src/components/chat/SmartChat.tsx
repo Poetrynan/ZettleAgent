@@ -207,7 +207,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
 };
 
 export function SmartChat() {
-  const { state, toggleChat, clearPendingAttachments, clearPendingChatPrompt, showToast } = useApp();
+  const { state, toggleChat, clearPendingAttachments, clearPendingChatPrompt, showToast, setView } = useApp();
   const currentView = state.view;
   const viewTemplates = WORKFLOW_TEMPLATES[currentView] || [];
   const activeTemplates = [...viewTemplates, ...WORKFLOW_TEMPLATES.generic].slice(0, 4);
@@ -1642,12 +1642,13 @@ export function SmartChat() {
         toggleChat={toggleChat}
       />
 
-      {/* Knowledge panel: context / memory / changes / tasks / index health */}
+      {/* This-turn inspector. 全局的记忆/变更/承诺/健康管理在知识中心，不在这条侧栏里。 */}
       {showKnowledgePanel && (
         <KnowledgePanel
           contextPackage={knowledgeContext}
           runId={knowledgeRunId}
           vaultPath={state.vaultPath || null}
+          onOpenCenter={() => setView('knowledge')}
           onClose={() => setShowKnowledgePanel(false)}
         />
       )}

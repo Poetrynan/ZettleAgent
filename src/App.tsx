@@ -6,7 +6,7 @@ import { MarkdownViewer } from './components/editor/MarkdownViewer';
 import { SmartChat } from './components/chat/SmartChat';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Settings } from './components/settings/Settings';
-import { IconDashboard, IconSettings, IconChat, IconLink, IconFile, IconCanvas, IconCalendar, IconSidebar, IconNetwork, IconChart, IconStack, IconBrain } from './components/icons';
+import { IconDashboard, IconSettings, IconChat, IconLink, IconFile, IconCanvas, IconCalendar, IconSidebar, IconNetwork, IconChart, IconStack, IconBrain, IconDatabase } from './components/icons';
 import { openOrCreateDailyNote } from './lib/dailyNote';
 
 /**
@@ -28,6 +28,8 @@ const Bases = lazy(() =>
 const DailyCalendar = lazy(() => import('./components/calendar/DailyCalendar'));
 const ReviewSession = lazy(() =>
   import('./components/review/ReviewSession').then(m => ({ default: m.ReviewSession })));
+const KnowledgeCenter = lazy(() =>
+  import('./components/knowledge/KnowledgeCenter').then(m => ({ default: m.KnowledgeCenter })));
 
 import { Toast } from './components/common/Toast';
 import { QuickSwitcher } from './components/common/QuickSwitcher';
@@ -37,10 +39,15 @@ import { ModelDownloadModal } from './components/common/ModelDownloadModal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { useHotkeys, HotkeyDef } from './hooks/useHotkeys';
+import { useInboxCounts } from './components/knowledge/useInboxCounts';
+import { KcCount } from './components/knowledge/states';
 import { t } from './lib/i18n';
 import { loadOnboardingComplete } from './lib/storage';
 import './styles/index.css';
 import './styles/components.css';
+/* 知识中心的样式在启动时就要在场：顶栏的待处理角标用的是同一套 class，而知识中心
+   自己是懒加载的。 */
+import './styles/knowledge-center.css';
 import './styles/onboarding.css';
 import './styles/splash.css';
 import './styles/search-panel.css';
@@ -169,6 +176,9 @@ function AppLayout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const toggleShortcuts = useCallback(() => setShortcutsOpen(p => !p), []);
 
+  // 顶栏的待处理角标。轮询的是一个只有四个 COUNT(*) 的命令，不刷新投影健康。
+  const { counts: inboxCounts } = useInboxCounts();
+
   // Global hotkeys
   const hotkeys = useMemo<HotkeyDef[]>(() => [
     { key: '1', ctrl: true, handler: () => setView('dashboard') },
@@ -179,6 +189,7 @@ function AppLayout() {
     { key: '6', ctrl: true, handler: () => setView('calendar') },
     { key: '7', ctrl: true, handler: () => setView('settings') },
     { key: '8', ctrl: true, handler: () => setView('review') },
+    { key: '9', ctrl: true, handler: () => setView('knowledge') },
     { key: ',', ctrl: true, handler: () => setView('settings') },
     { key: 'l', ctrl: true, handler: () => toggleChat() },
     { key: 'k', ctrl: true, handler: () => {
@@ -334,6 +345,15 @@ function AppLayout() {
                 <IconBrain size={14} /> <span>{t('review.navTitle')}</span>
               </button>
               <button
+                className={`toolbar-nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}
+                onClick={() => setView('knowledge')}
+                title={t('knowledge.navHint')}
+              >
+                <IconDatabase size={14} /> <span>{t('knowledge.navTitle')}</span>
+                {/* 角标在 span 之外：窄屏容器查询会隐藏 span，待处理数量不该跟着消失。 */}
+                <KcCount count={inboxCounts?.total ?? 0} />
+              </button>
+              <button
                 className={`toolbar-nav-btn ${currentView === 'settings' ? 'active' : ''}`}
                 onClick={() => setView('settings')}
                 title={t('settings.title')}
@@ -405,6 +425,11 @@ function AppLayout() {
               so keeping it alive in the background would serve a stale deck. */}
           {currentView === 'review' && (
             <Suspense fallback={<ViewLoading />}><ReviewSession /></Suspense>
+          )}
+          {/* 知识中心也只在活跃时挂载：它每次打开都该显示当下真实的待处理量，
+              而不是上次离开时的快照。 */}
+          {currentView === 'knowledge' && (
+            <Suspense fallback={<ViewLoading />}><KnowledgeCenter /></Suspense>
           )}
         </div>
       </div>

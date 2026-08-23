@@ -2061,6 +2061,56 @@ export async function getKnowledgeAuditTrail(
   });
 }
 
+// ── 统一收件箱 / the unified inbox ────────────────────────────────────────
+//
+// 四类"等用户判断的东西"合成一条流。`reason` 和 `actions` 是稳定代码，中英文文案由
+// 前端映射——后端返回中文会让英文界面缺一半信息。
+
+export type KnowledgeInboxKind = 'memory' | 'change' | 'task' | 'health';
+
+export interface KnowledgeInboxCounts {
+  memory: number;
+  changes: number;
+  tasks: number;
+  health: number;
+  total: number;
+}
+
+export interface KnowledgeInboxItem {
+  /** 原表主键，动作命令用它。 */
+  id: string;
+  kind: KnowledgeInboxKind;
+  title: string;
+  /** 一句摘要；变更是操作数，索引故障是失败原因。空串表示没有更多信息。 */
+  summary: string;
+  /** 原表状态值，给高级详情看的，不作主要文案。 */
+  status: string;
+  risk: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
+  /** 为什么现在需要你处理，稳定代码，见 `inboxReasonText`。 */
+  reason: string;
+  /** 可用动作的稳定代码。 */
+  actions: string[];
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+/**
+ * 角标要的那个数。
+ *
+ * 与 `getKnowledgeIndexHealth` 分开：角标会被轮询，这个命令只有四个 `COUNT(*)`，
+ * 不刷新投影健康、不写任何表。
+ */
+export async function getKnowledgeInboxCounts(): Promise<KnowledgeInboxCounts> {
+  return invoke<KnowledgeInboxCounts>('knowledge_inbox_counts');
+}
+
+/** 合并后的收件箱，索引故障在最前。 */
+export async function getKnowledgeInbox(limit?: number): Promise<KnowledgeInboxItem[]> {
+  return invoke<KnowledgeInboxItem[]>('knowledge_inbox', { limit });
+}
+
 // ── Memory Inbox ─────────────────────────────────────────────────────────
 //
 // 候选记忆必须有一个地方让用户看见并裁决。`confirmMemory` 是唯一会写

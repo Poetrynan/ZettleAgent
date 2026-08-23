@@ -30,6 +30,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         { keys: ['Ctrl', '5'], label: t('shortcuts.bases') },
         { keys: ['Ctrl', '6'], label: t('shortcuts.calendar') },
         { keys: ['Ctrl', '7'], label: isZh ? '设置' : 'Settings' },
+        { keys: ['Ctrl', '9'], label: t('knowledge.navTitle') },
         { keys: ['Ctrl', ','], label: isZh ? '打开设置' : 'Open Settings' },
         { keys: ['Ctrl', 'P'], label: t('shortcuts.quickSwitcher') },
         { keys: ['Ctrl', 'Shift', 'F'], label: isZh ? '全文内容检索' : 'Global Search' },
