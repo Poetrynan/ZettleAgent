@@ -2,22 +2,19 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ContextPackageSummary,
   KnowledgeAuditEvent,
-  KnowledgeBackfillProgress,
-  KnowledgeIndexHealth,
   MemoryItem,
   confirmMemory,
   forgetMemory,
   getKnowledgeAuditTrail,
-  getKnowledgeIndexHealth,
   getMemoryInbox,
   rejectMemory,
-  runKnowledgeBackfill,
   syncMemoryFile,
 } from '../../lib/tauri';
 import { getLang } from '../../lib/i18n';
 import { ContextInspector } from '../knowledge/ContextInspector';
 import { ChangeReview } from '../knowledge/ChangeReview';
 import { TaskCenter } from '../knowledge/TaskCenter';
+import { KnowledgeHealth } from '../knowledge/KnowledgeHealth';
 
 /**
  * 知识层面板 / the knowledge layer's in-chat surface.
@@ -422,111 +419,17 @@ export function TasksTab(_props: { isZh: boolean }) {
 // ── Index Health ────────────────────────────────────────────────────────────
 
 /**
- * 索引健康 / the real state of the derived projections.
+ * 索引健康 / delegated to {@link KnowledgeHealth}.
  *
- * 每个数字都来自后端的 `COUNT(*)`。这里不允许出现"看起来一切正常"的固定值——一个
- * 骗人的健康面板比没有面板更糟，它会让人不去查真正的问题。
+ * 旧版是一格一格的 COUNT，数字都真、但没有一个回答"现在能不能用、缺什么、怎么补"。
+ * 侧栏和知识中心现在看的是同一页，包括同一句结论和同一批真实修复动作。
+ *
+ * `isZh` 不再需要：文案走 i18n 字典。留着参数是为了不动调用点。
  */
-export function HealthTab({ isZh }: { isZh: boolean }) {
-  const { data, error, busy, reload } = useLoader<KnowledgeIndexHealth>(
-    () => getKnowledgeIndexHealth(),
-    [],
-  );
-  const [progress, setProgress] = useState<KnowledgeBackfillProgress | null>(null);
-  const [running, setRunning] = useState(false);
-
-  const advance = async () => {
-    setRunning(true);
-    try {
-      // 一批一批推进：单次调用持锁时间有上界，用户能看到进度也能停。
-      let batch = await runKnowledgeBackfill(100);
-      setProgress(batch);
-      let guard = 0;
-      while (batch.hasMore && guard < 50) {
-        batch = await runKnowledgeBackfill(100);
-        setProgress(batch);
-        guard += 1;
-      }
-      await reload();
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  if (error) return <Failed error={error} onRetry={reload} label={isZh ? '重试' : 'Retry'} />;
-  if (!data) return <Empty text={isZh ? '读取中…' : 'Loading…'} />;
-
-  const rows: [string, string, number | string][] = [
-    [isZh ? 'Schema 版本' : 'Schema version', 'schema', data.schemaVersion],
-    [isZh ? '笔记总数' : 'Notes', 'files', data.totalFiles],
-    [isZh ? '已有稳定身份' : 'With stable identity', 'objects', data.indexedDocuments],
-    [isZh ? '块对象' : 'Block objects', 'blocks', data.blockObjects],
-    [isZh ? '待处理任务' : 'Pending jobs', 'pending', data.pendingJobs],
-    [isZh ? '失败任务' : 'Failed jobs', 'failed', data.failedJobs],
-    [isZh ? '记忆条数' : 'Memories', 'memories', data.memoryItems],
-    [isZh ? '待确认记忆' : 'Memory inbox', 'inbox', data.memoryInbox],
-    [isZh ? '未落地变更' : 'Open change sets', 'changesets', data.openChangesets],
-    [isZh ? '未结承诺' : 'Open commitments', 'commitments', data.openCommitments],
-  ];
-
-  const behind = data.totalFiles - data.indexedDocuments;
-
-  return (
-    <div className="knowledge-section">
-      <div className="knowledge-health-grid">
-        {rows.map(([label, key, value]) => (
-          <div className="knowledge-health-cell" key={key}>
-            <span className="knowledge-health-value">{value}</span>
-            <span className="knowledge-health-label">{label}</span>
-          </div>
-        ))}
-      </div>
-
-      {data.lastError && (
-        <div className="knowledge-error-text">
-          {isZh ? '最近一次错误：' : 'Last error: '}{data.lastError}
-        </div>
-      )}
-      <div className="knowledge-item-meta">
-        <span>
-          {isZh ? '上次运行' : 'Last run'} {timeLabel(data.lastRunAtMs)}
-        </span>
-      </div>
-
-      {behind > 0 && (
-        <div className="knowledge-warn-row">
-          {isZh
-            ? `还有 ${behind} 篇笔记没有稳定身份，它们暂时无法被证据、关系或变更引用。`
-            : `${behind} notes have no stable identity yet — evidence and change sets cannot reference them.`}
-        </div>
-      )}
-
-      <div className="knowledge-item-actions">
-        <button
-          className="knowledge-mini-btn primary"
-          disabled={running || busy}
-          onClick={() => void advance()}
-        >
-          {running
-            ? (isZh ? '处理中…' : 'Working…')
-            : (isZh ? '推进对象化' : 'Advance backfill')}
-        </button>
-        <button className="knowledge-mini-btn" disabled={busy} onClick={() => void reload()}>
-          {isZh ? '刷新' : 'Refresh'}
-        </button>
-      </div>
-
-      {progress && (
-        <div className="knowledge-item-meta">
-          <span>{isZh ? '处理' : 'processed'} {progress.processed}</span>
-          <span>{isZh ? '新建' : 'created'} {progress.created}</span>
-          <span>{isZh ? '失败' : 'failed'} {progress.failed}</span>
-          <span>{isZh ? '剩余' : 'remaining'} {progress.remaining}</span>
-        </div>
-      )}
-    </div>
-  );
+export function HealthTab(_props: { isZh: boolean }) {
+  return <KnowledgeHealth />;
 }
+
 
 
 

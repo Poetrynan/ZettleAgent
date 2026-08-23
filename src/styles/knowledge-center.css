@@ -1072,6 +1072,46 @@
   font-size: var(--text-xs);
 }
 
+/* ── 知识健康 / the health page ──────────────────────────────────────────── */
+
+.kc-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* 结论卡片比下面的分节重一点：它是这一页唯一需要一眼看到的东西。 */
+.kc-health-verdict {
+  border-left: 3px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.kc-health-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.kc-health-reasons {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.kc-health-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+
 
 
 

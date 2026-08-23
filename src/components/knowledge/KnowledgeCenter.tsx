@@ -7,7 +7,7 @@ import { AgentActivity } from './AgentActivity';
 import { MemoryCenter } from './MemoryCenter';
 import { ChangeReview } from './ChangeReview';
 import { TaskCenter } from './TaskCenter';
-import { HealthTab } from '../chat/KnowledgePanel';
+import { KnowledgeHealth } from './KnowledgeHealth';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import '../../styles/knowledge-center.css';
@@ -54,7 +54,6 @@ export function KnowledgeCenter() {
   const { state, toggleChat, setCurrentFile, setView } = useApp();
   const [page, setPage] = useState<KnowledgePage>('inbox');
   const { counts, refresh } = useInboxCounts();
-  const isZh = state.lang === 'zh';
   const vaultPath = state.vaultPath ?? null;
   const current = PAGES.find(p => p.key === page) ?? PAGES[0];
 
@@ -128,7 +127,14 @@ export function KnowledgeCenter() {
           )}
           {page === 'changes' && <ChangeReview onOpenSource={openFile} />}
           {page === 'tasks' && <TaskCenter onOpenSource={openFile} onChanged={refresh} />}
-          {page === 'health' && <HealthTab isZh={isZh} />}
+          {page === 'health' && (
+            <KnowledgeHealth
+              vaultPath={vaultPath}
+              onOpenPage={setPage}
+              onOpenFile={openFile}
+              onOpenSettings={() => setView('settings')}
+            />
+          )}
           {page === 'activity' && <AgentActivity />}
         </div>
       </section>

@@ -12,23 +12,27 @@ import {
   confirmMemory,
   getChangeSetDetail,
   getCommitmentList,
+  getEmbeddingStats,
   getKnowledgeIndexHealth,
   getMemoryInbox,
   getPendingChangeSets,
   getProactiveDigest,
-  runKnowledgeBackfill,
   syncMemoryFile,
 } from '../../../lib/tauri';
 import { setLang } from '../../../lib/i18n';
 
 vi.mock('../../../lib/tauri', () => ({
   confirmMemory: vi.fn(),
+  createNoteForLink: vi.fn(),
   decideChangeSet: vi.fn().mockResolvedValue(undefined),
   decideCommitment: vi.fn(),
+  finalizeEmbeddingIndex: vi.fn().mockResolvedValue(undefined),
+  fixBrokenLink: vi.fn().mockResolvedValue(undefined),
   forgetMemory: vi.fn(),
   getCommitmentList: vi.fn(),
   getChangeSetDetail: vi.fn().mockResolvedValue(null),
   getChangeSetHistory: vi.fn().mockResolvedValue([]),
+  getEmbeddingStats: vi.fn(),
   getEvidenceByIds: vi.fn().mockResolvedValue([]),
   getKnowledgeAuditTrail: vi.fn().mockResolvedValue([]),
   getKnowledgeIndexHealth: vi.fn(),
@@ -40,9 +44,11 @@ vi.mock('../../../lib/tauri', () => ({
   previewChangeSet: vi.fn(),
   rejectMemory: vi.fn(),
   runKnowledgeBackfill: vi.fn(),
+  runVaultLint: vi.fn(),
   scanCommitments: vi.fn(),
   setSetting: vi.fn().mockResolvedValue(undefined),
   syncMemoryFile: vi.fn(),
+  syncVault: vi.fn(),
   undoAgentRun: vi.fn(),
 }));
 
@@ -57,6 +63,11 @@ function quietBackend() {
   vi.mocked(getCommitmentList).mockResolvedValue([]);
   vi.mocked(getProactiveDigest).mockResolvedValue({ items: [], silenced: null, expired: 0 });
   vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(health());
+  vi.mocked(getEmbeddingStats).mockResolvedValue({
+    total_chunks: 100,
+    indexed_chunks: 100,
+    has_index: true,
+  });
 }
 
 function health(over: Partial<KnowledgeIndexHealth> = {}): KnowledgeIndexHealth {
@@ -448,50 +459,43 @@ describe('Tasks tab', () => {
 });
 
 
-describe('Index Health', () => {
+/**
+ * 侧栏的健康 tab 现在就是知识健康页本身。
+ *
+ * 行为在 `KnowledgeHealth.test.tsx` 里验；这里只验"是同一页"，以及旧版那个错值没了：
+ * 后端的 `lastRunAtMs` 其实是查询时间，不该被当成索引时间显示。
+ */
+describe('Health tab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     quietBackend();
   });
 
-  it('reports the real pending and failed job counts', async () => {
-    vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(
-      health({ pendingJobs: 12, failedJobs: 3, lastError: 'embedding timed out' }),
-    );
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Index/);
-
-    expect(await screen.findByText('12')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText(/embedding timed out/)).toBeInTheDocument();
-  });
-
-  /** 没有稳定身份的笔记进不了证据和关系，这是缺陷，不是进度条。 */
-  it('warns when notes still have no stable identity', async () => {
+  it('renders the layered health page, not a grid of raw counts', async () => {
     vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(
       health({ totalFiles: 40, indexedDocuments: 31 }),
     );
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Index/);
 
-    expect(await screen.findByText(/9 notes have no stable identity/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        '9 note(s) have no stable identity, so nothing can cite or undo them',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Identity and indexing')).toBeInTheDocument();
   });
 
-  /** backfill 是分批的。跑一批就说“完成”会让面板长期显示一个假的落后数。 */
-  it('keeps advancing the backfill until the backend says there is nothing left', async () => {
-    vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(health({ totalFiles: 40, indexedDocuments: 20 }));
-    vi.mocked(runKnowledgeBackfill)
-      .mockResolvedValueOnce({ processed: 10, created: 10, failed: 0, remaining: 10, hasMore: true })
-      .mockResolvedValueOnce({ processed: 10, created: 10, failed: 0, remaining: 0, hasMore: false });
-
+  it('does not present the query time as an index time', async () => {
+    vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(health({ lastRunAtMs: 1_700_000_000_000 }));
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Index/);
-    fireEvent.click(await screen.findByRole('button', { name: 'Advance backfill' }));
 
-    await waitFor(() => expect(runKnowledgeBackfill).toHaveBeenCalledTimes(2));
-    expect(getKnowledgeIndexHealth).toHaveBeenCalledTimes(2);
+    await screen.findByText('Identity and indexing');
+    expect(screen.queryByText(/Last run/)).toBeNull();
   });
 });
+
 
 
 
