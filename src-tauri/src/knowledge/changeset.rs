@@ -148,6 +148,18 @@ pub enum Refusal {
     NoTarget,
     /// 写入内容为空但操作要求内容。
     MissingContent,
+    /// 这次调用被认成写入，但从参数里解析不出**任何**一个真实操作。
+    ///
+    /// 独立变体而不是复用 `NoTarget`：那个说的是"某一个 op 没有目标"，这个说的是
+    /// "整次调用一个 op 都建不出来"。处置都是拒绝，但给模型的话不同——后者要它把参数
+    /// 补全重试，而不是换个目标。
+    NoResolvableOperation(String),
+    /// 这个写工具的参数形状没人登记过，改动无法预演也无法回滚。
+    ///
+    /// 与 `NoResolvableOperation` 分开，因为原因和出路都不同：那个是这一次的参数没填
+    /// 全，重试有用；这个是工具本身还没接进 ChangeSet，重试多少次都一样。告诉模型
+    /// "补全参数"在这里是假建议。
+    UnmappedWriteTool(String),
 }
 
 impl Refusal {
@@ -157,6 +169,13 @@ impl Refusal {
             Self::NotPermitted(what) => format!("工具没有声明可以修改 {what}"),
             Self::NoTarget => "操作没有指定目标笔记或对象".to_string(),
             Self::MissingContent => "操作需要新内容，但内容为空".to_string(),
+            Self::NoResolvableOperation(tool) => format!(
+                "`{tool}` 是写入操作，但参数里解析不出要改哪一处，已拒绝执行；请补全参数后重试"
+            ),
+            Self::UnmappedWriteTool(tool) => format!(
+                "`{tool}` 的写入还不能被预览或撤销，已拒绝执行；请改用笔记写入工具，\
+                 或让用户自己完成这一步"
+            ),
         }
     }
 }

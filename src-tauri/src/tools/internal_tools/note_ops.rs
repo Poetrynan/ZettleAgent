@@ -1384,10 +1384,13 @@ pub(super) async fn execute_ocr_image(
     // Optionally store as a new note
     if store_as_note {
         let title = note_title.unwrap_or("OCR Result");
-        let file_name = format!("{}.md", title.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"));
-        let dest_dir = std::path::Path::new(vault_path).join("_ocr_results");
-        std::fs::create_dir_all(&dest_dir)?;
-        let dest_path = dest_dir.join(&file_name);
+        // 目的地由 helpers 算，写守卫用的是同一个函数：两处各算一遍，守卫就会预览
+        // 一个不存在的文件。
+        let relative = super::helpers::ocr_note_relative_path(title);
+        let dest_path = std::path::Path::new(vault_path).join(&relative);
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         if !dest_path.exists() {
             let note_content = format!(
@@ -1474,15 +1477,17 @@ pub(super) fn execute_extract_pdf_text(
 
     // Optionally save extracted text as a note
     if save_to_vault {
-        let file_stem = canonical.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("pdf_extract")
-            .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-
-        let dest_dir = std::path::Path::new(vault_path).join("_pdf_extracts");
-        std::fs::create_dir_all(&dest_dir)?;
-        let filename = format!("{}.md", file_stem);
-        let dest_path = dest_dir.join(&filename);
+        // 与 OCR 同理：目的地必须与写守卫算出来的那个路径是同一个函数算的。
+        let relative = super::helpers::pdf_extract_relative_path(&canonical.to_string_lossy());
+        let dest_path = std::path::Path::new(vault_path).join(&relative);
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let filename = std::path::Path::new(&relative)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative.clone());
+        let file_stem = filename.trim_end_matches(".md").to_string();
 
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
         let note_content = format!(

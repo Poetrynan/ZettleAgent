@@ -24,9 +24,18 @@
 //!
 //! ## 未映射的写工具
 //!
-//! Canvas、第三方 MCP、以及任何还没登记的写工具，参数形状本模块读不懂。这些调用
-//! **不会被放过**：仍然开一个 changeset 记下"某个写工具跑过、目标未知"，只是没有
-//! op 可以预演。假装知道目标比承认不知道更危险。
+//! 参数形状读不懂的写工具**不会被放过，也不会被放行**：[`open`] 直接返回
+//! [`Guarded::Refused`]，changeset 记成 `rejected`。放行等于让一次写入绕过预览、基线
+//! 和回滚，只在审计里留下一个空批次；假装知道目标同样危险。
+//!
+//! 现在落在这一类里的是三种写入：目录（`create_folder` / `delete_folder`）、关系表
+//! （`add_relation` / `delete_relation` / `batch_link_notes`）、以及目标要等模型跑完才
+//! 知道的（`propagate_fact_update`）；第三方 MCP 的写工具也一样。它们共同的问题是这一
+//! 层的 op 模型只描述"某个文件/对象的某一版变成另一版"，而目录、关系行、事后才确定的
+//! 目标都不是那个形状。要让它们能写，得先给 op 模型补上对应的种类，而不是在这里放行。
+//!
+//! [`intents_of`] 已经覆盖的是笔记与画布文件、`fix_broken_link`、OCR/PDF 存稿，以及
+//! Core Memory（`.zettelagent/memory.md`）。
 //!
 //! ## 冲突检测覆盖到哪里，没覆盖到哪里
 //!
@@ -52,7 +61,9 @@ use super::changeset::{self, DryRunReport, NewChangeSet, NewOp, ObservedRead, Re
 use super::object_store::{self, ObjectResult};
 use super::types::{now_ms, ChangeOpKind, ObjectKind, SourceRef};
 use crate::tools::capability;
-use crate::tools::internal_tools::helpers::{resolve_path_multi_vault, snapshot_path_key};
+use crate::tools::internal_tools::helpers::{
+    ocr_note_relative_path, pdf_extract_relative_path, resolve_path_multi_vault, snapshot_path_key,
+};
 
 /// 一次 Agent 写调用的上下文 / who is writing, where, and under which run.
 #[derive(Debug, Clone, Default)]
@@ -114,6 +125,68 @@ pub struct Intent {
     /// 改名/移动的目标路径（相对或绝对，按工具的参数原样）。
     pub dest: Option<String>,
     pub target_kind: ObjectKind,
+}
+
+/// 参数形状已经登记过的写工具 / write tools whose arguments this module understands.
+///
+/// [`intents_of`] 对这些工具返回空 vec 只有一个含义：**这一次的参数没填全**（漏了
+/// `path`、只给了一半的 merge）。对不在这张表里的写工具，空 vec 的含义完全不同：
+/// 我们根本读不懂它的参数。两者都要拒绝，但给模型的话必须不一样，所以这里把"登记过"
+/// 显式列出来，而不是让 `open` 去猜空 vec 是哪种空。
+///
+/// 加新写工具时两处一起改：这张表和 [`intents_of`] 的 match。漏改这张表的后果是那个
+/// 工具被当成未映射工具拒掉——方向是安全的。
+const MAPPED_WRITE_TOOLS: &[&str] = &[
+    "create_note",
+    "edit_note",
+    "append_to_note",
+    "patch_note",
+    "apply_edit",
+    "revert_note",
+    "delete_note",
+    "rename_note",
+    "move_note",
+    "merge_notes",
+    // 画布也是文件：`canvas_path` 就是目标，落定后的 JSON 从磁盘回读。
+    "create_canvas",
+    "modify_canvas",
+    "group_canvas_nodes",
+    "arrange_canvas_by",
+    "generate_canvas_from_notes",
+    "compile_canvas_to_note",
+    "fix_broken_link",
+    // 目标由固定规则算出来，不在参数里，但依然是写之前就能算的。
+    "ocr_image",
+    "extract_pdf_text",
+    "update_memory",
+];
+
+/// 这个工具的参数形状登记过吗 / does the guard know how to read this tool's arguments?
+pub fn maps_to_operations(tool_name: &str) -> bool {
+    MAPPED_WRITE_TOOLS.contains(&tool_name)
+}
+
+/// 这一次调用其实什么都不写 / this call writes nothing, despite the tool being a writer.
+///
+/// 三个工具有"只看不存"的模式：`compile_canvas_to_note` 不给 `output_path` 时只把
+/// Markdown 返回给模型，`ocr_image` / `extract_pdf_text` 不开 `store_as_note` /
+/// `save_to_vault` 时同理。这些调用没有目标，不是因为参数漏填，而是因为**确实没有目
+/// 标**——给它们开一个 changeset 会让"有 changeset"不再等于"有人写过东西"，拒绝它们
+/// 则会砍掉一个正常功能。
+fn writes_nothing(tool_name: &str, args_json: &str) -> bool {
+    let parsed: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
+    let flag = |key: &str| parsed.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+    match tool_name {
+        "compile_canvas_to_note" => parsed
+            .get("output_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty(),
+        "ocr_image" => !flag("store_as_note"),
+        "extract_pdf_text" => !flag("save_to_vault"),
+        _ => false,
+    }
 }
 
 /// 把一次工具调用拆成若干意图 / decompose one tool call.
@@ -197,10 +270,44 @@ pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
             if ops.len() == 2 {
                 ops
             } else {
-                // 只拿到一半的合并没法预演，交给未映射分支去记账。
+                // 只拿到一半的合并没法预演。空 vec 会让 `open` 拒绝这次调用，而不是
+                // 让它带着一个没有 op 的批次往下走。
                 Vec::new()
             }
         }
+        // 画布写入：参数里给的是节点操作，不是最终文件内容，所以内容留到写盘后回读。
+        // 用 `Patch` 而不是 `Create`/`Edit`——那两个要求参数里就带全文，而画布工具的
+        // 全文只有写完才存在。
+        "create_canvas" | "modify_canvas" | "group_canvas_nodes" | "arrange_canvas_by"
+        | "generate_canvas_from_notes" => note(ChangeOpKind::Patch, get("canvas_path"), None),
+        // 不给 `output_path` 时这个工具只把 Markdown 返回给模型，由 `writes_nothing`
+        // 提前放行，走不到这里。
+        "compile_canvas_to_note" => note(ChangeOpKind::Patch, get("output_path"), None),
+        "fix_broken_link" => note(ChangeOpKind::Patch, get("file_path"), None),
+        // 目标不在参数里，而是由固定规则算出来的。算它的是工具自己那一份实现
+        // （`helpers::*_relative_path`），不是这里再猜一遍——猜错的后果是守卫预览、
+        // 回滚一个从来没被碰过的文件。
+        "ocr_image" => note(
+            ChangeOpKind::Patch,
+            Some(ocr_note_relative_path(
+                get("note_title").as_deref().unwrap_or("OCR Result"),
+            )),
+            None,
+        ),
+        "extract_pdf_text" => note(
+            ChangeOpKind::Patch,
+            get("pdf_path").map(|p| pdf_extract_relative_path(&p)),
+            None,
+        ),
+        // Core Memory 写的是 `<vault>/.zettelagent/memory.md`，路径来自 vault 而不是
+        // 参数。登记成 op 之后它才和笔记一样有版本、有 diff、能回滚。
+        "update_memory" => vec![Intent {
+            kind: ChangeOpKind::Patch,
+            raw_path: ".zettelagent/memory.md".to_string(),
+            content: None,
+            dest: None,
+            target_kind: ObjectKind::Memory,
+        }],
         _ => Vec::new(),
     }
 }
@@ -408,6 +515,12 @@ pub fn open(
         return Ok(Guarded::Unguarded);
     }
 
+    // 写工具的"只看不存"模式：没有目标，也确实没有写入。开一个空 changeset 会污染
+    // 审计（"有 changeset"不再等于"有人写过东西"），拒绝会砍掉一个正常功能。
+    if writes_nothing(tool_name, args_json) {
+        return Ok(Guarded::Unguarded);
+    }
+
     let mut req = NewChangeSet::new(if ctx.actor.is_empty() { "agent" } else { &ctx.actor });
     req.session_id = ctx.session_id.clone();
     req.run_id = ctx.run_id.clone();
@@ -416,6 +529,30 @@ pub fn open(
     let cs = changeset::propose(conn, &req)?;
 
     let intents = intents_of(tool_name, args_json);
+    // 一个 op 都解析不出来时必须拒绝，不能放行。
+    //
+    // 这是 §7.6 那个漏洞：`intents` 为空时下面的循环一次都不跑，`dry_run` 对一个没有
+    // op 的批次当然报"无冲突"，于是 `record_decision(true)` 把它记成已批准，函数返回
+    // `Ready { paths: [] }`——调用方照常执行工具。结果是**写操作绕过了整套 ChangeSet
+    // 保障**（没有预览、没有基线、没有可回滚的 op），而审计里留下一个空批次，看起来
+    // 一切正常。
+    //
+    // 拒绝的理由分两种，因为回给模型的话不同：登记过的工具是这次参数没填全，重试有
+    // 用；没登记过的工具（canvas、第三方 MCP 写入）是它的写入压根还不能预览和回滚，
+    // 让它"补全参数重试"是假建议。
+    if intents.is_empty() {
+        let refusal = if maps_to_operations(tool_name) {
+            Refusal::NoResolvableOperation(tool_name.to_string())
+        } else {
+            Refusal::UnmappedWriteTool(tool_name.to_string())
+        };
+        changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
+        return Ok(Guarded::Refused {
+            changeset_id: Some(cs.id),
+            refusal,
+        });
+    }
+
     let run_key = ctx.run_id.clone().unwrap_or_default();
     let mut paths = Vec::new();
 

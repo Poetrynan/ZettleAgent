@@ -1564,7 +1564,11 @@ fn a_merge_shows_both_the_rewrite_and_the_disappearance() {
 #[test]
 fn unmapped_tools_produce_no_operations() {
     for (tool, args) in [
-        ("modify_canvas", r#"{"canvas_path":"a.canvas"}"#),
+        // 目录、关系行、以及目标要等模型跑完才知道的写入，都不是"某个文件的某一版变成
+        // 另一版"这个形状，所以这一层没有 op 能表达它们。
+        ("create_folder", r#"{"path":"新文件夹"}"#),
+        ("add_relation", r#"{"source_path":"a.md","target_path":"b.md"}"#),
+        ("propagate_fact_update", r#"{"fact_id":"f1"}"#),
         ("mcp_fs_write_file", r#"{"path":"/tmp/x"}"#),
         ("search_notes", r#"{"query":"x"}"#),
         ("create_note", r#"{"content":"没有路径"}"#),
@@ -1574,6 +1578,92 @@ fn unmapped_tools_produce_no_operations() {
             "{tool} must not be mapped onto a guessed path"
         );
     }
+}
+
+/// 画布文件也是文件 / a canvas write is a file write like any other.
+///
+/// 画布工具的参数里没有最终 JSON，只有节点操作。所以 op 记成 `patch`，内容等落盘后
+/// 回读——这样画布改动一样有版本、有 diff、能回滚。
+#[test]
+fn canvas_writes_are_mapped_onto_the_canvas_file() {
+    for tool in [
+        "create_canvas",
+        "modify_canvas",
+        "group_canvas_nodes",
+        "arrange_canvas_by",
+        "generate_canvas_from_notes",
+    ] {
+        let ops = write_guard::intents_of(tool, r#"{"canvas_path":"图/思路.canvas"}"#);
+        assert_eq!(ops.len(), 1, "{tool}");
+        assert_eq!(ops[0].kind, ChangeOpKind::Patch, "{tool}");
+        assert_eq!(ops[0].raw_path, "图/思路.canvas", "{tool}");
+        assert!(ops[0].content.is_none(), "{tool}: 全文只有写完才存在");
+    }
+}
+
+/// Core Memory 的目标不在参数里 / core memory's target comes from the vault, not the args.
+#[test]
+fn a_core_memory_write_targets_the_memory_file() {
+    let ops = write_guard::intents_of("update_memory", r#"{"content":"我用 Zettelkasten"}"#);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].raw_path, ".zettelagent/memory.md");
+    assert_eq!(ops[0].target_kind, ObjectKind::Memory);
+}
+
+/// 存稿的目的地只有一份算法 / the stored-copy destination is computed in exactly one place.
+///
+/// 守卫若自己再算一遍文件名，算错的那天它会去预览、回滚一个从来没被写过的文件。
+#[test]
+fn stored_copies_land_where_the_tool_will_actually_write_them() {
+    let ocr = write_guard::intents_of(
+        "ocr_image",
+        r#"{"image_path":"扫描/页1.png","store_as_note":true,"note_title":"发票: 3 月"}"#,
+    );
+    assert_eq!(ocr.len(), 1);
+    assert_eq!(
+        ocr[0].raw_path,
+        crate::tools::internal_tools::helpers::ocr_note_relative_path("发票: 3 月")
+    );
+
+    let pdf = write_guard::intents_of(
+        "extract_pdf_text",
+        r#"{"pdf_path":"资料/论文.pdf","save_to_vault":true}"#,
+    );
+    assert_eq!(pdf.len(), 1);
+    assert_eq!(
+        pdf[0].raw_path,
+        crate::tools::internal_tools::helpers::pdf_extract_relative_path("资料/论文.pdf")
+    );
+}
+
+/// 只看不存的调用不开批次 / a look-only call opens no change set.
+///
+/// `ocr_image` / `extract_pdf_text` / `compile_canvas_to_note` 都有"结果只回给模型"的
+/// 模式。那种调用没有目标不是因为参数漏填，而是因为确实没有写入：给它开一个空 changeset
+/// 会让"有 changeset"不再等于"有人写过东西"，拒绝它则会砍掉一个正常功能。
+#[test]
+fn a_write_tool_in_look_only_mode_is_not_gated() {
+    let conn = migrated_db();
+    let vault = temp_vault("lookonly");
+    let ctx = guard_ctx(&vault);
+
+    for (tool, args) in [
+        ("ocr_image", r#"{"image_path":"a.png"}"#),
+        ("extract_pdf_text", r#"{"pdf_path":"a.pdf"}"#),
+        ("compile_canvas_to_note", r#"{"canvas_path":"a.canvas"}"#),
+    ] {
+        let decision = write_guard::open(&conn, &ctx, tool, args).unwrap();
+        assert!(
+            matches!(decision, Guarded::Unguarded),
+            "{tool} writes nothing in this mode, got {decision:?}"
+        );
+    }
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM changesets", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }
 
 /// 读工具不进守卫 / read tools are not gated.
@@ -1867,6 +1957,115 @@ fn a_write_outside_every_vault_is_refused_before_execution() {
             .unwrap(),
         0
     );
+}
+
+/// 解析不出操作的写入必须被拒 / a write with no resolvable operation is refused.
+///
+/// §7.6 的漏洞：`intents_of` 返回空时，下面的 op 循环一次都不跑，`dry_run` 对一个没有
+/// op 的批次当然报"无冲突"，于是批次被记成已批准、`open` 返回 `Ready { paths: [] }`，
+/// 调用方照常执行工具。写入就这样绕过了预览、基线和回滚，审计里只留下一个空批次。
+#[test]
+fn a_write_tool_that_resolves_no_operation_is_refused_not_approved() {
+    let conn = migrated_db();
+    let vault = temp_vault("noop");
+    let ctx = guard_ctx(&vault);
+
+    // 认得这个工具，但参数里没有 path——模型漏填了目标。
+    let args = r#"{"content":"没有说要写到哪里"}"#;
+    match write_guard::open(&conn, &ctx, "create_note", args).unwrap() {
+        Guarded::Refused {
+            refusal,
+            changeset_id,
+        } => {
+            assert!(
+                matches!(refusal, Refusal::NoResolvableOperation(ref t) if t == "create_note"),
+                "expected the refusal to name the tool, got {refusal:?}"
+            );
+            // 留痕但作废：批次必须停在 rejected，不能是 approved。
+            let cs = changeset::get(&conn, &changeset_id.unwrap()).unwrap().unwrap();
+            assert_eq!(cs.state, ChangeSetState::Rejected);
+        }
+        other => panic!("an op-less write must not be allowed, got {other:?}"),
+    }
+
+    // 一个 op 都没有——这正是它不该被放行的原因。
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM changeset_ops", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+/// 参数形状没登记的写工具也不能放行 / an unmapped write tool is refused too.
+///
+/// 目录、关系行、第三方 MCP 的写入这一层读不懂，所以既不能预演也不能回滚。拒绝的理由
+/// 要与"参数没填全"分开：让模型去"补全参数重试"在这里是假建议，它无论怎么填都一样。
+#[test]
+fn an_unmapped_write_tool_cannot_slip_past_the_guard() {
+    for (tool, args) in [
+        ("create_folder", r#"{"path":"新文件夹"}"#),
+        ("add_relation", r#"{"source_path":"a.md","target_path":"b.md"}"#),
+        ("mcp_fs_write_file", r#"{"path":"/tmp/x","content":"y"}"#),
+    ] {
+        let conn = migrated_db();
+        let vault = temp_vault("unmapped");
+        let ctx = guard_ctx(&vault);
+
+        match write_guard::open(&conn, &ctx, tool, args).unwrap() {
+            Guarded::Refused { refusal, .. } => {
+                assert!(
+                    matches!(refusal, Refusal::UnmappedWriteTool(ref t) if t == tool),
+                    "{tool}: expected UnmappedWriteTool, got {refusal:?}"
+                );
+                // 给模型的话不能是"补全参数"——那件事它做不到。
+                assert!(!refusal.message().contains("补全参数"), "{tool}");
+            }
+            other => panic!("{tool} must not be allowed to write, got {other:?}"),
+        }
+    }
+}
+
+/// 登记表与映射不能各说各话 / the registry and the mapping stay in step.
+///
+/// `MAPPED_WRITE_TOOLS` 决定拒绝时说哪句话。它要是漏了一个真的能映射的工具，用户会
+/// 看到"这个工具的写入无法预览"——而它明明可以。
+#[test]
+fn every_registered_write_tool_really_maps_onto_operations() {
+    for (tool, args) in [
+        ("create_note", r#"{"path":"a.md","content":"x"}"#),
+        ("edit_note", r#"{"path":"a.md","content":"x"}"#),
+        ("append_to_note", r#"{"path":"a.md","content":"x"}"#),
+        ("patch_note", r#"{"path":"a.md"}"#),
+        ("apply_edit", r#"{"path":"a.md"}"#),
+        ("revert_note", r#"{"note_path":"a.md"}"#),
+        ("delete_note", r#"{"path":"a.md"}"#),
+        ("rename_note", r#"{"old_path":"a.md","new_path":"b.md"}"#),
+        ("move_note", r#"{"path":"a.md","destination":"sub"}"#),
+        ("merge_notes", r#"{"source_path":"a.md","target_path":"b.md"}"#),
+        ("create_canvas", r#"{"canvas_path":"a.canvas"}"#),
+        ("modify_canvas", r#"{"canvas_path":"a.canvas","operations":[]}"#),
+        ("group_canvas_nodes", r#"{"canvas_path":"a.canvas"}"#),
+        ("arrange_canvas_by", r#"{"canvas_path":"a.canvas"}"#),
+        ("generate_canvas_from_notes", r#"{"canvas_path":"a.canvas"}"#),
+        ("compile_canvas_to_note", r#"{"canvas_path":"a.canvas","output_path":"b.md"}"#),
+        ("fix_broken_link", r#"{"file_path":"a.md"}"#),
+        ("ocr_image", r#"{"image_path":"a.png","store_as_note":true}"#),
+        ("extract_pdf_text", r#"{"pdf_path":"a.pdf","save_to_vault":true}"#),
+        ("update_memory", r#"{"content":"x"}"#),
+    ] {
+        assert!(
+            write_guard::maps_to_operations(tool),
+            "{tool} is mapped but missing from MAPPED_WRITE_TOOLS"
+        );
+        assert!(
+            !write_guard::intents_of(tool, args).is_empty(),
+            "{tool} is registered as mapped but produced no operation"
+        );
+    }
+    assert!(!write_guard::maps_to_operations("create_folder"));
+    assert!(!write_guard::maps_to_operations("add_relation"));
+    assert!(!write_guard::maps_to_operations("mcp_fs_write_file"));
 }
 
 /// 完整一轮：放行 → 写盘 → 记账 / the full round trip.

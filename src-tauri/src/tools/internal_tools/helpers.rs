@@ -351,6 +351,33 @@ pub(crate) fn is_path_in_any_vault(
     false
 }
 
+/// Characters a note file name may not contain, replaced with `_`.
+///
+/// Shared so that the write guard can predict where a tool will write **before**
+/// it runs. Two copies of this rule would mean the guard records one path while
+/// the tool writes another — the change set would then preview and roll back a
+/// file that was never touched.
+pub(crate) fn sanitize_note_file_name(raw: &str) -> String {
+    raw.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
+/// Where a stored OCR note lands, relative to the vault root.
+pub(crate) fn ocr_note_relative_path(note_title: &str) -> String {
+    format!("_ocr_results/{}.md", sanitize_note_file_name(note_title))
+}
+
+/// Where a saved PDF extract lands, relative to the vault root.
+///
+/// The name comes from the PDF's own file stem, so a re-run overwrites the
+/// previous extract rather than piling up copies.
+pub(crate) fn pdf_extract_relative_path(pdf_path: &str) -> String {
+    let stem = std::path::Path::new(pdf_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pdf_extract");
+    format!("_pdf_extracts/{}.md", sanitize_note_file_name(stem))
+}
+
 /// Resolve `.` and `..` purely lexically, without touching the filesystem.
 /// Unlike `canonicalize` this also works for paths that do not exist yet.
 pub(crate) fn lexically_normalize(path: &std::path::Path) -> std::path::PathBuf {
