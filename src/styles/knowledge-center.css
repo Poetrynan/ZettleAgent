@@ -620,9 +620,12 @@
   overflow-wrap: anywhere;
 }
 
+/* 技术详情里放的是 id、路径、原始码。它们没有空格可断，360px 的侧栏里必须允许硬断。 */
 .kc-mono {
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
+
 
 .kc-muted {
   color: var(--text-tertiary);
