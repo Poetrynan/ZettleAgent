@@ -345,6 +345,11 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_pending_changesets,
             commands::knowledge_preview_changeset,
             commands::knowledge_decide_changeset,
+            commands::knowledge_commitment_inbox,
+            commands::knowledge_decide_commitment,
+            commands::knowledge_proactive_digest,
+            commands::knowledge_mark_notified,
+            commands::knowledge_scan_commitments,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

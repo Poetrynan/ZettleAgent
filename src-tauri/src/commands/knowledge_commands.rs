@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::error::ZettelError;
 use crate::knowledge::memory::{self, RecalledMemory};
-use crate::knowledge::{backfill, changeset, evidence, object_store, types};
+use crate::knowledge::{backfill, changeset, commitments, evidence, object_store, types};
 use crate::AppState;
 
 /// 一次 backfill 推进的上限 / the hard cap on one backfill call.
@@ -375,3 +375,143 @@ pub async fn knowledge_decide_changeset(
     let conn = state.db.lock()?;
     Ok(changeset::record_decision(&conn, &changeset_id, approved)?)
 }
+
+// ── 承诺 / commitments ──────────────────────────────────────────────────────
+//
+// 这组命令是 Task/Commitment View 的后端。全部走 `knowledge::commitments`，所以
+// 四道克制闸门（总开关、免打扰、日上限、最小间隔）在 UI 这条路上同样生效。
+
+/// 收件箱里等用户处理的承诺 / commitments waiting on the user.
+#[tauri::command]
+pub async fn knowledge_commitment_inbox(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<types::TaskCommitment>, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(commitments::inbox(&conn, limit.unwrap_or(50).clamp(1, 200))?)
+}
+
+/// 用户对一条承诺的裁决 / the user's decision on one commitment.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentDecision {
+    pub commitment_id: String,
+    /// `activate` / `dismiss` / `snooze` / `complete`。
+    pub action: String,
+    /// `snooze` 用：推迟到什么时候。
+    pub until_ms: Option<i64>,
+    /// `complete` 用：做完了什么。没有它就不算做完。
+    pub result_summary: Option<String>,
+}
+
+/// 处理一条承诺 / act on one commitment.
+///
+/// `complete` 走 `deliver_result`：登记结果证据、绑回源对象、留审计。只把状态改成
+/// done 的路径这里刻意不提供——那正是这套东西最容易滑向的失败模式。
+#[tauri::command]
+pub async fn knowledge_decide_commitment(
+    state: State<'_, AppState>,
+    decision: CommitmentDecision,
+) -> Result<types::TaskCommitment, ZettelError> {
+    let conn = state.db.lock()?;
+    let id = &decision.commitment_id;
+
+    match decision.action.as_str() {
+        "activate" => Ok(commitments::activate(&conn, id)?),
+        "dismiss" => Ok(commitments::dismiss(&conn, id)?),
+        "snooze" => {
+            let until = decision.until_ms.ok_or_else(|| {
+                ZettelError::System("snoozing a commitment needs untilMs".into())
+            })?;
+            Ok(commitments::snooze(&conn, id, until)?)
+        }
+        "complete" => {
+            let summary = decision.result_summary.unwrap_or_default();
+            Ok(commitments::deliver_result(&conn, id, &summary, "user")?)
+        }
+        other => Err(ZettelError::System(format!(
+            "unknown commitment action `{other}`"
+        ))),
+    }
+}
+
+/// 这一轮该不该提醒，以及为什么 / what may be surfaced now, or why nothing is.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProactiveDigest {
+    pub items: Vec<types::TaskCommitment>,
+    /// 被闸门挡住的原因：`disabled` / `quiet_hours` / `daily_cap` / `too_soon`。
+    /// 为 `None` 表示闸门放行了。
+    pub silenced: Option<String>,
+    /// 刚才转成 expired 的条数。逾期任务不能继续打扰。
+    pub expired: usize,
+}
+
+/// 取这一轮允许露面的提醒 / the reminders the policy allows right now.
+///
+/// 调用方拿到 `items` 之后必须自己决定要不要真的展示。真的展示了就该调
+/// `knowledge_mark_notified`，否则日上限与最小间隔永远不会推进。
+#[tauri::command]
+pub async fn knowledge_proactive_digest(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<ProactiveDigest, ZettelError> {
+    let conn = state.db.lock()?;
+    let now = types::now_ms();
+
+    // 先清逾期再挑提醒：顺序反了的话逾期任务会先被提醒一次再被标记过期。
+    let expired = commitments::expire_overdue(&conn, now, 86_400_000)?;
+
+    let policy = commitments::load_policy(&conn);
+    let hour = commitments::local_hour_now();
+    let limit = limit.unwrap_or(3).clamp(1, 20);
+
+    match commitments::due_notifications(&conn, &policy, now, hour, limit)? {
+        Ok(items) => Ok(ProactiveDigest { items, silenced: None, expired }),
+        Err(reason) => Ok(ProactiveDigest {
+            items: Vec::new(),
+            silenced: Some(
+                match reason {
+                    commitments::Silenced::Disabled => "disabled",
+                    commitments::Silenced::QuietHours(_) => "quiet_hours",
+                    commitments::Silenced::DailyCap(_) => "daily_cap",
+                    commitments::Silenced::TooSoon { .. } => "too_soon",
+                }
+                .to_string(),
+            ),
+            expired,
+        }),
+    }
+}
+
+/// 记下"这条真的提醒过了" / record that a reminder was actually shown.
+#[tauri::command]
+pub async fn knowledge_mark_notified(
+    state: State<'_, AppState>,
+    commitment_id: String,
+) -> Result<(), ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(commitments::record_notified(&conn, &commitment_id, types::now_ms())?)
+}
+
+/// 扫一遍笔记里的带日期待办 / harvest dated todos from the vault.
+///
+/// 只收带 `YYYY-MM-DD` 的未打勾条目，扫出来一律进 `proposed`。理由见
+/// `commitments::scan_notes` 的文档。
+#[tauri::command]
+pub async fn knowledge_scan_commitments(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<CommitmentScan, ZettelError> {
+    let conn = state.db.lock()?;
+    let report = commitments::scan_notes(&conn, limit.unwrap_or(50).clamp(1, 500))?;
+    Ok(CommitmentScan { found: report.found, created: report.created })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentScan {
+    pub found: usize,
+    pub created: usize,
+}
+

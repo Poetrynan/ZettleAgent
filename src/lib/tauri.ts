@@ -2225,4 +2225,93 @@ export async function decideChangeSet(
   return invoke<ChangeSet>('knowledge_decide_changeset', { changesetId, approved });
 }
 
+// ── 承诺 / Commitments ──────────────────────────────────────────────────────
+
+export type CommitmentStatus =
+  | 'proposed'
+  | 'active'
+  | 'done'
+  | 'snoozed'
+  | 'dismissed'
+  | 'expired';
+
+/** 一条承诺 / open loop。`source` 指回它是从哪儿被提取出来的。 */
+export interface TaskCommitment {
+  id: string;
+  object_id: string | null;
+  commitment_type: string;
+  title: string;
+  source: { source_type: string; source_id: string } | null;
+  evidence_ids: string[];
+  owner: string | null;
+  status: CommitmentStatus;
+  priority: number;
+  due_at_ms: number | null;
+  remind_at_ms: number | null;
+  dedupe_key: string;
+  proactive_enabled: boolean;
+  last_notified_at_ms: number | null;
+  notify_count: number;
+  completion_evidence_id: string | null;
+  return_target: string | null;
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
+/** 被闸门挡住的原因。`null` = 这一轮允许露面。 */
+export type SilencedReason = 'disabled' | 'quiet_hours' | 'daily_cap' | 'too_soon';
+
+export interface ProactiveDigest {
+  items: TaskCommitment[];
+  silenced: SilencedReason | null;
+  /** 刚刚转成 expired 的条数。 */
+  expired: number;
+}
+
+export interface CommitmentScan {
+  found: number;
+  created: number;
+}
+
+/** 等用户处理的承诺。 */
+export async function getCommitmentInbox(limit?: number): Promise<TaskCommitment[]> {
+  return invoke<TaskCommitment[]>('knowledge_commitment_inbox', { limit });
+}
+
+/**
+ * 处理一条承诺。
+ *
+ * `complete` 必须带 `resultSummary`：后端会把它登记成完成证据并绑回源对象。
+ * 没有摘要的"完成"会被拒——只把状态改成 done 不算闭环。
+ */
+export async function decideCommitment(decision: {
+  commitmentId: string;
+  action: 'activate' | 'dismiss' | 'snooze' | 'complete';
+  untilMs?: number;
+  resultSummary?: string;
+}): Promise<TaskCommitment> {
+  return invoke<TaskCommitment>('knowledge_decide_commitment', { decision });
+}
+
+/**
+ * 这一轮允许露面的提醒。
+ *
+ * 拿到 `items` 之后真的展示了，就要调 {@link markCommitmentNotified}，否则日上限
+ * 与最小间隔永远不会推进，克制机制形同虚设。
+ */
+export async function getProactiveDigest(limit?: number): Promise<ProactiveDigest> {
+  return invoke<ProactiveDigest>('knowledge_proactive_digest', { limit });
+}
+
+/** 记下"这条提醒真的展示过了"。 */
+export async function markCommitmentNotified(commitmentId: string): Promise<void> {
+  return invoke<void>('knowledge_mark_notified', { commitmentId });
+}
+
+/** 扫一遍笔记里的带日期未打勾待办，扫出来一律进 proposed。 */
+export async function scanCommitments(limit?: number): Promise<CommitmentScan> {
+  return invoke<CommitmentScan>('knowledge_scan_commitments', { limit });
+}
+
+
 

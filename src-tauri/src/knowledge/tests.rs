@@ -1839,3 +1839,304 @@ fn a_delete_tombstones_the_object_instead_of_emptying_it() {
         "删除不该伪造一个新版本"
     );
 }
+
+// ── 承诺与主动提醒 / commitments and the proactive gate ──────────────────────
+
+use super::commitments::{self, NewCommitment, NotifyPolicy, Silenced};
+
+/// 一条到点该提醒的任务 / a commitment that is due right now.
+fn due_commitment(conn: &Connection, title: &str, now: i64) -> TaskCommitment {
+    let mut req = NewCommitment::new("commitment", title);
+    req.remind_at_ms = Some(now - 1_000);
+    commitments::propose(conn, &req).unwrap()
+}
+
+/// 一切都放行的策略 / a policy that lets everything through.
+fn permissive_policy() -> NotifyPolicy {
+    NotifyPolicy {
+        enabled: true,
+        quiet_from_hour: 0,
+        quiet_to_hour: 0,
+        max_per_day: 10,
+        min_gap_ms: 0,
+    }
+}
+
+/// 默认不说话 / a fresh install stays silent.
+///
+/// 默认开着的主动提醒等于没有征得同意就开始说话。这条锁的是默认值的方向。
+#[test]
+fn the_default_policy_says_nothing_until_the_user_opts_in() {
+    let policy = NotifyPolicy::default();
+    assert!(!policy.enabled, "主动提醒必须是 opt-in");
+
+    let conn = migrated_db();
+    // 设置项一条都没写过时，读出来也必须是安静的默认值，而不是"全部允许"。
+    assert_eq!(commitments::load_policy(&conn), NotifyPolicy::default());
+}
+
+/// 免打扰跨午夜 / the quiet window wraps past midnight.
+///
+/// `22-8` 表示 22、23、0…7。这行写反的话免打扰会变成"只在白天安静"——正好相反。
+#[test]
+fn quiet_hours_wrap_around_midnight() {
+    let policy = NotifyPolicy::default(); // 22-8
+    for hour in [22, 23, 0, 3, 7] {
+        assert!(policy.is_quiet_hour(hour), "{hour} 点应当安静");
+    }
+    for hour in [8, 12, 21] {
+        assert!(!policy.is_quiet_hour(hour), "{hour} 点不该被静音");
+    }
+
+    // 不跨午夜的窗口按常规区间算。
+    let daytime = NotifyPolicy { quiet_from_hour: 9, quiet_to_hour: 17, ..policy.clone() };
+    assert!(daytime.is_quiet_hour(10));
+    assert!(!daytime.is_quiet_hour(20));
+
+    // 起止相同 = 没有免打扰，而不是全天静音。
+    let none = NotifyPolicy { quiet_from_hour: 5, quiet_to_hour: 5, ..policy };
+    assert!(!none.is_quiet_hour(5));
+}
+
+/// 四道闸门每一道都真的拦得住 / every gate actually stops the nudge.
+#[test]
+fn each_gate_can_silence_the_reminder_on_its_own() {
+    let conn = migrated_db();
+    let now = now_ms();
+    due_commitment(&conn, "写周报", now);
+
+    // 1. 总开关
+    let off = NotifyPolicy { enabled: false, ..permissive_policy() };
+    assert_eq!(
+        commitments::due_notifications(&conn, &off, now, 12, 10).unwrap().err(),
+        Some(Silenced::Disabled)
+    );
+
+    // 2. 免打扰时段
+    let quiet = NotifyPolicy { quiet_from_hour: 22, quiet_to_hour: 8, ..permissive_policy() };
+    assert_eq!(
+        commitments::due_notifications(&conn, &quiet, now, 23, 10).unwrap().err(),
+        Some(Silenced::QuietHours(23))
+    );
+
+    // 放行时确实能拿到那一条。
+    let allowed = commitments::due_notifications(&conn, &permissive_policy(), now, 12, 10)
+        .unwrap()
+        .expect("闸门全开时应当有提醒");
+    assert_eq!(allowed.len(), 1);
+    commitments::record_notified(&conn, &allowed[0].id, now).unwrap();
+
+    // 3. 日上限：已经提醒过一条，上限设成 1 就该闭嘴。
+    let capped = NotifyPolicy { max_per_day: 1, ..permissive_policy() };
+    assert_eq!(
+        commitments::due_notifications(&conn, &capped, now, 12, 10).unwrap().err(),
+        Some(Silenced::DailyCap(1))
+    );
+
+    // 4. 最小间隔：刚提醒完，隔一小时才允许下一条。
+    let spaced = NotifyPolicy { min_gap_ms: 3_600_000, ..permissive_policy() };
+    assert!(matches!(
+        commitments::due_notifications(&conn, &spaced, now, 12, 10).unwrap().err(),
+        Some(Silenced::TooSoon { .. })
+    ));
+}
+
+/// 同一件事只有一条 / the same commitment does not pile up.
+///
+/// 换个说法就当成新任务的话，收件箱会在一周内变成一堆同义重复。
+#[test]
+fn the_same_commitment_proposed_twice_stays_one_row() {
+    let conn = migrated_db();
+
+    let first = commitments::propose(&conn, &NewCommitment::new("commitment", "写 周报！")).unwrap();
+    let second = commitments::propose(&conn, &NewCommitment::new("commitment", "写周报")).unwrap();
+    assert_eq!(first.id, second.id, "标点与空格不该造出第二条任务");
+
+    // 类型不同就是不同的事。
+    let gap = commitments::propose(&conn, &NewCommitment::new("knowledge_gap", "写周报")).unwrap();
+    assert_ne!(gap.id, first.id);
+}
+
+/// 被否掉的不会被重新提议复活 / a dismissed commitment stays dismissed.
+///
+/// 这是"用户总开关必须真实生效"在单条粒度上的落点。重复提议能把它拉回 proposed 的
+/// 话，用户根本关不掉它。
+#[test]
+fn re_proposing_a_dismissed_commitment_does_not_resurrect_it() {
+    let conn = migrated_db();
+    let now = now_ms();
+    let created = due_commitment(&conn, "帮我订机票", now);
+    commitments::dismiss(&conn, &created.id).unwrap();
+
+    let again = commitments::propose(&conn, &NewCommitment::new("commitment", "帮我订机票")).unwrap();
+    assert_eq!(again.id, created.id);
+    assert_eq!(again.status, CommitmentStatus::Dismissed);
+    assert!(!again.proactive_enabled, "否掉之后不该再问");
+
+    // 也不该再进提醒候选集。
+    let surfaced = commitments::due_notifications(&conn, &permissive_policy(), now, 12, 10)
+        .unwrap()
+        .unwrap();
+    assert!(surfaced.is_empty());
+}
+
+/// 结掉和过期的不再打扰 / finished and timed-out work stops nagging.
+#[test]
+fn expired_and_finished_commitments_stop_being_surfaced() {
+    let conn = migrated_db();
+    let now = now_ms();
+
+    let mut overdue = NewCommitment::new("deadline", "交季度总结");
+    overdue.due_at_ms = Some(now - 7 * 86_400_000);
+    overdue.remind_at_ms = Some(now - 1_000);
+    let overdue = commitments::propose(&conn, &overdue).unwrap();
+
+    // 逾期一天以上就转 expired。
+    assert_eq!(commitments::expire_overdue(&conn, now, 86_400_000).unwrap(), 1);
+    assert_eq!(
+        commitments::get(&conn, &overdue.id).unwrap().unwrap().status,
+        CommitmentStatus::Expired
+    );
+
+    let surfaced = commitments::due_notifications(&conn, &permissive_policy(), now, 12, 10)
+        .unwrap()
+        .unwrap();
+    assert!(surfaced.is_empty(), "过期任务不该继续提醒");
+}
+
+/// 没有证据不算做完 / "done" without evidence is refused.
+///
+/// 任务系统最坏的失败模式是一堆看起来做完了、其实没人能核对的事。
+#[test]
+fn completing_a_commitment_requires_real_evidence() {
+    let conn = migrated_db();
+    let created = due_commitment(&conn, "整理读书笔记", now_ms());
+
+    assert!(commitments::complete(&conn, &created.id, "").is_err(), "空证据不行");
+    assert!(
+        commitments::complete(&conn, &created.id, "evidence-that-does-not-exist").is_err(),
+        "编一个证据 ID 也不行"
+    );
+    assert_eq!(
+        commitments::get(&conn, &created.id).unwrap().unwrap().status,
+        CommitmentStatus::Proposed,
+        "被拒的完成不该改状态"
+    );
+
+    let evidence_id = evidence::record_evidence(
+        &conn,
+        NewEvidence {
+            source_type: "chat_session".to_string(),
+            source_id: "s-1".to_string(),
+            locator: None,
+            excerpt: Some("已经整理完并归档".to_string()),
+            author: Some("user".to_string()),
+            extraction_model: None,
+            pipeline_version: None,
+        },
+    )
+    .unwrap();
+    let done = commitments::complete(&conn, &created.id, &evidence_id).unwrap();
+    assert_eq!(done.status, CommitmentStatus::Done);
+    assert_eq!(done.completion_evidence_id.as_deref(), Some(evidence_id.as_str()));
+}
+
+/// 做完之后结果要回到它来的地方 / the result lands back on the source object.
+///
+/// 只把状态改成 done 的话，那份产出不会出现在任何人下次会看到的地方。
+#[test]
+fn a_finished_commitment_returns_its_result_to_the_source_object() {
+    let conn = migrated_db();
+    let object_id = backfilled_note(&conn, "d:/vault/项目.md", "项目", "原来的内容");
+
+    let mut req = NewCommitment::new("next_action", "把讨论结论写回项目笔记");
+    req.object_id = Some(object_id.clone());
+    req.return_target = Some("d:/vault/项目.md".to_string());
+    let created = commitments::propose(&conn, &req).unwrap();
+
+    let done = commitments::deliver_result(
+        &conn,
+        &created.id,
+        "结论：先做检索层，再做 UI。",
+        "agent",
+    )
+    .unwrap();
+
+    assert_eq!(done.status, CommitmentStatus::Done);
+    let evidence_id = done.completion_evidence_id.expect("完成必须有证据");
+
+    // 证据挂在源对象上，那篇笔记的证据列表里能看到这次产出。
+    let attached = evidence::evidence_for_object(&conn, &object_id).unwrap();
+    assert!(
+        attached.iter().any(|(e, role, _)| e.id == evidence_id && role == "supports"),
+        "结果证据必须绑到源对象上"
+    );
+
+    // 审计里留下了回流目标，而不是只留一个 done。
+    let logged: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audit_events WHERE event = 'commitment_result' AND scope = ?1",
+            params!["d:/vault/项目.md"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(logged, 1);
+
+    // 但**不能**偷偷改用户的 Markdown：对象版本没有被这次回流推进。
+    assert_eq!(
+        object_store::get_object(&conn, &object_id).unwrap().unwrap().current_version,
+        1,
+        "结果回流不该绕过 ChangeSet 去改笔记正文"
+    );
+}
+
+/// 结掉的任务不能倒回去 / a finished commitment cannot be reopened in place.
+///
+/// 让它复活的话，那条完成证据就变成了在说谎。要重开就再提一条新的。
+#[test]
+fn a_finished_commitment_cannot_walk_backwards() {
+    let conn = migrated_db();
+    let created = due_commitment(&conn, "复盘上一次发布", now_ms());
+    commitments::deliver_result(&conn, &created.id, "已复盘，结论三条。", "agent").unwrap();
+
+    assert!(commitments::activate(&conn, &created.id).is_err());
+    assert!(commitments::snooze(&conn, &created.id, now_ms() + 86_400_000).is_err());
+}
+
+/// 只收带日期的未打勾待办 / only dated, unchecked todos are harvested.
+///
+/// 全收的话一个大 vault 当天就把收件箱冲爆；收已打勾的等于把做完的事重新推一遍。
+#[test]
+fn the_scan_takes_dated_open_todos_and_nothing_else() {
+    let conn = migrated_db();
+    add_note_with_chunks(
+        &conn,
+        "d:/vault/待办.md",
+        "待办",
+        &[concat!(
+            "- [ ] 交季度总结 2026-08-30\n",
+            "- [x] 已经交了的月报 2026-07-31\n",
+            "- [ ] 有空再看看那本书\n",
+            "普通正文，不是待办 2026-09-01\n",
+        )],
+    );
+
+    let report = commitments::scan_notes(&conn, 50).unwrap();
+    assert_eq!(report.found, 1, "只有那条带日期的未打勾条目算");
+    assert_eq!(report.created, 1);
+
+    let inbox = commitments::inbox(&conn, 50).unwrap();
+    assert_eq!(inbox.len(), 1);
+    let item = &inbox[0];
+    assert!(item.title.contains("交季度总结"));
+    assert_eq!(item.status, CommitmentStatus::Proposed, "扫出来的一律先进 proposed");
+    assert_eq!(item.return_target.as_deref(), Some("d:/vault/待办.md"));
+    assert!(item.due_at_ms.is_some());
+    assert_eq!(item.evidence_ids.len(), 1, "每条都要能指回原文");
+
+    // 再扫一遍不会变成两条。
+    let again = commitments::scan_notes(&conn, 50).unwrap();
+    assert_eq!(again.found, 1);
+    assert_eq!(again.created, 0, "重复扫描不该造出第二条");
+    assert_eq!(commitments::inbox(&conn, 50).unwrap().len(), 1);
+}
