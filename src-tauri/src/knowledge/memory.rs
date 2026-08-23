@@ -584,3 +584,147 @@ pub fn list_by_lifecycle(
         .collect::<Result<Vec<_>, _>>()?;
     rows.into_iter().collect()
 }
+
+// ── memory.md 手工编辑回流 / hand edits to memory.md ────────────────────────
+
+/// `memory.md` 在 vault 里的位置 / where the projection lives.
+///
+/// 与 `workspace_ops` 用的是同一条路径，写和读不能各算一次。
+pub fn memory_file_path(vault_path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(vault_path)
+        .join(".zettelagent")
+        .join("memory.md")
+}
+
+/// 一次回流的结果 / what one reconciliation did.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownSync {
+    /// 文件里新出现、因此被采纳为用户事实的条数。
+    pub adopted: usize,
+    /// 文件里有、库里已经生效的条数。
+    pub unchanged: usize,
+    /// 之前从这个文件采纳过、现在被用户删掉的条数。
+    pub forgotten: usize,
+}
+
+/// 把 `memory.md` 的手工编辑吸收回记忆层 / absorb hand edits to `memory.md`.
+///
+/// 用户直接改这个文件是一条一等公民的输入通道：那是他自己写下的话，所以采纳时直接
+/// 记成已确认的用户事实（`confirmed_by`），不再走候选收件箱——让用户确认他刚亲手
+/// 打的一行字是没有意义的。
+///
+/// 删除只作用于**当初就是从这个文件采纳的**那些条目：从对话里抽出来的记忆不因为
+/// 没出现在 `memory.md` 里就被忘掉。`memory.md` 是投影，不是全集，把它当全集会
+/// 让一次手工整理静默清空整个记忆库。
+///
+/// 文件不存在不是错误——只是还没人写过。
+pub fn reconcile_from_markdown(conn: &Connection, vault_path: &str) -> ObjectResult<MarkdownSync> {
+    let path = memory_file_path(vault_path);
+    if !path.exists() {
+        return Ok(MarkdownSync::default());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| {
+        ObjectError::Search(format!("cannot read {}: {e}", path.display()))
+    })?;
+    let source_id = path.to_string_lossy().to_string();
+    let parsed = crate::tools::internal_tools::workspace_ops::parse_structured_memory(&raw);
+
+    let mut report = MarkdownSync::default();
+    let mut present: Vec<String> = Vec::new();
+
+    for (section, items) in &parsed.sections {
+        for claim in items {
+            let claim = claim.trim();
+            if claim.is_empty() {
+                continue;
+            }
+            // 没有 frontmatter 的老格式会被 `parse_structured_memory` 整体迁移进
+            // "User Preferences"，标题行也一起进来。把 `## 小标题` 当成一条记忆，
+            // 用户会在召回里看到自己写的标题——那不是他的意思。
+            if claim.starts_with('#') || claim.chars().all(|c| c == '-' || c == '=') {
+                continue;
+            }
+
+            present.push(crate::db::memory_store::normalize(claim));
+
+            if let Some(existing) = find_duplicate(conn, claim, "global")? {
+                if existing.lifecycle == MemoryLifecycle::Active
+                    || existing.lifecycle == MemoryLifecycle::Verified
+                {
+                    touch(conn, &existing.id)?;
+                    report.unchanged += 1;
+                    continue;
+                }
+                // 用户亲手把一条被拒/过期的记忆写回文件里，那是他改了主意。
+                confirm(conn, &existing.id, CONFIRMED_BY_FILE)?;
+                report.adopted += 1;
+                continue;
+            }
+
+            let mut proposal = MemoryProposal::new(kind_for_section(section), claim, "global");
+            proposal.confidence = 1.0;
+            proposal.importance = 1.5;
+            proposal.user_requested = true;
+            proposal.section = Some(section.clone());
+            proposal.source = Some(SourceRef {
+                source_type: "file".to_string(),
+                source_id: source_id.clone(),
+            });
+            proposal.excerpt = Some(claim.to_string());
+            proposal.locator = Some(format!("memory.md#{section}"));
+            let item = propose(conn, proposal)?;
+            confirm(conn, &item.id, CONFIRMED_BY_FILE)?;
+            report.adopted += 1;
+        }
+    }
+
+    report.forgotten = forget_removed_from_file(conn, &source_id, &present)?;
+    Ok(report)
+}
+
+/// 采纳一行手写记忆时记的 `confirmed_by` / who confirmed a hand-written line.
+const CONFIRMED_BY_FILE: &str = "user:memory.md";
+
+/// section 名字决定种类 / the section decides the kind.
+///
+/// 未知 section 落到 `Semantic`：宁可分类粗一点，也不能因为用户自己加了个小标题
+/// 就把那几行丢掉。
+fn kind_for_section(section: &str) -> MemoryKind {
+    match section {
+        "User Preferences" => MemoryKind::Profile,
+        "Workflow Habits" => MemoryKind::Procedural,
+        "Research Topics" => MemoryKind::Resource,
+        _ => MemoryKind::Semantic,
+    }
+}
+
+/// 用户从文件里删掉的那些，忘掉 / forget what the user deleted from the file.
+fn forget_removed_from_file(
+    conn: &Connection,
+    source_id: &str,
+    present: &[String],
+) -> ObjectResult<usize> {
+    let sql = format!(
+        "SELECT {MEMORY_COLUMNS} FROM memory_items
+         WHERE source_type = 'file' AND source_id = ?1
+           AND lifecycle IN ('active', 'verified')"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<_> = stmt
+        .query_map(params![source_id], |row| Ok(map_memory(row)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut forgotten = 0usize;
+    for row in rows {
+        let item = row?;
+        let normalized = crate::db::memory_store::normalize(&item.claim);
+        if present.iter().any(|p| p == &normalized) {
+            continue;
+        }
+        forget(conn, &item.id)?;
+        forgotten += 1;
+    }
+    Ok(forgotten)
+}
+

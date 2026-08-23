@@ -1625,6 +1625,7 @@ export function SmartChat() {
         <KnowledgePanel
           contextPackage={knowledgeContext}
           runId={knowledgeRunId}
+          vaultPath={state.vaultPath || null}
           onClose={() => setShowKnowledgePanel(false)}
         />
       )}

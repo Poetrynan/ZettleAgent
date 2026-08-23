@@ -2552,6 +2552,133 @@ fn scenario_e_untrusted_content_neither_becomes_a_fact_nor_a_quiet_write() {
     crate::llm::tool_hooks::clear_turn_taint();
 }
 
+// ── memory.md 手工编辑回流 / hand edits to memory.md ────────────────────────
+
+/// 写一份 `memory.md` / lay down a memory file.
+fn write_memory_file(vault: &std::path::Path, body: &str) {
+    let dir = vault.join(".zettelagent");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("memory.md"), body).unwrap();
+}
+
+/// 手写的一行就是用户事实 / a hand-written line is a user fact.
+///
+/// 用户自己打进 `memory.md` 的话不该再回到收件箱等他确认——那等于让他确认自己刚写的
+/// 字。这一条锁的是"采纳即已确认"，并且它必须同时进得了两条召回路径。
+#[test]
+fn a_hand_written_memory_line_is_adopted_as_a_confirmed_fact() {
+    let conn = migrated_db();
+    let vault = temp_vault("memfile");
+    write_memory_file(
+        &vault,
+        concat!(
+            "---\nversion: 2\nlast_updated: 2026-08-23T00:00:00Z\n---\n\n",
+            "## User Preferences\n",
+            "- 回答一律用中文\n",
+            "\n## Workflow Habits\n",
+            "- 每天早上先看收件箱\n",
+        ),
+    );
+
+    let report =
+        memory::reconcile_from_markdown(&conn, &vault.to_string_lossy()).unwrap();
+    assert_eq!(report.adopted, 2);
+    assert_eq!(report.forgotten, 0);
+
+    assert!(
+        memory::inbox(&conn, 20).unwrap().is_empty(),
+        "手写的行不该回到收件箱等确认"
+    );
+
+    let active = memory::list_by_lifecycle(&conn, MemoryLifecycle::Active, 20).unwrap();
+    assert_eq!(active.len(), 2);
+    let zh = active
+        .iter()
+        .find(|m| m.claim.contains("中文"))
+        .expect("那一行必须落库");
+    assert_eq!(zh.confirmed_by.as_deref(), Some("user:memory.md"));
+    assert_eq!(zh.kind, MemoryKind::Profile, "User Preferences 是画像类");
+    assert_eq!(zh.section.as_deref(), Some("User Preferences"));
+
+    // 两条召回路径都要看得见它。
+    assert!(!crate::db::memory_store::recall(&conn, "中文", 5).unwrap().is_empty());
+    assert!(!memory::recall(&conn, "中文", None, 5).unwrap().is_empty());
+}
+
+/// 再跑一次不重复采纳 / running twice adopts nothing new.
+#[test]
+fn reconciling_the_same_memory_file_twice_changes_nothing() {
+    let conn = migrated_db();
+    let vault = temp_vault("memfile_idem");
+    write_memory_file(&vault, "## Vault Context\n- 这个库主要放读书笔记\n");
+
+    let path = vault.to_string_lossy().to_string();
+    let first = memory::reconcile_from_markdown(&conn, &path).unwrap();
+    let second = memory::reconcile_from_markdown(&conn, &path).unwrap();
+
+    assert_eq!(first.adopted, 1);
+    assert_eq!(second.adopted, 0);
+    assert_eq!(second.unchanged, 1);
+    assert_eq!(
+        memory::list_by_lifecycle(&conn, MemoryLifecycle::Active, 20).unwrap().len(),
+        1,
+        "同一行不该变成两条记忆"
+    );
+}
+
+/// 用户删掉的行会被忘掉，但只限它自己带进来的那些 / deletions are scoped.
+///
+/// `memory.md` 是投影不是全集。把它当全集，一次手工整理就会静默清空从对话里学到的
+/// 一切——那是最坏的一种数据丢失：用户不会知道少了什么。
+#[test]
+fn deleting_a_line_forgets_only_what_that_file_brought_in() {
+    let conn = migrated_db();
+    let vault = temp_vault("memfile_del");
+    let path = vault.to_string_lossy().to_string();
+
+    // 从对话里学到的一条，和文件无关。
+    let mut from_chat = MemoryProposal::new(MemoryKind::Semantic, "项目截止日是十月", "global");
+    from_chat.user_requested = true;
+    from_chat.confidence = 0.9;
+    from_chat.source = Some(SourceRef {
+        source_type: "message".into(),
+        source_id: "msg-1".into(),
+    });
+    let chat_item = memory::propose(&conn, from_chat).unwrap();
+    memory::confirm(&conn, &chat_item.id, "user").unwrap();
+
+    write_memory_file(&vault, "## Vault Context\n- 先写摘要再写正文\n- 引用一律带页码\n");
+    assert_eq!(memory::reconcile_from_markdown(&conn, &path).unwrap().adopted, 2);
+
+    // 用户手工删掉其中一行。
+    write_memory_file(&vault, "## Vault Context\n- 先写摘要再写正文\n");
+    let report = memory::reconcile_from_markdown(&conn, &path).unwrap();
+    assert_eq!(report.forgotten, 1);
+    assert_eq!(report.unchanged, 1);
+
+    let active = memory::list_by_lifecycle(&conn, MemoryLifecycle::Active, 20).unwrap();
+    assert!(active.iter().any(|m| m.claim.contains("先写摘要")));
+    assert!(!active.iter().any(|m| m.claim.contains("页码")), "删掉的那行该被忘掉");
+    assert!(
+        active.iter().any(|m| m.claim.contains("十月")),
+        "从对话里学到的记忆不该因为不在 memory.md 里就被忘掉"
+    );
+}
+
+/// 没有文件不是错误 / a missing file is not an error.
+#[test]
+fn reconciling_without_a_memory_file_is_a_no_op() {
+    let conn = migrated_db();
+    let vault = temp_vault("memfile_none");
+    let report =
+        memory::reconcile_from_markdown(&conn, &vault.to_string_lossy()).unwrap();
+    assert_eq!(report.adopted, 0);
+    assert_eq!(report.unchanged, 0);
+    assert_eq!(report.forgotten, 0);
+}
+
+
+
 
 
 

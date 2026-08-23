@@ -21,6 +21,7 @@ import {
   rejectMemory,
   runKnowledgeBackfill,
   scanCommitments,
+  syncMemoryFile,
 } from '../../lib/tauri';
 import { getLang } from '../../lib/i18n';
 
@@ -49,10 +50,12 @@ interface KnowledgePanelProps {
   contextPackage: ContextPackageSummary | null;
   /** 本轮的 run id，用于拉这一轮的审计明细。 */
   runId: string | null;
+  /** 当前 vault，`memory.md` 回流需要它。没有 vault 时该入口不出现。 */
+  vaultPath: string | null;
   onClose: () => void;
 }
 
-export function KnowledgePanel({ contextPackage, runId, onClose }: KnowledgePanelProps) {
+export function KnowledgePanel({ contextPackage, runId, vaultPath, onClose }: KnowledgePanelProps) {
   const isZh = getLang() === 'zh';
   const [tab, setTab] = useState<TabKey>('context');
 
@@ -86,7 +89,7 @@ export function KnowledgePanel({ contextPackage, runId, onClose }: KnowledgePane
         {tab === 'context' && (
           <ContextTab pkg={contextPackage} runId={runId} isZh={isZh} />
         )}
-        {tab === 'memory' && <MemoryTab isZh={isZh} />}
+        {tab === 'memory' && <MemoryTab isZh={isZh} vaultPath={vaultPath} />}
         {tab === 'changes' && <ChangesTab isZh={isZh} />}
         {tab === 'tasks' && <TasksTab isZh={isZh} />}
         {tab === 'health' && <HealthTab isZh={isZh} />}
@@ -307,9 +310,12 @@ function AuditList({ runId, isZh }: { runId: string; isZh: boolean }) {
  * 这一块是"不得让未经确认的 LLM 推断伪装成用户事实"在界面上的落点。确认是唯一会写
  * `confirmed_by` 的路径，所以它必须是用户点出来的。
  */
-function MemoryTab({ isZh }: { isZh: boolean }) {
+function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: string | null }) {
   const { data, error, busy, reload } = useLoader<MemoryItem[]>(() => getMemoryInbox(50), []);
   const [acting, setActing] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const act = async (id: string, fn: (id: string) => Promise<MemoryItem>) => {
     setActing(id);
@@ -321,14 +327,61 @@ function MemoryTab({ isZh }: { isZh: boolean }) {
     }
   };
 
-  if (error) return <Failed error={error} onRetry={reload} label={isZh ? '重试' : 'Retry'} />;
-  if (busy && !data) return <Empty text={isZh ? '读取中…' : 'Loading…'} />;
+  /** 用户手改过 `memory.md` 之后，把那些行吸收回记忆层。 */
+  const sync = async () => {
+    if (!vaultPath) return;
+    setSyncing(true);
+    setSyncNote(null);
+    setSyncError(null);
+    try {
+      const r = await syncMemoryFile(vaultPath);
+      setSyncNote(
+        isZh
+          ? `采纳 ${r.adopted} 条，已有 ${r.unchanged} 条，忘掉 ${r.forgotten} 条`
+          : `${r.adopted} adopted, ${r.unchanged} already known, ${r.forgotten} forgotten`,
+      );
+      await reload();
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const toolbar = vaultPath ? (
+    <div className="knowledge-toolbar">
+      <button className="knowledge-mini-btn" disabled={syncing} onClick={() => void sync()}>
+        {syncing
+          ? (isZh ? '回流中…' : 'Syncing…')
+          : (isZh ? '读回 memory.md 的手工修改' : 'Absorb memory.md edits')}
+      </button>
+      {syncNote && <span className="knowledge-toolbar-note">{syncNote}</span>}
+    </div>
+  ) : null;
+
+
+  // 回流入口在三种状态下都要在：收件箱为空恰恰是最可能想手改文件的时候。
+  const shell = (body: React.ReactNode) => (
+    <div className="knowledge-section">
+      {toolbar}
+      {syncError && <div className="knowledge-error-text">{syncError}</div>}
+      {body}
+    </div>
+  );
+
+  if (error) {
+    return shell(<Failed error={error} onRetry={reload} label={isZh ? '重试' : 'Retry'} />);
+  }
+  if (busy && !data) return shell(<Empty text={isZh ? '读取中…' : 'Loading…'} />);
   if (!data || data.length === 0) {
-    return <Empty text={isZh ? '没有待确认的候选记忆。' : 'No candidate memories to review.'} />;
+    return shell(
+      <Empty text={isZh ? '没有待确认的候选记忆。' : 'No candidate memories to review.'} />,
+    );
   }
 
-  return (
+  return shell(
     <div className="knowledge-list">
+
       {data.map(item => (
         <div className="knowledge-item" key={item.id}>
           <div className="knowledge-item-head">
@@ -373,11 +426,12 @@ function MemoryTab({ isZh }: { isZh: boolean }) {
           </div>
         </div>
       ))}
-    </div>
+    </div>,
   );
 }
 
 // ── Change Preview ──────────────────────────────────────────────────────────
+
 
 /**
  * 待决变更批次 / change sets that have not landed yet.

@@ -258,6 +258,20 @@ pub async fn knowledge_memory_confirm(
     Ok(memory::confirm(&conn, &memory_id, "user")?)
 }
 
+/// 把 `memory.md` 的手工编辑吸收回记忆层 / absorb hand edits to `memory.md`.
+///
+/// 用户直接改那个文件也是在说话。不回流的话，他手写的那一行只活在一个文件里，
+/// 检索、证据、冲突检查全都看不见它。
+#[tauri::command]
+pub async fn knowledge_sync_memory_file(
+    state: State<'_, AppState>,
+    vault_path: String,
+) -> Result<memory::MarkdownSync, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(memory::reconcile_from_markdown(&conn, &vault_path)?)
+}
+
+
 /// 用户否掉一条候选 / the user rejects a candidate.
 ///
 /// 归档而不是删除，所以同一条错误提案不会反复回到 Inbox。

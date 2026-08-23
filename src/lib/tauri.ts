@@ -2124,6 +2124,26 @@ export async function forgetMemory(memoryId: string): Promise<MemoryItem> {
   return invoke<MemoryItem>('knowledge_memory_forget', { memoryId });
 }
 
+/** 一次 `memory.md` 回流的结果。 */
+export interface MemoryFileSync {
+  /** 文件里新出现、因此被采纳为用户事实的条数。 */
+  adopted: number;
+  /** 文件里有、库里已经生效的条数。 */
+  unchanged: number;
+  /** 之前从这个文件采纳过、现在被用户删掉的条数。 */
+  forgotten: number;
+}
+
+/**
+ * 把用户对 `memory.md` 的手工编辑吸收回记忆层。
+ *
+ * 采纳即已确认——那是用户自己打的字，不该再回收件箱。删除只作用于当初从这个文件
+ * 采纳的条目：`memory.md` 是投影，不是记忆的全集。
+ */
+export async function syncMemoryFile(vaultPath: string): Promise<MemoryFileSync> {
+  return invoke<MemoryFileSync>('knowledge_sync_memory_file', { vaultPath });
+}
+
 /** 按当前问题召回记忆，用于 Context Inspector 解释"为什么注入了这些"。 */
 export async function recallMemories(
   query: string,

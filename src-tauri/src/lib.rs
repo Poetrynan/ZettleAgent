@@ -342,6 +342,7 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_memory_reject,
             commands::knowledge_memory_forget,
             commands::knowledge_memory_recall,
+            commands::knowledge_sync_memory_file,
             commands::knowledge_pending_changesets,
             commands::knowledge_preview_changeset,
             commands::knowledge_decide_changeset,

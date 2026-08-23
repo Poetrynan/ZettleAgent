@@ -18,6 +18,7 @@ import {
   getPendingChangeSets,
   previewChangeSet,
   runKnowledgeBackfill,
+  syncMemoryFile,
 } from '../../../lib/tauri';
 
 vi.mock('../../../lib/tauri', () => ({
@@ -34,6 +35,7 @@ vi.mock('../../../lib/tauri', () => ({
   rejectMemory: vi.fn(),
   runKnowledgeBackfill: vi.fn(),
   scanCommitments: vi.fn(),
+  syncMemoryFile: vi.fn(),
 }));
 
 vi.mock('../../../lib/i18n', () => ({ getLang: () => 'en' }));
@@ -99,7 +101,7 @@ describe('Context Inspector', () => {
   });
 
   it('shows the query, the budget and every reason an item was recalled', async () => {
-    render(<KnowledgePanel contextPackage={pkg()} runId="run-1" onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={pkg()} runId="run-1" vaultPath={null} onClose={() => {}} />);
 
     expect(screen.getByText('what did I decide about caching')).toBeInTheDocument();
     expect(screen.getByText('Caching decision')).toBeInTheDocument();
@@ -115,7 +117,7 @@ describe('Context Inspector', () => {
       <KnowledgePanel
         contextPackage={pkg({ budget: { maxTokens: 4000, usedTokens: 4000, truncatedCandidates: 7 } })}
         runId="run-1"
-        onClose={() => {}}
+        vaultPath={null} onClose={() => {}}
       />,
     );
 
@@ -141,7 +143,7 @@ describe('Context Inspector', () => {
           ],
         })}
         runId={null}
-        onClose={() => {}}
+        vaultPath={null} onClose={() => {}}
       />,
     );
 
@@ -152,7 +154,7 @@ describe('Context Inspector', () => {
 
   /** 没编译过上下文不是错误，也不能渲染成“召回为空”。 */
   it('distinguishes "nothing compiled yet" from "nothing found"', () => {
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     expect(screen.getByText(/No context compiled yet/)).toBeInTheDocument();
   });
 });
@@ -179,7 +181,7 @@ describe('Memory Inbox', () => {
 
   it('shows the claim with the evidence it came from', async () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
     expect(await screen.findByText('writes weekly reviews on Friday')).toBeInTheDocument();
@@ -189,7 +191,7 @@ describe('Memory Inbox', () => {
   /** 失败必须长得像失败。把读取错误画成“没有候选”会让人以为提取器没工作。 */
   it('renders a read failure as a failure with a retry, not as an empty inbox', async () => {
     vi.mocked(getMemoryInbox).mockRejectedValueOnce(new Error('database is locked'));
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
     expect(await screen.findByText('database is locked')).toBeInTheDocument();
@@ -204,7 +206,7 @@ describe('Memory Inbox', () => {
   it('confirms only when the user asks, then re-reads the inbox', async () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
     vi.mocked(confirmMemory).mockResolvedValue(memory({ claim: 'confirmed' }));
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
     await screen.findByText('writes weekly reviews on Friday');
 
@@ -218,12 +220,38 @@ describe('Memory Inbox', () => {
 
   it('marks a memory that contradicts an existing one', async () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([memory({ conflicts_with_id: 'mem-0' })]);
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
     expect(await screen.findByText('conflicts')).toBeInTheDocument();
   });
+
+  /** 收件箱空的时候恰恰最可能想手改文件，所以回流入口不能只在有候选时出现。 */
+  it('offers the memory.md sync in an empty inbox and reports what it did', async () => {
+    vi.mocked(getMemoryInbox).mockResolvedValue([]);
+    vi.mocked(syncMemoryFile).mockResolvedValue({ adopted: 2, unchanged: 1, forgotten: 1 });
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath="/vault" onClose={() => {}} />);
+    openTab(/Memory/);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Absorb memory.md edits' }));
+
+    await waitFor(() => expect(syncMemoryFile).toHaveBeenCalledWith('/vault'));
+    expect(
+      await screen.findByText('2 adopted, 1 already known, 1 forgotten'),
+    ).toBeInTheDocument();
+  });
+
+  /** 没有 vault 就没有 memory.md，按钮不该在那里骗人。 */
+  it('hides the sync entry when there is no vault', async () => {
+    vi.mocked(getMemoryInbox).mockResolvedValue([]);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    openTab(/Memory/);
+
+    await screen.findByText(/No candidate memories/);
+    expect(screen.queryByRole('button', { name: /memory.md/ })).not.toBeInTheDocument();
+  });
 });
+
 
 function changeSet(over: Partial<PendingChangeSet> = {}): PendingChangeSet {
   return {
@@ -273,7 +301,7 @@ describe('Change Preview', () => {
   it('runs the dry run on expand and shows both sides of the edit', async () => {
     vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet()]);
     vi.mocked(previewChangeSet).mockResolvedValue(dryRun());
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Changes/);
 
     fireEvent.click(await screen.findByText('tidy up the caching note'));
@@ -299,7 +327,7 @@ describe('Change Preview', () => {
         ],
       }),
     );
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Changes/);
 
     fireEvent.click(await screen.findByText('tidy up the caching note'));
@@ -313,7 +341,7 @@ describe('Change Preview', () => {
     vi.mocked(getPendingChangeSets).mockResolvedValue([
       changeSet({ state: 'failed', commitError: 'disk full' }),
     ]);
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Changes/);
 
     expect(await screen.findByText('disk full')).toBeInTheDocument();
@@ -341,7 +369,7 @@ describe('Commitment Inbox', () => {
   });
 
   it('says what an empty inbox means rather than showing a bare zero', async () => {
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     expect(await screen.findByText(/Dated, unchecked todos get harvested here/)).toBeInTheDocument();
@@ -349,7 +377,7 @@ describe('Commitment Inbox', () => {
 
   it('surfaces a read failure with a retry', async () => {
     vi.mocked(getCommitmentInbox).mockRejectedValueOnce(new Error('no such table'));
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     expect(await screen.findByText('no such table')).toBeInTheDocument();
@@ -358,7 +386,7 @@ describe('Commitment Inbox', () => {
   /** 完成必须带说明：后端要把它登记成完成证据，空的“done”是假账。 */
   it('will not submit a completion without a summary', async () => {
     vi.mocked(getCommitmentInbox).mockResolvedValue([commitment()]);
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Complete' }));
@@ -381,7 +409,7 @@ describe('Commitment Inbox', () => {
   it('shows the backend refusal instead of closing the form silently', async () => {
     vi.mocked(getCommitmentInbox).mockResolvedValue([commitment()]);
     vi.mocked(decideCommitment).mockRejectedValueOnce(new Error('completion requires evidence'));
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
@@ -390,7 +418,7 @@ describe('Commitment Inbox', () => {
 
   it('only offers "accept" for a commitment that is still merely proposed', async () => {
     vi.mocked(getCommitmentInbox).mockResolvedValue([commitment({ status: 'active' })]);
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     await screen.findByText('send the retro notes');
@@ -408,7 +436,7 @@ describe('Index Health', () => {
     vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(
       health({ pendingJobs: 12, failedJobs: 3, lastError: 'embedding timed out' }),
     );
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Index/);
 
     expect(await screen.findByText('12')).toBeInTheDocument();
@@ -421,7 +449,7 @@ describe('Index Health', () => {
     vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(
       health({ totalFiles: 40, indexedDocuments: 31 }),
     );
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Index/);
 
     expect(await screen.findByText(/9 notes have no stable identity/)).toBeInTheDocument();
@@ -434,7 +462,7 @@ describe('Index Health', () => {
       .mockResolvedValueOnce({ processed: 10, created: 10, failed: 0, remaining: 10, hasMore: true })
       .mockResolvedValueOnce({ processed: 10, created: 10, failed: 0, remaining: 0, hasMore: false });
 
-    render(<KnowledgePanel contextPackage={null} runId={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Index/);
     fireEvent.click(await screen.findByRole('button', { name: 'Advance backfill' }));
 
