@@ -33,6 +33,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         { keys: ['Ctrl', '9'], label: t('knowledge.navTitle') },
         { keys: ['Ctrl', ','], label: isZh ? '打开设置' : 'Open Settings' },
         { keys: ['Ctrl', 'P'], label: t('shortcuts.quickSwitcher') },
+        { keys: ['Ctrl', 'Shift', 'P'], label: t('palette.modeCommands') },
         { keys: ['Ctrl', 'Shift', 'F'], label: isZh ? '全文内容检索' : 'Global Search' },
       ],
     },

@@ -28,6 +28,26 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* 模式标签和输入框同一行：用户要一眼看出现在是在找笔记还是在找命令。 */
+.quick-switcher-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.quick-switcher-mode {
+  flex-shrink: 0;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
 .quick-switcher-input {
   width: 100%;
   padding: 14px 18px;
@@ -38,6 +58,16 @@
   color: var(--text-primary);
   outline: none;
   font-family: var(--font-sans);
+}
+
+/* 输入框在 field 里时下边框由 field 画，避免两条线。 */
+.quick-switcher-field .quick-switcher-input {
+  border-bottom: none;
+  padding-left: 0;
+}
+
+.quick-switcher-field:focus-within {
+  border-bottom-color: var(--border-focus);
 }
 
 .quick-switcher-input::placeholder {

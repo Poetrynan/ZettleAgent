@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { t } from '../../lib/i18n';
 import type { TranslationKey } from '../../lib/i18n';
 import { useApp } from '../../contexts/AppContext';
@@ -56,6 +56,22 @@ export function KnowledgeCenter() {
   const { counts, refresh } = useInboxCounts();
   const vaultPath = state.vaultPath ?? null;
   const current = PAGES.find(p => p.key === page) ?? PAGES[0];
+
+  /**
+   * 命令面板点了某一页 / the palette asked for a page.
+   *
+   * 页面选择留在本地状态，只接一个事件，而不是把它提到全局 store——那会让两处都要
+   * 维护同一份"现在在哪一页"。事件名与 `zettel:open-search-panel` 是一套做法。
+   */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as KnowledgePage | undefined;
+      if (detail && PAGES.some(p => p.key === detail)) setPage(detail);
+    };
+    window.addEventListener('zettel:knowledge-page', handler);
+    return () => window.removeEventListener('zettel:knowledge-page', handler);
+  }, []);
+
 
   /**
    * 打开被改动的那个文件 / jump to the file a change touched.
@@ -135,7 +151,7 @@ export function KnowledgeCenter() {
               onOpenSettings={() => setView('settings')}
             />
           )}
-          {page === 'activity' && <AgentActivity />}
+          {page === 'activity' && <AgentActivity onOpenFile={openFile} />}
         </div>
       </section>
     </div>
