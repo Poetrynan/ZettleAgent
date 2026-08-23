@@ -2207,6 +2207,7 @@ export interface PendingChangeSet {
  */
 export type ChangeConflict =
   | { kind: 'version'; expected: number; actual: number }
+  | { kind: 'stale_read'; readVersion: number; actual: number; readAtMs: number }
   | { kind: 'checksum'; expected: string; actual: string }
   | { kind: 'target_gone'; target: string };
 
@@ -2222,6 +2223,8 @@ export interface ChangeOpPreview {
   evidenceIds: string[];
   affectedObjects: string[];
   conflict: ChangeConflict | null;
+  /** 冲突的人话版本。措辞由后端给，前端不再自己拼一套。 */
+  conflictMessage: string | null;
 }
 
 export interface ChangeSetDryRun {

@@ -6,7 +6,7 @@
 use rusqlite::{params, Connection};
 
 use super::backfill;
-use super::changeset::{self, NewChangeSet, NewOp, Refusal};
+use super::changeset::{self, Conflict, NewChangeSet, NewOp, Refusal};
 use super::evidence::{self, NewEvidence};
 use super::memory::{self, MemoryProposal};
 use super::migration;
@@ -58,7 +58,7 @@ fn migration_creates_every_table_on_a_fresh_database() {
     let conn = legacy_db();
     let report = migration::run_knowledge_migrations(&conn).unwrap();
 
-    assert_eq!(report.applied, vec![1]);
+    assert_eq!(report.applied, vec![1, 2]);
     assert_eq!(report.version, migration::KNOWLEDGE_SCHEMA_VERSION);
 
     for table in [
@@ -74,6 +74,8 @@ fn migration_creates_every_table_on_a_fresh_database() {
         "ingestion_jobs",
         "task_commitments",
         "projection_health",
+        // v2：读→写窗口的基线来源。
+        "agent_reads",
     ] {
         assert!(table_exists(&conn, table), "{table} was not created");
     }
@@ -89,7 +91,7 @@ fn migration_is_idempotent_across_restarts() {
     let second = migration::run_knowledge_migrations(&conn).unwrap();
     let third = migration::run_knowledge_migrations(&conn).unwrap();
 
-    assert_eq!(first.applied, vec![1]);
+    assert_eq!(first.applied, vec![1, 2]);
     assert!(second.is_noop(), "second run must apply nothing");
     assert!(third.is_noop());
     assert_eq!(third.version, migration::KNOWLEDGE_SCHEMA_VERSION);
@@ -99,7 +101,11 @@ fn migration_is_idempotent_across_restarts() {
             r.get(0)
         })
         .unwrap();
-    assert_eq!(rows, 1, "one row per version, not one per startup");
+    assert_eq!(
+        rows,
+        migration::KNOWLEDGE_SCHEMA_VERSION,
+        "one row per version, not one per startup"
+    );
 }
 
 /// 旧库带数据也能升，且旧数据一行不动 / an existing vault upgrades without losing rows.
@@ -148,7 +154,10 @@ fn current_version_is_zero_before_any_migration() {
     let conn = legacy_db();
     assert_eq!(migration::current_version(&conn).unwrap(), 0);
     migration::run_knowledge_migrations(&conn).unwrap();
-    assert_eq!(migration::current_version(&conn).unwrap(), 1);
+    assert_eq!(
+        migration::current_version(&conn).unwrap(),
+        migration::KNOWLEDGE_SCHEMA_VERSION
+    );
 }
 
 // ── 对象身份与版本 / object identity and versions ───────────────────────────
@@ -675,7 +684,7 @@ fn bootstrap_migrates_and_enqueues_without_processing() {
 
     let report = super::bootstrap(&conn).unwrap();
     assert_eq!(report.schema_version, migration::KNOWLEDGE_SCHEMA_VERSION);
-    assert_eq!(report.migrations_applied, vec![1]);
+    assert_eq!(report.migrations_applied, vec![1, 2]);
     assert_eq!(report.backfill_enqueued, 1);
     assert_eq!(report.backfill_pending, 1);
 
@@ -1588,6 +1597,249 @@ fn a_read_tool_passes_through_ungated() {
     );
 }
 
+/// 读工具留下基线 / a read leaves the baseline behind.
+#[test]
+fn a_read_records_the_version_the_agent_saw() {
+    let conn = migrated_db();
+    let vault = temp_vault("readledger");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "第一版");
+    let v = object_store::get_object(&conn, &object_id)
+        .unwrap()
+        .unwrap()
+        .current_version;
+
+    let decision = write_guard::open(&conn, &ctx, "read_note", r#"{"path":"a.md"}"#).unwrap();
+    assert!(matches!(decision, Guarded::Unguarded), "读不该被守卫拦下");
+
+    let (run, version): (String, i64) = conn
+        .query_row(
+            "SELECT run_id, version FROM agent_reads WHERE object_id = ?1",
+            params![object_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(run, "run-guard");
+    assert_eq!(version, v, "记下的必须是 Agent 真正看到的那一版");
+}
+
+/// 只有整篇读才算读过 / only a whole-note read counts as a read.
+///
+/// `search_notes` 给的是片段。把它算成"读过这篇笔记"会让基线钉在模型没看全的版本上，
+/// 之后每次写都报假冲突——那比不检测更糟。
+#[test]
+fn a_search_hit_is_not_recorded_as_having_read_the_note() {
+    let conn = migrated_db();
+    let vault = temp_vault("readsearch");
+    let ctx = guard_ctx(&vault);
+    vault_note(&conn, &vault, "a.md", "第一版");
+
+    write_guard::open(&conn, &ctx, "search_notes", r#"{"query":"第一版"}"#).unwrap();
+
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM agent_reads", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+/// 读→写窗口被拦住了 / the read→write window is now covered.
+///
+/// 这是本层最容易静默丢数据的那条路径：Agent 读了 v1，用户随后手改成 v2，Agent 基于
+/// v1 算出的内容如果落盘，用户那次编辑就无声消失了。基线取"读到的那一版"之后，这次
+/// 写在**执行之前**就被拦下。
+#[test]
+fn an_edit_computed_from_a_stale_read_is_refused_before_it_runs() {
+    let conn = migrated_db();
+    let vault = temp_vault("stale");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "会议记录.md", "原始要点");
+
+    // 1. Agent 读了这篇笔记。
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"会议记录.md"}"#).unwrap();
+    let read_version = object_store::get_object(&conn, &object_id)
+        .unwrap()
+        .unwrap()
+        .current_version;
+
+    // 2. 用户在编辑器里改了。
+    object_store::update_object_patch(
+        &conn,
+        &object_id,
+        ObjectPatch {
+            content: Some("用户自己补的要点".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(vault.join("会议记录.md"), "用户自己补的要点").unwrap();
+
+    // 3. Agent 拿着基于 v1 的内容来写。
+    let report = match write_guard::open(
+        &conn,
+        &ctx,
+        "edit_note",
+        r#"{"path":"会议记录.md","content":"Agent 基于旧内容整理的要点"}"#,
+    )
+    .unwrap()
+    {
+        Guarded::Conflicted { report, .. } => report,
+        other => panic!("基于过期读的写必须被拦下，实际是 {other:?}"),
+    };
+
+    let conflict = report.ops[0].conflict.as_ref().expect("必须报出冲突");
+    match conflict {
+        Conflict::StaleRead {
+            read_version: read,
+            actual,
+            read_at_ms,
+        } => {
+            assert_eq!(*read, read_version);
+            assert_eq!(*actual, read_version + 1);
+            assert!(*read_at_ms > 0, "得说得出是什么时候读的");
+        }
+        other => panic!("读→写窗口的冲突要能和普通版本冲突区分开，实际是 {other:?}"),
+    }
+
+    // 冲突必须是能念给人听的，而不是只有一个枚举名字。
+    let message = report.ops[0]
+        .conflict_message
+        .as_deref()
+        .expect("冲突要带人话解释");
+    assert!(message.contains("读到"), "解释里要说明是读之后被改的：{message}");
+    assert!(message.contains("你的编辑还在"), "得让用户知道自己没丢东西");
+
+    // 用户那一版原封不动。
+    assert_eq!(
+        std::fs::read_to_string(vault.join("会议记录.md")).unwrap(),
+        "用户自己补的要点"
+    );
+}
+
+/// 重读一遍就能继续 / re-reading clears the way.
+///
+/// 冲突是让 Agent 重来一次，不是把它永久钉死。这条同时钉住"同一轮里重复读要覆盖成
+/// 最新一次"——保留首次读会让 Agent 永远出不来。
+#[test]
+fn re_reading_after_a_stale_read_lets_the_write_through() {
+    let conn = migrated_db();
+    let vault = temp_vault("reread");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "第一版");
+
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"a.md"}"#).unwrap();
+    object_store::update_object_patch(
+        &conn,
+        &object_id,
+        ObjectPatch {
+            content: Some("用户改的第二版".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 重读：基线跟着推进到用户那一版。
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"a.md"}"#).unwrap();
+
+    let ready = match write_guard::open(
+        &conn,
+        &ctx,
+        "edit_note",
+        r#"{"path":"a.md","content":"用户改的第二版\n\nAgent 追加"}"#,
+    )
+    .unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("重读之后应当放行，实际是 {other:?}"),
+    };
+    std::fs::write(vault.join("a.md"), "用户改的第二版\n\nAgent 追加").unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+
+    assert_eq!(
+        changeset::get(&conn, &ready.changeset_id).unwrap().unwrap().state,
+        ChangeSetState::Committed
+    );
+}
+
+/// 上一轮读的不算这一轮的基线 / a read from another run is not this run's baseline.
+///
+/// 轮与轮之间上下文可能已经被压缩，那份"读过"未必还在模型眼前。拿它当基线会在几轮
+/// 之后突然报出一个用户无从理解的冲突。
+#[test]
+fn a_read_from_another_run_is_not_this_runs_baseline() {
+    let conn = migrated_db();
+    let vault = temp_vault("runscope");
+    let mut ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "第一版");
+
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"a.md"}"#).unwrap();
+    object_store::update_object_patch(
+        &conn,
+        &object_id,
+        ObjectPatch {
+            content: Some("用户改的第二版".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // 新的一轮，没读过：基线退回"此刻的当前版本"，于是这次写是放行的。
+    ctx.run_id = Some("run-next".to_string());
+    let decision = write_guard::open(
+        &conn,
+        &ctx,
+        "edit_note",
+        r#"{"path":"a.md","content":"新一轮算出来的内容"}"#,
+    )
+    .unwrap();
+    assert!(
+        matches!(decision, Guarded::Ready(_)),
+        "上一轮的读不该让这一轮无端冲突，实际是 {decision:?}"
+    );
+}
+
+/// 没读过就别装作知道 / with no read on record, say so instead of inventing one.
+///
+/// 没有读记录时基线退回"准备写入这一刻"——它拦得住"提议与提交之间有人改过"，但那是
+/// 另一件事，所以冲突也要报成另一种，不能冒充读→写窗口。
+#[test]
+fn a_write_with_no_read_on_record_reports_a_plain_version_conflict() {
+    let conn = migrated_db();
+    let vault = temp_vault("noread");
+    let ctx = guard_ctx(&vault);
+    let (key, object_id) = vault_note(&conn, &vault, "a.md", "第一版");
+
+    // 直接构一个基线是 v1 的 op，但不留任何读记录。
+    let mut req = NewChangeSet::new("agent");
+    req.scopes = ctx.vaults.clone();
+    let cs = changeset::propose(&conn, &req).unwrap();
+    let mut op = NewOp::new(ChangeOpKind::Edit, "edit_note");
+    op.legacy_path = Some(key);
+    op.target_object_id = Some(object_id.clone());
+    op.new_content = Some("Agent 写的".to_string());
+    changeset::add_op(&conn, &cs.id, &ctx.vaults, &op).unwrap().unwrap();
+
+    object_store::update_object_patch(
+        &conn,
+        &object_id,
+        ObjectPatch {
+            content: Some("用户改的".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let report = changeset::dry_run(&conn, &cs.id).unwrap();
+    assert!(matches!(
+        report.ops[0].conflict,
+        Some(Conflict::Version { .. })
+    ));
+}
+
 /// 库外路径写不进去 / a path outside every vault is refused.
 #[test]
 fn a_write_outside_every_vault_is_refused_before_execution() {
@@ -2316,7 +2568,9 @@ fn scenario_c_a_users_edit_wins_over_a_write_computed_against_an_old_version() {
     let ctx = guard_ctx(&vault);
     let (_, object_id) = vault_note(&conn, &vault, "会议记录.md", "原始要点");
 
-    // Agent 算出一份改动，基线是它读到的那一版。
+    // Agent 算出一份改动。这一轮没调过读工具，所以基线是"准备写入这一刻"的版本——
+    // 覆盖的是提议与提交之间的窗口。读→写窗口另有其测，见
+    // `an_edit_computed_from_a_stale_read_is_refused_before_it_runs`。
     let ready = match write_guard::open(
         &conn,
         &ctx,

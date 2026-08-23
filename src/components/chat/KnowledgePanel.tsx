@@ -512,7 +512,8 @@ function ChangesTab({ isZh }: { isZh: boolean }) {
                   {op.reason && <div className="knowledge-op-reason">{op.reason}</div>}
                   {op.conflict && (
                     <div className="knowledge-op-conflict">
-                      {isZh ? '冲突：' : 'Conflict: '}{op.conflict.kind}
+                      {isZh ? '冲突：' : 'Conflict: '}
+                      {op.conflictMessage ?? op.conflict.kind}
                     </div>
                   )}
                   <div className="knowledge-diff">

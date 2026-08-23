@@ -82,6 +82,19 @@ pub struct NewOp {
     /// 落在库里而不是只存在调用方的内存里：一次改名如果写盘成功、进程随后被杀，
     /// 重绑信息还得能从 `changeset_ops` 里捞出来，否则对象就永久指着旧路径。
     pub side_effects: Option<String>,
+    /// Agent 真正读到的那一版 / the version the agent actually read.
+    ///
+    /// 给了就用它当乐观并发的基线，而不是用"准备写入这一刻"的当前版本。这条是
+    /// 读→写窗口的唯一防线：不给的话，用户在 Agent 读完之后的手改会被当成不存在。
+    pub observed_read: Option<ObservedRead>,
+}
+
+/// 一次读留下的基线 / the baseline one read established.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedRead {
+    pub version: i64,
+    pub checksum: Option<String>,
+    pub read_at_ms: i64,
 }
 
 impl NewOp {
@@ -98,6 +111,7 @@ impl NewOp {
             tool_name: tool_name.into(),
             target_kind: ObjectKind::Document,
             side_effects: None,
+            observed_read: None,
         }
     }
 
@@ -208,8 +222,13 @@ pub fn add_op(
         return Ok(Err(refusal));
     }
 
-    // 目标对象的当前版本与校验和，作为乐观并发的基线。
+    // 目标对象的基线：优先用 Agent 读到的那一版，退回到"此刻的当前版本"。
     let (old_version, expected_checksum) = baseline_of(conn, op)?;
+    let baseline_read_at_ms = op
+        .observed_read
+        .as_ref()
+        .filter(|_| old_version.is_some())
+        .map(|r| r.read_at_ms);
 
     let seq: i64 = conn
         .query_row(
@@ -224,8 +243,8 @@ pub fn add_op(
         "INSERT INTO changeset_ops
             (id, changeset_id, seq, target_object_id, legacy_path, legacy_chunk_id, op_kind,
              old_version, expected_checksum, new_content, patch, reason, evidence_ids,
-             affected_objects, side_effects)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '[]', ?14)",
+             affected_objects, side_effects, baseline_read_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '[]', ?14, ?15)",
         params![
             id,
             changeset_id,
@@ -241,6 +260,7 @@ pub fn add_op(
             op.reason,
             serde_json::to_string(&op.evidence_ids).unwrap_or_else(|_| "[]".into()),
             op.side_effects,
+            baseline_read_at_ms,
         ],
     )?;
 
@@ -293,7 +313,15 @@ fn path_in_scope(path: &str, scopes: &[String]) -> bool {
     })
 }
 
-/// 取目标当前的版本与校验和 / the optimistic-concurrency baseline.
+/// 取乐观并发的基线 / the optimistic-concurrency baseline.
+///
+/// 优先级是**先读记录、后当前版本**，这个顺序就是读→写窗口的防线：
+///
+/// - Agent 在这一轮读过这篇笔记 → 基线是它读到的那一版。用户在读之后的手改会让
+///   版本号对不上，冲突被如实报出来。
+/// - 没有读记录（新建、backfill 未覆盖、或者写工具压根没先读） → 退回到此刻的
+///   当前版本。这拦得住"提议与提交之间有人改过"，拦不住读→写窗口——但没有读记录时
+///   也确实无从知道 Agent 看到的是哪一版，编一个只会制造假冲突。
 ///
 /// 校验和住在 `object_versions` 而不是 `knowledge_objects`：对象行只记"当前是第几版"，
 /// 内容指纹跟着版本走，否则回滚到旧版时校验和就对不上了。
@@ -308,6 +336,10 @@ fn baseline_of(conn: &Connection, op: &NewOp) -> ObjectResult<(Option<i64>, Opti
         // backfill 还没覆盖到：没有基线可用，如实留空而不是编一个 0。
         return Ok((None, None));
     };
+
+    if let Some(read) = &op.observed_read {
+        return Ok((Some(read.version), read.checksum.clone()));
+    }
 
     let checksum = object_store::get_object_version(conn, &object.id, object.current_version)?
         .map(|v| v.checksum);
@@ -334,17 +366,36 @@ pub struct OpPreview {
     pub affected_objects: Vec<String>,
     /// 有值就意味着这一步现在不能提交。
     pub conflict: Option<Conflict>,
+    /// 冲突的人话版本 / the conflict, phrased for a human.
+    ///
+    /// 措辞留在 Rust 一份：`kind` 是给程序看的，UI 直接渲染 `kind` 就等于把内部枚举
+    /// 名字甩给用户。两边各写一套文案，迟早有一套是错的。
+    pub conflict_message: Option<String>,
 }
 
-/// 两种不同的冲突 / the two distinct kinds of conflict.
+/// 几种不同的冲突 / the distinct kinds of conflict.
 ///
 /// 分开是因为处理方式不同：版本冲突意味着"有人改过了，重新生成一份"，校验和冲突
 /// 意味着"磁盘上的内容不是我读到的那份，先让用户看看"。混成一个"写失败"会让 UI
 /// 只能给出"重试"这个既无用又危险的选项。
+///
+/// `StaleRead` 与 `Version` 的区别不在数据上而在**该怎么跟人解释**：前者是"你在
+/// Agent 读完之后改过这篇笔记"，责任和处置都清楚；后者只能说"有人改过"。同一个
+/// 提示文案覆盖两件事，用户就无从判断自己那次编辑到底还在不在。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Conflict {
     Version { expected: i64, actual: i64 },
+    /// Agent 读到的是旧版，之后这篇笔记被改过。
+    #[serde(rename_all = "camelCase")]
+    StaleRead {
+        /// Agent 读到的版本。
+        read_version: i64,
+        /// 现在的版本。
+        actual: i64,
+        /// Agent 读的时刻。
+        read_at_ms: i64,
+    },
     Checksum { expected: String, actual: String },
     /// 目标已经不存在了（被删/被改名）。
     TargetGone { target: String },
@@ -356,6 +407,14 @@ impl Conflict {
             Self::Version { expected, actual } => {
                 format!("目标已从 v{expected} 变到 v{actual}，这份改动是基于旧版本算的")
             }
+            Self::StaleRead {
+                read_version,
+                actual,
+                ..
+            } => format!(
+                "这篇笔记在 Agent 读到 v{read_version} 之后被改到了 v{actual}。\
+                 这份改动是基于改之前的内容算的，所以没有落盘——你的编辑还在。"
+            ),
             Self::Checksum { .. } => "磁盘上的内容与生成这份改动时读到的不一致".to_string(),
             Self::TargetGone { target } => format!("目标 `{target}` 已不存在"),
         }
@@ -403,6 +462,7 @@ pub fn dry_run(conn: &Connection, changeset_id: &str) -> ObjectResult<DryRunRepo
             reason: op.reason,
             evidence_ids: op.evidence_ids,
             affected_objects: op.affected_objects,
+            conflict_message: conflict.as_ref().map(|c| c.message()),
             conflict,
         });
     }
@@ -441,9 +501,17 @@ fn detect_conflict(conn: &Connection, op: &ChangeSetOp) -> ObjectResult<Option<C
     };
 
     if current.current_version != expected_version {
-        return Ok(Some(Conflict::Version {
-            expected: expected_version,
-            actual: current.current_version,
+        // 基线来自一次读，就按"读→写窗口"来解释；否则只能说"有人改过"。
+        return Ok(Some(match op.baseline_read_at_ms {
+            Some(read_at_ms) => Conflict::StaleRead {
+                read_version: expected_version,
+                actual: current.current_version,
+                read_at_ms,
+            },
+            None => Conflict::Version {
+                expected: expected_version,
+                actual: current.current_version,
+            },
         }));
     }
 
@@ -715,7 +783,7 @@ fn query_ops(
     let sql = format!(
         "SELECT id, changeset_id, seq, target_object_id, legacy_path, legacy_chunk_id, op_kind,
                 old_version, expected_checksum, new_content, patch, reason, evidence_ids,
-                affected_objects, side_effects
+                affected_objects, side_effects, baseline_read_at_ms
          FROM changeset_ops {clause}"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -739,6 +807,7 @@ fn query_ops(
                 affected_objects: serde_json::from_str(&r.get::<_, String>(13)?)
                     .unwrap_or_default(),
                 side_effects: r.get(14)?,
+                baseline_read_at_ms: r.get(15)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

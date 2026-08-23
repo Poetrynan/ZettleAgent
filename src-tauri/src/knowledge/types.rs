@@ -376,6 +376,11 @@ pub struct ChangeSetOp {
     pub legacy_chunk_id: Option<i64>,
     pub op_kind: ChangeOpKind,
     pub old_version: Option<i64>,
+    /// `old_version` 是哪次读留下的 / when the agent read the version in `old_version`.
+    ///
+    /// 有值 = 基线是 Agent 真正读到的那一版，读→写之间的窗口被覆盖到了；`None` = 基线
+    /// 是准备写入时拍的，或者压根没有基线（新建 / backfill 未覆盖）。
+    pub baseline_read_at_ms: Option<i64>,
     /// 提交前必须与磁盘现状一致，否则返回 conflict。
     pub expected_checksum: Option<String>,
     pub new_content: Option<String>,

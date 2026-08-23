@@ -17,7 +17,7 @@
 use rusqlite::Connection;
 
 /// 当前期望的知识层 schema 版本 / the knowledge-layer schema version this build expects.
-pub const KNOWLEDGE_SCHEMA_VERSION: i64 = 1;
+pub const KNOWLEDGE_SCHEMA_VERSION: i64 = 2;
 
 struct Migration {
     version: i64,
@@ -43,11 +43,18 @@ impl MigrationReport {
     }
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "knowledge_object_layer",
-    sql: V1_KNOWLEDGE_OBJECT_LAYER,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "knowledge_object_layer",
+        sql: V1_KNOWLEDGE_OBJECT_LAYER,
+    },
+    Migration {
+        version: 2,
+        name: "read_baseline_provenance",
+        sql: V2_READ_BASELINE_PROVENANCE,
+    },
+];
 
 /// 应用所有未应用的知识层迁移 / apply every not-yet-applied knowledge migration.
 ///
@@ -363,4 +370,34 @@ CREATE TABLE IF NOT EXISTS projection_health (
     last_error      TEXT,
     updated_at_ms   INTEGER NOT NULL
 );
+"#;
+
+// ── v2 ──────────────────────────────────────────────────────────────────────
+//
+// 乐观并发的基线本来是在**准备写入的那一刻**拍的，于是"Agent 早些时候读了这篇笔记、
+// 用户随后手改、Agent 再写"这条路径下，基线拍到的已经是用户改过之后的版本——系统
+// 认为无冲突，用户的编辑被静默覆盖。
+//
+// 修法是让基线取 **Agent 真正读到的那一版**。这一列记的是"这个基线来自哪次读、
+// 什么时候读的"：为空表示基线是准备写入时拍的（没有读记录，例如新建）。
+//
+// 单独一列而不是一个布尔：时间戳能让冲突提示说出"agent 在 14:03 读的，你在之后改了"，
+// 而一个 true/false 只能说"冲突了"。
+//
+// `agent_reads` 记的是"这一轮里 Agent 看到的是哪一版"。放在库里而不是进程内存里，
+// 图的不是持久化，是**没有全局可变状态**：每个连接各有一份，测试之间天然隔离，而且
+// 这条读记录本身就是可查证的证据。同一轮里重复读同一篇会覆盖成最新一次——那正是
+// 冲突之后"重新读一遍再写"的恢复路径，保留首次读会让 Agent 永远出不来。
+const V2_READ_BASELINE_PROVENANCE: &str = r#"
+ALTER TABLE changeset_ops ADD COLUMN baseline_read_at_ms INTEGER;
+
+CREATE TABLE IF NOT EXISTS agent_reads (
+    run_id      TEXT NOT NULL,
+    object_id   TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    checksum    TEXT,
+    read_at_ms  INTEGER NOT NULL,
+    PRIMARY KEY (run_id, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_reads_age ON agent_reads(read_at_ms);
 "#;

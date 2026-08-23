@@ -30,17 +30,27 @@
 //!
 //! ## 冲突检测覆盖到哪里，没覆盖到哪里
 //!
-//! [`open`] 取的基线是**调用那一刻**对象层记录的版本，所以它能拦住的是"提议与提交
-//! 之间有人改过"。它拦不住"Agent 在这一轮早些时候读了这篇笔记、之后用户改了、
-//! Agent 再写"——那需要知道 Agent 当时读到的是哪一版，而读取记录属于 evidence 层。
+//! 基线取的是 **Agent 真正读到的那一版**：[`open`] 对读工具调用 [`remember_reads`]，
+//! 把 `(run_id, object_id) → 版本` 记进 `agent_reads`，写的时候再取回来当
+//! `expected_version`。所以下面这条路径是被拦住的：
 //!
-//! 这条限制写在这里而不是留一个 TODO：把它说清楚，比让人以为这层已经防住了要好。
+//! ```text
+//! Agent 读 note.md（v3）→ 用户手改成 v4 → Agent 基于 v3 写 → StaleRead 冲突，不落盘
+//! ```
+//!
+//! 没覆盖到的还有两处，都写出来而不是留一个 TODO：
+//!
+//! - **没先读就写**。`create_note`、以及模型凭上下文里的旧内容直接改而这一轮没调过
+//!   读工具的情况，没有读记录，基线退回到"准备写入这一刻"。这时确实无从知道 Agent
+//!   看到的是哪一版，编一个只会制造假冲突。
+//! - **跨轮的读**。读记录按 `run_id` 分桶，上一轮读的不会成为这一轮的基线：轮之间
+//!   上下文可能已经被压缩，那份"读过"未必还在模型眼前。
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::changeset::{self, DryRunReport, NewChangeSet, NewOp, Refusal};
+use super::changeset::{self, DryRunReport, NewChangeSet, NewOp, ObservedRead, Refusal};
 use super::object_store::{self, ObjectResult};
-use super::types::{ChangeOpKind, ObjectKind, SourceRef};
+use super::types::{now_ms, ChangeOpKind, ObjectKind, SourceRef};
 use crate::tools::capability;
 use crate::tools::internal_tools::helpers::{resolve_path_multi_vault, snapshot_path_key};
 
@@ -268,6 +278,113 @@ fn path_key_unchecked(ctx: &WriteContext, raw: &str) -> Option<String> {
     Some(snapshot_path_key(&resolved))
 }
 
+// ── 读记录 / the read ledger ─────────────────────────────────────────────────
+
+/// 一次读工具调用碰到的笔记 / the notes one read tool call touched.
+///
+/// 只认**真的把整篇内容交给模型**的那几个工具。`search_notes` 之类给的是片段，把它
+/// 算成"读过这篇笔记"会让基线钉在一个模型其实没看全的版本上，之后每次写都报假冲突。
+fn read_intents_of(tool_name: &str, args_json: &str) -> Vec<String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
+    match tool_name {
+        "read_note" => parsed
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|p| !p.is_empty())
+            .map(|p| vec![p.to_string()])
+            .unwrap_or_default(),
+        "batch_read_notes" => parsed
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.to_string())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// 读记录保留多久 / how long a read stays usable as a baseline.
+///
+/// 一天。超过这个跨度的"读"不该再决定一次写入的基线，而这个表也不该无限长大。
+const READ_LEDGER_TTL_MS: i64 = 86_400_000;
+
+/// 记下 Agent 这一轮读到了哪一版 / record the version the agent just saw.
+///
+/// 在工具**执行之前**记，而不是之后。之后记会拿到用户刚改出来的新版本号，配上模型
+/// 实际读到的旧内容——那正是静默覆盖的配方。之前记最坏是多报一次冲突，方向是安全的。
+pub fn remember_reads(
+    conn: &Connection,
+    ctx: &WriteContext,
+    tool_name: &str,
+    args_json: &str,
+) -> ObjectResult<usize> {
+    let paths = read_intents_of(tool_name, args_json);
+    if paths.is_empty() {
+        return Ok(0);
+    }
+
+    let run_id = ctx.run_id.clone().unwrap_or_default();
+    let now = now_ms();
+    let mut recorded = 0usize;
+
+    for raw in paths {
+        let Some(key) = path_key(ctx, &raw) else { continue };
+        let (_, object_id) = locate(conn, &key)?;
+        // 没有对象就没有版本可记。这不是错误：backfill 还没覆盖到的笔记本来也没有基线。
+        let Some(object_id) = object_id else { continue };
+        let Some(object) = object_store::get_object(conn, &object_id)? else {
+            continue;
+        };
+        let checksum = object_store::get_object_version(conn, &object_id, object.current_version)?
+            .map(|v| v.checksum);
+
+        conn.execute(
+            "INSERT INTO agent_reads (run_id, object_id, version, checksum, read_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(run_id, object_id) DO UPDATE SET
+                version = ?3, checksum = ?4, read_at_ms = ?5",
+            params![run_id, object_id, object.current_version, checksum, now],
+        )?;
+        recorded += 1;
+    }
+
+    conn.execute(
+        "DELETE FROM agent_reads WHERE read_at_ms < ?1",
+        params![now - READ_LEDGER_TTL_MS],
+    )?;
+    Ok(recorded)
+}
+
+/// 取这一轮对某个对象的读记录 / the baseline this run's read established.
+fn baseline_from_read(
+    conn: &Connection,
+    run_id: &str,
+    object_id: &str,
+) -> ObjectResult<Option<ObservedRead>> {
+    let row = conn
+        .query_row(
+            "SELECT version, checksum, read_at_ms FROM agent_reads
+             WHERE run_id = ?1 AND object_id = ?2 AND read_at_ms >= ?3",
+            params![run_id, object_id, now_ms() - READ_LEDGER_TTL_MS],
+            |r| {
+                Ok(ObservedRead {
+                    version: r.get(0)?,
+                    checksum: r.get(1)?,
+                    read_at_ms: r.get(2)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
+}
+
 // ── 写之前 / before the write ────────────────────────────────────────────────
 
 /// 拦下一次工具调用 / gate one tool call.
@@ -283,6 +400,11 @@ pub fn open(
     args_json: &str,
 ) -> ObjectResult<Guarded> {
     if !capability::capability_of(tool_name).requires_changeset {
+        // 读也要留痕：它是后面那次写的基线来源。记失败不该让一次读失败——降级成
+        // "没有读记录"，基线退回当前版本，行为回到本模块升级之前的样子。
+        if let Err(e) = remember_reads(conn, ctx, tool_name, args_json) {
+            log::warn!("read baseline not recorded for {tool_name}: {e}");
+        }
         return Ok(Guarded::Unguarded);
     }
 
@@ -294,6 +416,7 @@ pub fn open(
     let cs = changeset::propose(conn, &req)?;
 
     let intents = intents_of(tool_name, args_json);
+    let run_key = ctx.run_id.clone().unwrap_or_default();
     let mut paths = Vec::new();
 
     for intent in &intents {
@@ -310,9 +433,14 @@ pub fn open(
 
         let mut op = NewOp::new(intent.kind, tool_name);
         op.legacy_path = Some(key.clone());
-        op.target_object_id = object_id;
+        op.target_object_id = object_id.clone();
         op.new_content = intent.content.clone();
         op.target_kind = intent.target_kind;
+        // 基线取 Agent 这一轮读到的那一版。没读过就留空，`baseline_of` 会退回当前版本。
+        op.observed_read = match &object_id {
+            Some(id) => baseline_from_read(conn, run_key.as_str(), id)?,
+            None => None,
+        };
         op.side_effects = destination_key(ctx, intent)
             .and_then(|new_path| serde_json::to_string(&SideEffect { new_path }).ok());
 

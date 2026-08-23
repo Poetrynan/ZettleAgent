@@ -287,6 +287,7 @@ function dryRun(over: Partial<ChangeSetDryRun> = {}): ChangeSetDryRun {
         evidenceIds: ['ev-1'],
         affectedObjects: [],
         conflict: null,
+        conflictMessage: null,
       },
     ],
     ...over,
@@ -346,6 +347,35 @@ describe('Change Preview', () => {
     openTab(/Changes/);
 
     expect(await screen.findByText('disk full')).toBeInTheDocument();
+  });
+
+  /**
+   * 冲突要说人话 / a conflict has to be readable.
+   *
+   * 直接渲染 `kind` 等于把内部枚举名甩给用户：`stale_read` 说不出"你在 Agent 读过之后
+   * 改了这篇笔记，所以它没写"。措辞由后端给一份，前端只负责显示。
+   */
+  it('reads out the backend explanation rather than the conflict enum name', async () => {
+    vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet({ state: 'conflicted' })]);
+    vi.mocked(previewChangeSet).mockResolvedValue(
+      dryRun({
+        hasConflicts: true,
+        ops: [
+          {
+            ...dryRun().ops[0],
+            conflict: { kind: 'stale_read', readVersion: 3, actual: 4, readAtMs: 1_700_000_000_000 },
+            conflictMessage: '这篇笔记在 Agent 读到 v3 之后被改到了 v4。你的编辑还在。',
+          },
+        ],
+      }),
+    );
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    openTab(/Changes/);
+
+    fireEvent.click(await screen.findByText('tidy up the caching note'));
+
+    expect(await screen.findByText(/读到 v3 之后被改到了 v4/)).toBeInTheDocument();
+    expect(screen.queryByText(/stale_read/)).not.toBeInTheDocument();
   });
 });
 
