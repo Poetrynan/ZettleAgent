@@ -799,18 +799,17 @@ async fn run_agent_turn(
         }
     };
 
-    // Build unified memories context string for agent prompts
+    // Build unified memories context string for agent prompts.
+    //
+    // Core memory is deliberately NOT dumped here any more: `ContextCompiler`
+    // picks the `memory.md` sections that are relevant to this turn instead of
+    // copying the whole file every turn (see the compile call below, and
+    // `core_memory_fallback` for what happens when compilation fails).
     let memories_context = {
         let mut ctx = String::new();
 
-        if !core_memory_context.is_empty() {
-            ctx.push_str("### Core Memory (verified preferences & decisions)\n");
-            ctx.push_str(&core_memory_context);
-            ctx.push('\n');
-        }
-
         if !archival_recalled.is_empty() {
-            ctx.push_str("\n### Recalled Memory (relevant to this request)\n");
+            ctx.push_str("### Recalled Memory (relevant to this request)\n");
             for m in &archival_recalled {
                 if m.category.is_empty() {
                     ctx.push_str(&format!("- {}\n", m.content));
@@ -880,17 +879,10 @@ async fn run_agent_turn(
         }
     }
 
-    if let Some(ref ac) = request.attached_context {
-        if !ac.is_empty() {
-            additional_context_parts.push(format!("## Attached Notes for Context\n{}", ac));
-        }
-    }
-
-    let context = if additional_context_parts.is_empty() {
-        None
-    } else {
-        Some(additional_context_parts.join("\n\n"))
-    };
+    // The attached notes themselves are no longer pasted in raw here — they go
+    // through `ContextCompiler` so they arrive as a provenanced item the model
+    // can tell apart from what retrieval found. `context_fallback` below still
+    // pastes them raw if compilation fails.
 
     // Extract user query for routing (last user message)
     let user_query = messages.iter().rev()
@@ -1090,6 +1082,93 @@ async fn run_agent_turn(
         tools.len(),
         classification.intent
     ));
+
+    // ── ContextCompiler ────────────────────────────────────────────────
+    // Retrieval results are never concatenated straight into the prompt. They
+    // are compiled into a ContextPackage first, whose `render()` is the single
+    // place knowledge becomes prompt text, and whose `inspector_summary()` is
+    // what the Context Inspector shows — same data, so the UI cannot disagree
+    // with what the model actually saw.
+    //
+    // Compilation runs AFTER routing on purpose: the intent decides whether
+    // this turn wants the current note in full or a wide recall.
+    //
+    // It is an enhancement, not a dependency. On failure we fall back to the
+    // old raw-string context (core memory + attached notes) so the turn still
+    // has everything it used to.
+    let context = {
+        let mut parts = additional_context_parts.clone();
+        let compiled = {
+            let mut req = crate::llm::context_compiler::CompileRequest::new(
+                user_query.clone(),
+                crate::llm::context_compiler::ContextIntent::from(&classification.intent),
+            );
+            req.scopes = all_vault_paths.clone();
+            req.current_file = request.current_file.clone();
+            req.attached_context = request.attached_context.clone();
+            req.core_memory = if core_memory_context.is_empty() {
+                None
+            } else {
+                Some(core_memory_context.clone())
+            };
+            req.already_injected = Some(memories_context.clone());
+
+            match state.db.lock() {
+                Ok(conn) => crate::llm::context_compiler::compile(&conn, &req)
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            }
+        };
+
+        match compiled {
+            Ok(pkg) => {
+                crate::chat_file_log::log_agent(&format!(
+                    "context_compiled intent={} facts={} memories={} tasks={} related={} conflicts={} tokens={}/{} truncated={}",
+                    pkg.intent.as_str(),
+                    pkg.facts.len(),
+                    pkg.memories.len(),
+                    pkg.open_tasks.len(),
+                    pkg.related_objects.len(),
+                    pkg.conflicts.len(),
+                    pkg.budget.used_tokens,
+                    pkg.budget.max_tokens,
+                    pkg.budget.truncated_candidates,
+                ));
+                // The inspector event carries no body text (see
+                // `inspector_summary`) — it crosses IPC and lands in logs.
+                let _ = app.emit("agent-event", serde_json::json!({
+                    "type": "context_package_ready",
+                    "run_id": crate::llm::tool_hooks::current_run_id(),
+                    "package": pkg.inspector_summary(),
+                }));
+                if !pkg.is_empty() {
+                    parts.push(pkg.render());
+                }
+                parts
+            }
+            Err(e) => {
+                log::warn!("Context compilation failed, falling back to raw context: {}", e);
+                crate::chat_file_log::log_agent(&format!("context_compile_failed {}", e));
+                if !core_memory_context.is_empty() {
+                    parts.push(format!(
+                        "## Core Memory (verified preferences & decisions)\n{}",
+                        core_memory_context
+                    ));
+                }
+                if let Some(ref ac) = request.attached_context {
+                    if !ac.is_empty() {
+                        parts.push(format!("## Attached Notes for Context\n{}", ac));
+                    }
+                }
+                parts
+            }
+        }
+    };
+    let context = if context.is_empty() {
+        None
+    } else {
+        Some(context.join("\n\n"))
+    };
 
     // 2. Build Agent Registry with role-specific prompts
     crate::chat_file_log::log_agent("stage loading_tools");

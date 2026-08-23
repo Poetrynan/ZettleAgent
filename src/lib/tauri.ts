@@ -1866,4 +1866,363 @@ export async function setFsrsConfig(patch: Partial<FsrsConfig>): Promise<FsrsCon
   return { ...DEFAULT_FSRS_CONFIG, ...(raw ?? {}) };
 }
 
+// ── 统一知识对象层 / the knowledge-object layer ──────────────────────────
+//
+// 稳定身份层：Agent 的写入、证据、关系、审批都挂在 objectId 上，而不是挂在
+// 文件路径上（重命名就换身份）。原始 Markdown 仍是内容权威，这些表全部可重建。
+
+export type KnowledgeObjectKind =
+  | 'document' | 'block' | 'memory' | 'fact' | 'claim'
+  | 'event' | 'task' | 'skill' | 'resource' | 'collection';
+
+export type KnowledgeObjectStatus = 'active' | 'archived' | 'superseded' | 'deleted';
+
+export type RelationProvenance =
+  | 'observed' | 'extracted' | 'inferred' | 'proposed' | 'user_authored';
+
+export interface KnowledgeSourceRef {
+  source_type: string;
+  source_id: string;
+}
+
+/**
+ * 一个可寻址的知识对象。
+ *
+ * 字段名是 snake_case：后端这些结构体没有加 `rename_all = "camelCase"`，因为
+ * 它们也会出现在 evidence/audit 的 JSON 里，保持与数据库列名一致更好排查。
+ * 命令的包装层（`KnowledgeIndexHealth` 等）才是 camelCase。
+ */
+export interface KnowledgeObject {
+  id: string;
+  kind: KnowledgeObjectKind;
+  scope: string;
+  parent_id: string | null;
+  source: KnowledgeSourceRef | null;
+  title: string | null;
+  /** `document`/`block` 为 null——内容在 Markdown 里，这里只有校验和。 */
+  canonical_content: string | null;
+  content_format: string;
+  status: KnowledgeObjectStatus;
+  current_version: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+  valid_from_ms: number | null;
+  valid_to_ms: number | null;
+  supersedes_id: string | null;
+  confidence: number;
+  user_confirmed: boolean;
+  metadata_json: string | null;
+}
+
+export interface KnowledgeObjectVersion {
+  object_id: string;
+  version: number;
+  content: string | null;
+  checksum: string;
+  actor: string;
+  run_id: string | null;
+  session_id: string | null;
+  changeset_id: string | null;
+  created_at_ms: number;
+  valid_from_ms: number | null;
+  valid_to_ms: number | null;
+}
+
+export interface KnowledgeRelation {
+  id: string;
+  source_object_id: string;
+  target_object_id: string;
+  relation_type: string;
+  provenance: RelationProvenance;
+  confidence: number;
+  status: KnowledgeObjectStatus;
+  evidence_ids: string[];
+  supersedes_id: string | null;
+  conflicts_with_id: string | null;
+  created_at_ms: number;
+  valid_from_ms: number | null;
+  valid_to_ms: number | null;
+}
+
+/** 一条证据加上它在某个对象上的角色。 */
+export interface KnowledgeEvidence {
+  id: string;
+  source_type: string;
+  source_id: string;
+  /** 回到原文的坐标，如 `notes/a.md#L12-L18`。为 null 时 UI 只能标为不可验证。 */
+  locator: string | null;
+  excerpt: string | null;
+  checksum: string | null;
+  captured_at_ms: number;
+  author: string | null;
+  extraction_model: string | null;
+  pipeline_version: string | null;
+  /** `supports` | `contradicts` | `source` | `completion` */
+  role: string;
+  confidence: number;
+}
+
+export interface KnowledgeAuditEvent {
+  id: string;
+  actor: string;
+  run_id: string | null;
+  session_id: string | null;
+  event: string;
+  object_id: string | null;
+  tool_name: string | null;
+  scope: string | null;
+  before_version: number | null;
+  after_version: number | null;
+  result: string;
+  metadata_json: string | null;
+  created_at_ms: number;
+}
+
+export interface KnowledgeIndexHealth {
+  schemaVersion: number;
+  totalFiles: number;
+  indexedDocuments: number;
+  blockObjects: number;
+  pendingJobs: number;
+  failedJobs: number;
+  lastError: string | null;
+  lastRunAtMs: number | null;
+  memoryItems: number;
+  memoryInbox: number;
+  openChangesets: number;
+  openCommitments: number;
+}
+
+export interface KnowledgeBackfillProgress {
+  processed: number;
+  created: number;
+  failed: number;
+  remaining: number;
+  hasMore: boolean;
+}
+
+export interface KnowledgeObjectDetail {
+  object: KnowledgeObject;
+  /** 根在前，含对象自身。 */
+  breadcrumb: KnowledgeObject[];
+  children: KnowledgeObject[];
+  backlinks: KnowledgeRelation[];
+  evidence: KnowledgeEvidence[];
+}
+
+/** 真实的索引健康计数。每个数字都来自后端的 `COUNT(*)`。 */
+export async function getKnowledgeIndexHealth(): Promise<KnowledgeIndexHealth> {
+  return invoke<KnowledgeIndexHealth>('knowledge_index_health');
+}
+
+/**
+ * 推进一批对象化。
+ *
+ * 有意做成"调一次推一批"：单次调用持锁时间有上界，UI 可以在批与批之间刷新进度，
+ * 用户也能中途停下。循环直到 `hasMore` 为 false 即完成。
+ */
+export async function runKnowledgeBackfill(limit?: number): Promise<KnowledgeBackfillProgress> {
+  return invoke<KnowledgeBackfillProgress>('knowledge_run_backfill', { limit });
+}
+
+/**
+ * 取一个对象的全部可解释信息。
+ *
+ * 返回 null 表示这篇笔记还没有稳定身份（backfill 未跑到），不是出错。
+ */
+export async function getKnowledgeObject(
+  target: { objectId: string } | { filePath: string },
+): Promise<KnowledgeObjectDetail | null> {
+  return invoke<KnowledgeObjectDetail | null>('knowledge_get_object', {
+    objectId: 'objectId' in target ? target.objectId : undefined,
+    filePath: 'filePath' in target ? target.filePath : undefined,
+  });
+}
+
+export async function getKnowledgeObjectVersions(
+  objectId: string,
+  limit?: number,
+): Promise<KnowledgeObjectVersion[]> {
+  return invoke<KnowledgeObjectVersion[]>('knowledge_object_versions', { objectId, limit });
+}
+
+/** 某一轮 Agent 或某个对象的审计明细，最新在前。 */
+export async function getKnowledgeAuditTrail(
+  filter: { runId?: string; objectId?: string; limit?: number },
+): Promise<KnowledgeAuditEvent[]> {
+  return invoke<KnowledgeAuditEvent[]>('knowledge_audit_trail', {
+    runId: filter.runId,
+    objectId: filter.objectId,
+    limit: filter.limit,
+  });
+}
+
+// ── Memory Inbox ─────────────────────────────────────────────────────────
+//
+// 候选记忆必须有一个地方让用户看见并裁决。`confirmMemory` 是唯一会写
+// `confirmed_by` 的路径——模型不能把自己的推断升级成用户事实。
+
+export type MemoryKind =
+  | 'episodic' | 'semantic' | 'profile' | 'procedural' | 'resource' | 'error' | 'task';
+
+export type MemoryLifecycle =
+  | 'candidate' | 'verified' | 'active' | 'superseded' | 'expired' | 'archived' | 'forgotten';
+
+export interface MemoryItem {
+  id: string;
+  /** 背后的 `memory` 对象，证据与关系挂在它上面。 */
+  object_id: string | null;
+  kind: MemoryKind;
+  lifecycle: MemoryLifecycle;
+  claim: string;
+  scope: string;
+  confidence: number;
+  importance: number;
+  source: KnowledgeSourceRef | null;
+  valid_from_ms: number | null;
+  valid_to_ms: number | null;
+  supersedes_id: string | null;
+  conflicts_with_id: string | null;
+  /** 只有用户动作会写这一列。 */
+  confirmed_by: string | null;
+  confirmed_at_ms: number | null;
+  requires_user_confirmation: boolean;
+  last_accessed_ms: number | null;
+  expires_at_ms: number | null;
+  /** `memory.md` 的五个 canonical section 之一。 */
+  section: string | null;
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
+/** 一条召回结果，`warnings` 直接可渲染成角标。 */
+export interface RecalledMemory {
+  item: MemoryItem;
+  score: number;
+  /** `low_confidence` | `unconfirmed` | `conflicting` | `out_of_scope` */
+  warnings: string[];
+}
+
+export async function getMemoryInbox(limit?: number): Promise<MemoryItem[]> {
+  return invoke<MemoryItem[]>('knowledge_memory_inbox', { limit });
+}
+
+export async function confirmMemory(memoryId: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_confirm', { memoryId });
+}
+
+/** 否掉候选。归档而非删除，所以同一条错误提案不会反复回到 Inbox。 */
+export async function rejectMemory(memoryId: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_reject', { memoryId });
+}
+
+export async function forgetMemory(memoryId: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_forget', { memoryId });
+}
+
+/** 按当前问题召回记忆，用于 Context Inspector 解释"为什么注入了这些"。 */
+export async function recallMemories(
+  query: string,
+  options?: { scope?: string; limit?: number },
+): Promise<RecalledMemory[]> {
+  return invoke<RecalledMemory[]>('knowledge_memory_recall', {
+    query,
+    scope: options?.scope,
+    limit: options?.limit,
+  });
+}
+
+// ── ChangeSet ───────────────────────────────────────────────────────────────
+
+/** `proposed` → `previewed`/`conflicted` → `awaiting_approval` → `approved` → `committed`。 */
+export type ChangeSetState =
+  | 'proposed'
+  | 'previewed'
+  | 'awaiting_approval'
+  | 'approved'
+  | 'committed'
+  | 'rejected'
+  | 'conflicted'
+  | 'rolled_back'
+  | 'failed';
+
+export interface ChangeSet {
+  id: string;
+  actor: string;
+  session_id: string | null;
+  run_id: string | null;
+  intent: string | null;
+  state: ChangeSetState;
+  risk: string;
+  requires_approval: boolean;
+  dry_run: boolean;
+  evidence_ids: string[];
+  created_at_ms: number;
+  updated_at_ms: number;
+  commit_error: string | null;
+}
+
+export interface PendingChangeSet {
+  id: string;
+  actor: string;
+  runId: string | null;
+  intent: string | null;
+  state: ChangeSetState;
+  opCount: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  commitError: string | null;
+}
+
+/**
+ * 有值就意味着这一步现在不能提交。
+ *
+ * `version` = 有人先改了（该重新生成），`checksum` = 磁盘内容不是生成这份改动时读到的
+ * 那份（该先让用户看），`target_gone` = 目标已被删/改名。三者的处置方式不同，所以
+ * UI 不能都渲染成"重试"。
+ */
+export type ChangeConflict =
+  | { kind: 'version'; expected: number; actual: number }
+  | { kind: 'checksum'; expected: string; actual: string }
+  | { kind: 'target_gone'; target: string };
+
+export interface ChangeOpPreview {
+  opId: string;
+  seq: number;
+  opKind: 'create' | 'edit' | 'patch' | 'append' | 'rename' | 'move' | 'delete' | 'merge';
+  targetObjectId: string | null;
+  path: string | null;
+  before: string | null;
+  after: string | null;
+  reason: string | null;
+  evidenceIds: string[];
+  affectedObjects: string[];
+  conflict: ChangeConflict | null;
+}
+
+export interface ChangeSetDryRun {
+  changesetId: string;
+  ops: ChangeOpPreview[];
+  hasConflicts: boolean;
+  touchedPaths: string[];
+}
+
+/** 还没落地的批次（不含 committed / rejected / rolled_back）。 */
+export async function getPendingChangeSets(limit?: number): Promise<PendingChangeSet[]> {
+  return invoke<PendingChangeSet[]>('knowledge_pending_changesets', { limit });
+}
+
+/** 预演一个批次。只读，但会把状态推到 `previewed` 或 `conflicted`。 */
+export async function previewChangeSet(changesetId: string): Promise<ChangeSetDryRun> {
+  return invoke<ChangeSetDryRun>('knowledge_preview_changeset', { changesetId });
+}
+
+/** 记录用户裁决。只改状态，真实写回由 Agent 的工具路径完成。 */
+export async function decideChangeSet(
+  changesetId: string,
+  approved: boolean,
+): Promise<ChangeSet> {
+  return invoke<ChangeSet>('knowledge_decide_changeset', { changesetId, approved });
+}
+
 

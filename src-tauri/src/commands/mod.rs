@@ -15,6 +15,7 @@ pub mod bases_commands;
 pub mod reconcile_commands;
 pub mod undo_commands;
 pub mod review_commands;
+pub mod knowledge_commands;
 pub use file_commands::*;
 pub use search_commands::*;
 pub use chat_commands::*;
@@ -28,6 +29,7 @@ pub use bases_commands::*;
 pub use reconcile_commands::*;
 pub use undo_commands::*;
 pub use review_commands::*;
+pub use knowledge_commands::*;
 
 // ── Shared API Request/Response Types ─────────────────────────────
 

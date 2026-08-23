@@ -1,6 +1,8 @@
 pub mod internal_tools;
 pub mod mcp_client;
-/// Server half of MCP: exposes this vault to external agents. Lives next to the
+/// 工具能力元数据。回答"这个工具能碰什么、要不要走 ChangeSet、来源可信吗"，
+/// 风险等级仍然由 `llm::approval` 负责。
+pub mod capability;/// Server half of MCP: exposes this vault to external agents. Lives next to the
 /// client on purpose — they share the protocol version and framing convention,
 /// and keeping them siblings makes a drift between the two obvious.
 pub mod mcp_server;
@@ -293,9 +295,16 @@ pub fn execute_list_available_tools(arguments: &str, skill_dirs: &[String]) -> a
             }
         }
         if matched.len() < limit {
+            // Capability travels with the name: a model deciding between two
+            // discovered tools should be able to see that one only reads and the
+            // other rewrites user content, without having to call it to find out.
+            let cap = capability::capability_of(name);
             matched.push(json!({
                 "name": name,
                 "description": truncate_chars(&tool.function.description, 200),
+                "effect": cap.effect.as_str(),
+                "risk": cap.risk.as_str(),
+                "needs_approval": crate::llm::approval::requires_approval(name),
             }));
         }
     }

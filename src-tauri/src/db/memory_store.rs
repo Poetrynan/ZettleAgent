@@ -49,7 +49,12 @@ const SCORE_FLOOR: f64 = 0.08;
 /// Normalize for dedup comparison: lowercase, collapse whitespace, drop
 /// trailing punctuation. Two facts that differ only in phrasing whitespace are
 /// the same fact.
-fn normalize(s: &str) -> String {
+///
+/// `pub(crate)` so the object-level memory lifecycle
+/// (`knowledge::memory`) dedups by the *same* rule this table always has. Two
+/// normalization rules would mean a claim that is a duplicate in one layer and
+/// a new fact in the other.
+pub(crate) fn normalize(s: &str) -> String {
     s.to_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -63,7 +68,9 @@ fn normalize(s: &str) -> String {
 /// CJK has no spaces, so whitespace tokenization yields one giant token and
 /// scores every Chinese fact at zero. Han characters are therefore emitted
 /// individually, which approximates unigram matching.
-fn tokenize(s: &str) -> Vec<String> {
+///
+/// `pub(crate)` for the same reason as [`normalize`]: one recall rule, not two.
+pub(crate) fn tokenize(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut buf = String::new();
     for ch in s.chars() {
@@ -88,7 +95,7 @@ fn tokenize(s: &str) -> Vec<String> {
 }
 
 /// Fraction of the query's tokens present in `text`, in `[0, 1]`.
-fn lexical_overlap(query_tokens: &[String], text: &str) -> f64 {
+pub(crate) fn lexical_overlap(query_tokens: &[String], text: &str) -> f64 {
     if query_tokens.is_empty() {
         return 0.0;
     }

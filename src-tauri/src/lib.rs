@@ -1,5 +1,8 @@
 mod file_lock;
 pub mod db;
+/// 统一知识对象层 / the stable, addressable identity layer Agent writes hang off.
+/// 不替换 `db`：Markdown 是内容权威，`files`/`chunks`/FTS/vec 继续是投影。
+pub mod knowledge;
 mod chunker;
 mod watcher;
 mod reconciler;
@@ -328,6 +331,20 @@ pipeline_log::init(&app_data_dir);
             commands::get_review_stats,
             commands::get_fsrs_config,
             commands::set_fsrs_config,
+            // 统一知识对象层 / the knowledge-object layer.
+            commands::knowledge_index_health,
+            commands::knowledge_run_backfill,
+            commands::knowledge_get_object,
+            commands::knowledge_object_versions,
+            commands::knowledge_audit_trail,
+            commands::knowledge_memory_inbox,
+            commands::knowledge_memory_confirm,
+            commands::knowledge_memory_reject,
+            commands::knowledge_memory_forget,
+            commands::knowledge_memory_recall,
+            commands::knowledge_pending_changesets,
+            commands::knowledge_preview_changeset,
+            commands::knowledge_decide_changeset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -7,6 +7,7 @@ pub mod reasoning_mode;
 pub mod memory_extractor;
 pub mod approval;
 pub mod context;
+pub mod context_compiler;
 pub mod planning;
 pub mod plan_guard;
 pub mod adaptive_prompt;

@@ -54,6 +54,25 @@ pub fn initialize_database(db_path: &Path) -> anyhow::Result<Connection> {
         Err(e) => log::warn!("Failed to migrate links to note_relations: {}", e),
     }
 
+    // Bring up the knowledge-object layer (versioned, idempotent) and queue the
+    // files → document backfill. Deliberately non-fatal: the object layer only
+    // gates the newer Agent features, so a failure here must degrade those and
+    // still let the user open their notes.
+    match crate::knowledge::bootstrap(&conn) {
+        Ok(report) => {
+            if !report.migrations_applied.is_empty() || report.backfill_enqueued > 0 {
+                log::info!(
+                    "Knowledge layer v{} ready (migrations: {:?}, backfill queued: {}, pending: {})",
+                    report.schema_version,
+                    report.migrations_applied,
+                    report.backfill_enqueued,
+                    report.backfill_pending
+                );
+            }
+        }
+        Err(e) => log::warn!("Knowledge layer bootstrap failed, object features disabled: {}", e),
+    }
+
     log::info!("Database initialized at {:?}", db_path);
     Ok(conn)
 }
