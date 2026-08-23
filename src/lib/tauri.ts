@@ -2561,6 +2561,31 @@ export async function getCommitmentInbox(limit?: number): Promise<TaskCommitment
   return invoke<TaskCommitment[]>('knowledge_commitment_inbox', { limit });
 }
 
+/** 任务台的筛选条件。全部留空 = 最近 200 条，按优先级与到期排。 */
+export interface CommitmentListQuery {
+  statuses?: CommitmentStatus[];
+  /** 到期时间早于这个时刻。没有到期日的条目不会被它选中。 */
+  dueBeforeMs?: number;
+  dueAfterMs?: number;
+  /** 只要没写到期日的。与 `dueBeforeMs`/`dueAfterMs` 互斥使用才有意义。 */
+  undatedOnly?: boolean;
+  /** 标题子串，大小写不敏感，中文可用。 */
+  search?: string;
+  limit?: number;
+}
+
+/**
+ * 按条件列任务。
+ *
+ * 与 {@link getCommitmentInbox} 分开：收件箱回答"现在有什么等我"，这个回答"某一类
+ * 任务现在是什么情况"——包括已完成和被推迟的。
+ */
+export async function getCommitmentList(
+  query?: CommitmentListQuery
+): Promise<TaskCommitment[]> {
+  return invoke<TaskCommitment[]>('knowledge_commitment_list', { query });
+}
+
 /**
  * 处理一条承诺。
  *

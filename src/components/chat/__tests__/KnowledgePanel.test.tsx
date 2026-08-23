@@ -10,12 +10,12 @@ import {
   PendingChangeSet,
   TaskCommitment,
   confirmMemory,
-  decideCommitment,
   getChangeSetDetail,
-  getCommitmentInbox,
+  getCommitmentList,
   getKnowledgeIndexHealth,
   getMemoryInbox,
   getPendingChangeSets,
+  getProactiveDigest,
   runKnowledgeBackfill,
   syncMemoryFile,
 } from '../../../lib/tauri';
@@ -26,7 +26,7 @@ vi.mock('../../../lib/tauri', () => ({
   decideChangeSet: vi.fn().mockResolvedValue(undefined),
   decideCommitment: vi.fn(),
   forgetMemory: vi.fn(),
-  getCommitmentInbox: vi.fn(),
+  getCommitmentList: vi.fn(),
   getChangeSetDetail: vi.fn().mockResolvedValue(null),
   getChangeSetHistory: vi.fn().mockResolvedValue([]),
   getEvidenceByIds: vi.fn().mockResolvedValue([]),
@@ -34,10 +34,14 @@ vi.mock('../../../lib/tauri', () => ({
   getKnowledgeIndexHealth: vi.fn(),
   getMemoryInbox: vi.fn(),
   getPendingChangeSets: vi.fn(),
+  getProactiveDigest: vi.fn(),
+  getSetting: vi.fn().mockResolvedValue(null),
+  markCommitmentNotified: vi.fn().mockResolvedValue(undefined),
   previewChangeSet: vi.fn(),
   rejectMemory: vi.fn(),
   runKnowledgeBackfill: vi.fn(),
   scanCommitments: vi.fn(),
+  setSetting: vi.fn().mockResolvedValue(undefined),
   syncMemoryFile: vi.fn(),
   undoAgentRun: vi.fn(),
 }));
@@ -50,7 +54,8 @@ beforeEach(() => setLang('en'));
 function quietBackend() {
   vi.mocked(getMemoryInbox).mockResolvedValue([]);
   vi.mocked(getPendingChangeSets).mockResolvedValue([]);
-  vi.mocked(getCommitmentInbox).mockResolvedValue([]);
+  vi.mocked(getCommitmentList).mockResolvedValue([]);
+  vi.mocked(getProactiveDigest).mockResolvedValue({ items: [], silenced: null, expired: 0 });
   vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(health());
 }
 
@@ -386,79 +391,62 @@ function commitment(over: Partial<TaskCommitment> = {}): TaskCommitment {
   return {
     id: 'task-1',
     status: 'proposed',
-    commitment_type: 'todo',
+    commitment_type: 'commitment',
     title: 'send the retro notes',
+    source: null,
     notify_count: 0,
     due_at_ms: null,
+    remind_at_ms: null,
+    completion_evidence_id: null,
     return_target: null,
     ...over,
   } as TaskCommitment;
 }
 
-describe('Commitment Inbox', () => {
+/**
+ * 侧栏的任务 tab 现在就是任务台本身。
+ *
+ * 这里只验"确实是同一个东西"：读的是任务台的查询、用的是任务台的状态词、六个视图都在。
+ * 具体行为（完成必须带证据、任意时刻推迟、闸门理由）在 `TaskCenter.test.tsx` 里验，
+ * 不在两处各写一遍——那正是这次合并要消掉的重复。
+ */
+describe('Tasks tab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     quietBackend();
-    vi.mocked(decideCommitment).mockResolvedValue(commitment({ status: 'active' }));
   });
 
-  it('says what an empty inbox means rather than showing a bare zero', async () => {
+  it('renders the task workbench, not a second inbox of its own', async () => {
+    vi.mocked(getCommitmentList).mockResolvedValue([commitment({ status: 'active' })]);
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
-    expect(await screen.findByText(/Dated, unchecked todos get harvested here/)).toBeInTheDocument();
+    expect(await screen.findByText('send the retro notes')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Past their date' })).toBeInTheDocument();
+    // 后端状态串不许直接印出来。
+    expect(screen.queryByText('active')).toBeNull();
   });
 
-  it('surfaces a read failure with a retry', async () => {
-    vi.mocked(getCommitmentInbox).mockRejectedValueOnce(new Error('no such table'));
+  it('asks the same filtered query the Knowledge Center asks', async () => {
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    openTab(/Tasks/);
+
+    await waitFor(() =>
+      expect(getCommitmentList).toHaveBeenCalledWith(
+        expect.objectContaining({ statuses: ['proposed'] }),
+      ),
+    );
+  });
+
+  it('surfaces a read failure with a retry instead of an empty list', async () => {
+    vi.mocked(getCommitmentList).mockRejectedValueOnce(new Error('no such table'));
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Tasks/);
 
     expect(await screen.findByText('no such table')).toBeInTheDocument();
   });
-
-  /** 完成必须带说明：后端要把它登记成完成证据，空的“done”是假账。 */
-  it('will not submit a completion without a summary', async () => {
-    vi.mocked(getCommitmentInbox).mockResolvedValue([commitment()]);
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Tasks/);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Complete' }));
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'sent, 12 people replied' } });
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    await waitFor(() =>
-      expect(decideCommitment).toHaveBeenCalledWith({
-        commitmentId: 'task-1',
-        action: 'complete',
-        resultSummary: 'sent, 12 people replied',
-      }),
-    );
-  });
-
-  /** 后端拒绝时不能悄悄吞掉：用户以为存下了，其实没有。 */
-  it('shows the backend refusal instead of closing the form silently', async () => {
-    vi.mocked(getCommitmentInbox).mockResolvedValue([commitment()]);
-    vi.mocked(decideCommitment).mockRejectedValueOnce(new Error('completion requires evidence'));
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Tasks/);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
-    expect(await screen.findByText('completion requires evidence')).toBeInTheDocument();
-  });
-
-  it('only offers "accept" for a commitment that is still merely proposed', async () => {
-    vi.mocked(getCommitmentInbox).mockResolvedValue([commitment({ status: 'active' })]);
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Tasks/);
-
-    await screen.findByText('send the retro notes');
-    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
-  });
 });
+
 
 describe('Index Health', () => {
   beforeEach(() => {

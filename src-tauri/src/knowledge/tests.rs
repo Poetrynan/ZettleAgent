@@ -2302,12 +2302,98 @@ fn due_commitment(conn: &Connection, title: &str, now: i64) -> TaskCommitment {
     commitments::propose(conn, &req).unwrap()
 }
 
+/// 任务台的筛选 / the workbench's filters.
+///
+/// 三件事要成立：状态筛选真的把做完的挡在外面（否则"待办"里混着已完成的）、逾期窗口
+/// 只算真的有截止日期的（无日期不等于逾期）、标题搜索对中文有效（SQLite 的 `LOWER`
+/// 只认 ASCII，所以这一步刻意留在 Rust）。
+#[test]
+fn the_task_list_filters_by_status_due_window_and_title() {
+    let conn = migrated_db();
+    let now = now_ms();
+
+    let mut overdue = NewCommitment::new("deadline", "交季度总结");
+    overdue.due_at_ms = Some(now - 3 * 86_400_000);
+    let overdue = commitments::propose(&conn, &overdue).unwrap();
+
+    let mut later = NewCommitment::new("deadline", "写读书笔记");
+    later.due_at_ms = Some(now + 3 * 86_400_000);
+    let later = commitments::propose(&conn, &later).unwrap();
+
+    let undated = commitments::propose(&conn, &NewCommitment::new("commitment", "整理书架")).unwrap();
+
+    let finished = due_commitment(&conn, "订机票", now);
+    commitments::deliver_result(&conn, &finished.id, "订好了，周三出发。", "user").unwrap();
+
+    let ids = |list: Vec<TaskCommitment>| list.into_iter().map(|c| c.id).collect::<Vec<_>>();
+
+    // 状态：proposed 里没有已完成的那条。
+    let open = ids(commitments::list(
+        &conn,
+        &commitments::CommitmentFilter {
+            statuses: vec![CommitmentStatus::Proposed, CommitmentStatus::Active],
+            ..Default::default()
+        },
+    )
+    .unwrap());
+    assert!(open.contains(&overdue.id) && open.contains(&later.id) && open.contains(&undated.id));
+    assert!(!open.contains(&finished.id), "做完的不该出现在待办里");
+
+    // 逾期窗口：无日期的那条不算逾期。
+    let late = commitments::list(
+        &conn,
+        &commitments::CommitmentFilter {
+            due_before_ms: Some(now),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .into_iter()
+    .map(|c| c.title)
+    .collect::<Vec<_>>();
+    assert_eq!(late, vec!["交季度总结".to_string()]);
+
+    // 只看没定日期的、还没做完的。做完的那条也没有日期，所以这里必须同时按状态筛——
+    // 否则"没定日期"这一栏会把已完成的混进来。
+    let no_date = ids(commitments::list(
+        &conn,
+        &commitments::CommitmentFilter {
+            statuses: vec![CommitmentStatus::Proposed, CommitmentStatus::Active],
+            undated_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap());
+    assert_eq!(no_date, vec![undated.id.clone()]);
+
+    // 中文标题搜得到。
+    let searched = ids(commitments::list(
+        &conn,
+        &commitments::CommitmentFilter {
+            search: Some("读书".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap());
+    assert_eq!(searched, vec![later.id]);
+
+    // 已完成的能单独查出来——任务台要能回看，而不只是给待办。
+    let done = ids(commitments::list(
+        &conn,
+        &commitments::CommitmentFilter {
+            statuses: vec![CommitmentStatus::Done],
+            ..Default::default()
+        },
+    )
+    .unwrap());
+    assert_eq!(done, vec![finished.id]);
+}
+
 /// 一切都放行的策略 / a policy that lets everything through.
 fn permissive_policy() -> NotifyPolicy {
     NotifyPolicy {
         enabled: true,
-        quiet_from_hour: 0,
-        quiet_to_hour: 0,
+        quiet_from_hour: 0,        quiet_to_hour: 0,
         max_per_day: 10,
         min_gap_ms: 0,
     }

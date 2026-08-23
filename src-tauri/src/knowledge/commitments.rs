@@ -180,6 +180,90 @@ pub fn inbox(conn: &Connection, limit: usize) -> ObjectResult<Vec<TaskCommitment
     )
 }
 
+/// 任务台要查的那些条件 / what the task workbench asks for.
+///
+/// 与 [`inbox`] 分开：收件箱只回答"现在有什么等我"，任务台要回答"某一类任务现在是什么
+/// 情况"——包括已经做完的和被推迟的。把两者塞进一个函数会得到一个谁都看不懂的参数表。
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentFilter {
+    /// 空 = 不按状态筛。
+    pub statuses: Vec<CommitmentStatus>,
+    /// 只要截止时间早于这个时刻的。用来做"逾期"和"今天到期"。
+    pub due_before_ms: Option<i64>,
+    /// 只要截止时间不早于这个时刻的。
+    pub due_after_ms: Option<i64>,
+    /// 只要**没有**截止日期的。与上面两个互斥，由调用方保证。
+    pub undated_only: bool,
+    /// 标题里的子串，大小写不敏感。
+    pub search: Option<String>,
+    /// 0 视为默认 200。
+    pub limit: usize,
+}
+
+/// 按条件列任务 / list commitments the workbench asked for.
+///
+/// 状态与时间窗在 SQL 里筛（有索引），标题搜索留在 Rust：SQLite 的 `LOWER` 只认
+/// ASCII，中文标题在那儿会静默失配，而"搜不到"比"报错"更难发现。
+pub fn list(conn: &Connection, filter: &CommitmentFilter) -> ObjectResult<Vec<TaskCommitment>> {
+    let mut clauses: Vec<String> = Vec::new();
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if !filter.statuses.is_empty() {
+        let marks = filter
+            .statuses
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!("status IN ({marks})"));
+        for status in &filter.statuses {
+            args.push(Box::new(status.as_str().to_string()));
+        }
+    }
+    if filter.undated_only {
+        clauses.push("due_at_ms IS NULL".to_string());
+    }
+    if let Some(before) = filter.due_before_ms {
+        clauses.push(format!("due_at_ms IS NOT NULL AND due_at_ms < ?{}", args.len() + 1));
+        args.push(Box::new(before));
+    }
+    if let Some(after) = filter.due_after_ms {
+        clauses.push(format!("due_at_ms IS NOT NULL AND due_at_ms >= ?{}", args.len() + 1));
+        args.push(Box::new(after));
+    }
+
+    let where_sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", clauses.join(" AND "))
+    };
+    // 无日期的排在有日期的后面，而不是排在最前面：没定日期不等于最紧急。
+    let sql = format!(
+        "{where_sql}
+         ORDER BY priority DESC, COALESCE(due_at_ms, 9223372036854775807), created_at_ms"
+    );
+
+    let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a.as_ref()).collect();
+    let rows = query(conn, &sql, refs.as_slice())?;
+
+    let needle = filter
+        .search
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+    let limit = if filter.limit == 0 { 200 } else { filter.limit };
+
+    Ok(rows
+        .into_iter()
+        .filter(|c| match &needle {
+            Some(needle) => c.title.to_lowercase().contains(needle),
+            None => true,
+        })
+        .take(limit)
+        .collect())
+}
+
 fn query(
     conn: &Connection,
     clause: &str,

@@ -632,6 +632,49 @@ pub async fn knowledge_decide_commitment(
     }
 }
 
+/// 任务台要看哪一批 / which commitments the workbench is asking for.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentListQuery {
+    /// 状态名，无法识别的忽略而不是让整个查询失败。
+    pub statuses: Option<Vec<String>>,
+    pub due_before_ms: Option<i64>,
+    pub due_after_ms: Option<i64>,
+    pub undated_only: Option<bool>,
+    pub search: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// 按条件列任务 / the task workbench's list.
+///
+/// 与 [`knowledge_commitment_inbox`] 分开：收件箱回答"现在有什么等我"，这个回答"某一类
+/// 任务现在是什么情况"，包括做完的和推迟的。
+#[tauri::command]
+pub async fn knowledge_commitment_list(
+    state: State<'_, AppState>,
+    query: Option<CommitmentListQuery>,
+) -> Result<Vec<types::TaskCommitment>, ZettelError> {
+    let query = query.unwrap_or_default();
+    let conn = state.db.lock()?;
+
+    let statuses = query
+        .statuses
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| types::CommitmentStatus::parse(s))
+        .collect::<Vec<_>>();
+
+    let filter = commitments::CommitmentFilter {
+        statuses,
+        due_before_ms: query.due_before_ms,
+        due_after_ms: query.due_after_ms,
+        undated_only: query.undated_only.unwrap_or(false),
+        search: query.search,
+        limit: query.limit.unwrap_or(200).clamp(1, 500),
+    };
+    Ok(commitments::list(&conn, &filter)?)
+}
+
 /// 这一轮该不该提醒，以及为什么 / what may be surfaced now, or why nothing is.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

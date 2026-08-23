@@ -5,22 +5,19 @@ import {
   KnowledgeBackfillProgress,
   KnowledgeIndexHealth,
   MemoryItem,
-  TaskCommitment,
   confirmMemory,
-  decideCommitment,
   forgetMemory,
-  getCommitmentInbox,
   getKnowledgeAuditTrail,
   getKnowledgeIndexHealth,
   getMemoryInbox,
   rejectMemory,
   runKnowledgeBackfill,
-  scanCommitments,
   syncMemoryFile,
 } from '../../lib/tauri';
 import { getLang } from '../../lib/i18n';
 import { ContextInspector } from '../knowledge/ContextInspector';
 import { ChangeReview } from '../knowledge/ChangeReview';
+import { TaskCenter } from '../knowledge/TaskCenter';
 
 /**
  * 知识层面板 / the knowledge layer's in-chat surface.
@@ -409,166 +406,18 @@ export function ChangesTab(_props: { isZh: boolean }) {
 // ── Task / Commitment View ──────────────────────────────────────────────────
 
 /**
- * 承诺收件箱 / the commitment inbox.
+ * 承诺 / delegated to {@link TaskCenter}.
  *
- * "完成"必须带一句说明：后端会把它登记成完成证据并绑回源笔记。没有说明的完成会被
- * 拒——只把状态改成 done 的任务列表干净得毫无意义。
+ * 侧栏原来只读收件箱，看不到推迟的、做完的、日期已过的，于是"我上周答应的那件事后来
+ * 怎么了"在侧栏里无法回答。现在两处是同一个任务台：同一套状态词、同一个"完成必须带
+ * 证据"的规则、同一个任意时刻的推迟。
+ *
+ * `isZh` 不再需要：文案走 i18n 字典，不在组件里分叉。留着参数是为了不动调用点。
  */
-export function TasksTab({ isZh }: { isZh: boolean }) {
-  const { data, error, busy, reload } = useLoader<TaskCommitment[]>(
-    () => getCommitmentInbox(50),
-    [],
-  );
-  const [completing, setCompleting] = useState<string | null>(null);
-  const [summary, setSummary] = useState('');
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanNote, setScanNote] = useState<string | null>(null);
-
-  const act = async (payload: Parameters<typeof decideCommitment>[0]) => {
-    setActionError(null);
-    try {
-      await decideCommitment(payload);
-      setCompleting(null);
-      setSummary('');
-      await reload();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const scan = async () => {
-    setScanning(true);
-    setScanNote(null);
-    try {
-      const result = await scanCommitments(200);
-      setScanNote(
-        isZh
-          ? `扫到 ${result.found} 条带日期待办，新建 ${result.created} 条`
-          : `${result.found} dated todos found, ${result.created} new`,
-      );
-      await reload();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  return (
-    <div className="knowledge-section">
-      <div className="knowledge-toolbar">
-        <button className="knowledge-mini-btn" disabled={scanning} onClick={() => void scan()}>
-          {scanning
-            ? (isZh ? '扫描中…' : 'Scanning…')
-            : (isZh ? '扫描笔记里的待办' : 'Scan notes for todos')}
-        </button>
-        {scanNote && <span className="knowledge-toolbar-note">{scanNote}</span>}
-      </div>
-
-      {actionError && <div className="knowledge-error-text">{actionError}</div>}
-      {error && <Failed error={error} onRetry={reload} label={isZh ? '重试' : 'Retry'} />}
-      {busy && !data && <Empty text={isZh ? '读取中…' : 'Loading…'} />}
-      {data && data.length === 0 && (
-        <Empty
-          text={
-            isZh
-              ? '收件箱是空的。带日期的未打勾待办会被扫进来。'
-              : 'Inbox is empty. Dated, unchecked todos get harvested here.'
-          }
-        />
-      )}
-
-      <div className="knowledge-list">
-        {data?.map(item => (
-          <div className="knowledge-item" key={item.id}>
-            <div className="knowledge-item-head">
-              <span className={`knowledge-state knowledge-state-${item.status}`}>
-                {item.status}
-              </span>
-              <span className="knowledge-item-title">{item.title}</span>
-            </div>
-            <div className="knowledge-item-meta">
-              <span>{item.commitment_type}</span>
-              {item.due_at_ms && (
-                <span>{isZh ? '截止' : 'due'} {timeLabel(item.due_at_ms)}</span>
-              )}
-              {item.return_target && (
-                <span className="knowledge-item-locator">{item.return_target}</span>
-              )}
-              {item.notify_count > 0 && (
-                <span>{isZh ? '提醒过' : 'nudged'} {item.notify_count}×</span>
-              )}
-            </div>
-
-            {completing === item.id ? (
-              <div className="knowledge-complete-form">
-                <input
-                  className="knowledge-input"
-                  value={summary}
-                  autoFocus
-                  placeholder={isZh ? '做完了什么？会存为完成证据' : 'What got done? Stored as evidence'}
-                  onChange={e => setSummary(e.target.value)}
-                />
-                <button
-                  className="knowledge-mini-btn primary"
-                  disabled={!summary.trim()}
-                  onClick={() =>
-                    void act({
-                      commitmentId: item.id,
-                      action: 'complete',
-                      resultSummary: summary.trim(),
-                    })
-                  }
-                >
-                  {isZh ? '提交' : 'Save'}
-                </button>
-                <button className="knowledge-mini-btn" onClick={() => setCompleting(null)}>
-                  {isZh ? '取消' : 'Cancel'}
-                </button>
-              </div>
-            ) : (
-              <div className="knowledge-item-actions">
-                {item.status === 'proposed' && (
-                  <button
-                    className="knowledge-mini-btn primary"
-                    onClick={() => void act({ commitmentId: item.id, action: 'activate' })}
-                  >
-                    {isZh ? '接受' : 'Accept'}
-                  </button>
-                )}
-                <button
-                  className="knowledge-mini-btn"
-                  onClick={() => { setCompleting(item.id); setSummary(''); }}
-                >
-                  {isZh ? '完成' : 'Complete'}
-                </button>
-                <button
-                  className="knowledge-mini-btn"
-                  onClick={() =>
-                    void act({
-                      commitmentId: item.id,
-                      action: 'snooze',
-                      untilMs: Date.now() + 86_400_000,
-                    })
-                  }
-                >
-                  {isZh ? '明天再说' : 'Tomorrow'}
-                </button>
-                <button
-                  className="knowledge-mini-btn danger"
-                  onClick={() => void act({ commitmentId: item.id, action: 'dismiss' })}
-                >
-                  {isZh ? '不要提醒' : 'Dismiss'}
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+export function TasksTab(_props: { isZh: boolean }) {
+  return <TaskCenter />;
 }
+
 
 // ── Index Health ────────────────────────────────────────────────────────────
 

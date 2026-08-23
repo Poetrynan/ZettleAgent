@@ -6,7 +6,8 @@ import { KnowledgeInbox } from './KnowledgeInbox';
 import { AgentActivity } from './AgentActivity';
 import { MemoryCenter } from './MemoryCenter';
 import { ChangeReview } from './ChangeReview';
-import { HealthTab, TasksTab } from '../chat/KnowledgePanel';
+import { TaskCenter } from './TaskCenter';
+import { HealthTab } from '../chat/KnowledgePanel';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import '../../styles/knowledge-center.css';
@@ -126,7 +127,7 @@ export function KnowledgeCenter() {
             <MemoryCenter vaultPath={vaultPath} onChanged={refresh} />
           )}
           {page === 'changes' && <ChangeReview onOpenSource={openFile} />}
-          {page === 'tasks' && <TasksTab isZh={isZh} />}
+          {page === 'tasks' && <TaskCenter onOpenSource={openFile} onChanged={refresh} />}
           {page === 'health' && <HealthTab isZh={isZh} />}
           {page === 'activity' && <AgentActivity />}
         </div>

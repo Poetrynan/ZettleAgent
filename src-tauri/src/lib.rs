@@ -349,6 +349,7 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_preview_changeset,
             commands::knowledge_decide_changeset,
             commands::knowledge_commitment_inbox,
+            commands::knowledge_commitment_list,
             commands::knowledge_decide_commitment,
             commands::knowledge_proactive_digest,
             commands::knowledge_mark_notified,
