@@ -643,6 +643,93 @@ pub async fn generate_card_metadata(
     Ok(response)
 }
 
+// ── ChangeSet 守卫的两个薄封装 / thin wrappers around the write guard ────────
+//
+// 单独抽出来只为一件事：`db.lock()` 拿到的 `MutexGuard` 不能跨 `.await` 活着。
+// 把它关在这两个同步函数里，锁在函数返回时就释放了，工具执行的 await 完全在锁外。
+
+/// 守卫放行与否 / whether the tool call may proceed.
+enum GuardOutcome {
+    /// 可以执行。`Some` 表示执行后要记账，`None` 表示这个工具不写知识内容。
+    Proceed(Option<crate::knowledge::write_guard::ReadyWrite>),
+    /// 不执行，把这段话回给模型。
+    Stop(String),
+}
+
+fn open_write_guard(
+    db: &std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
+    vault: &str,
+    all_vaults: &[String],
+    name: &str,
+    args: &str,
+) -> Result<GuardOutcome, String> {
+    use crate::knowledge::write_guard::{self, Guarded, WriteContext};
+
+    let ctx = WriteContext {
+        actor: "agent".to_string(),
+        session_id: None,
+        run_id: crate::llm::tool_hooks::current_run_id(),
+        primary_vault: vault.to_string(),
+        vaults: all_vaults.to_vec(),
+    };
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    match write_guard::open(&conn, &ctx, name, args).map_err(|e| e.to_string())? {
+        Guarded::Unguarded => Ok(GuardOutcome::Proceed(None)),
+        Guarded::Ready(ready) => {
+            crate::chat_file_log::log_agent(&format!(
+                "changeset_ready tool={} id={} paths={}",
+                name,
+                ready.changeset_id,
+                ready.paths.len()
+            ));
+            Ok(GuardOutcome::Proceed(Some(ready)))
+        }
+        Guarded::Refused { refusal, .. } => Ok(GuardOutcome::Stop(format!(
+            "Refused: {}. Nothing was written.",
+            refusal.message()
+        ))),
+        Guarded::Conflicted { report, .. } => {
+            // 把冲突原文回给模型，让它知道该重新读一遍而不是重试同一份内容。
+            let detail = report
+                .ops
+                .iter()
+                .filter_map(|op| op.conflict.as_ref().map(|c| c.message()))
+                .collect::<Vec<_>>()
+                .join("; ");
+            Ok(GuardOutcome::Stop(format!(
+                "Conflict: {}. Nothing was written — re-read the note before writing again.",
+                detail
+            )))
+        }
+    }
+}
+
+fn settle_write_guard(
+    db: &std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>,
+    ready: &crate::knowledge::write_guard::ReadyWrite,
+    error: Option<&str>,
+) {
+    let Ok(conn) = db.lock() else {
+        // 记不上账不能装作记上了：批次会停在 approved，由 stale_changesets 兜底。
+        crate::chat_file_log::log_agent(&format!(
+            "changeset_settle_skipped id={} reason=db_lock",
+            ready.changeset_id
+        ));
+        return;
+    };
+    let outcome = match error {
+        None => Ok(()),
+        Some(e) => Err(e),
+    };
+    if let Err(e) = crate::knowledge::write_guard::settle(&conn, ready, outcome) {
+        crate::chat_file_log::log_agent(&format!(
+            "changeset_settle_failed id={} err={}",
+            ready.changeset_id, e
+        ));
+    }
+}
+
 #[tauri::command]
 pub async fn agent_chat(
     state: State<'_, AppState>,
@@ -1217,7 +1304,31 @@ async fn run_agent_turn(
             let config = config_clone.clone();
             let skill_dirs_inner = skill_dirs_clone.clone();
             Box::pin(async move {
-                crate::tools::execute_tool(name, args, &db, &vault, &all_vaults, &config, &skill_dirs_inner).await
+                // Agent 的写入必须先拿到一个 ChangeSet：预演过、无冲突、留了审计。
+                // 审批本身已经在 orchestrator 的 approval gate 里发生过了，这里不重判。
+                let ready = match open_write_guard(&db, &vault, &all_vaults, name, args) {
+                    Ok(GuardOutcome::Proceed(ready)) => ready,
+                    Ok(GuardOutcome::Stop(message)) => return Ok(message),
+                    Err(e) => {
+                        // 守卫跑不起来就不写。放行等于让这次写入绕过 ChangeSet，
+                        // 而那正是这一层存在的理由。
+                        crate::chat_file_log::log_agent(&format!(
+                            "write_guard_unavailable tool={} err={}", name, e
+                        ));
+                        return Ok(format!(
+                            "Write refused: the change-set guard could not run ({}). Nothing was written. Please retry.",
+                            e
+                        ));
+                    }
+                };
+
+                let result = crate::tools::execute_tool(name, args, &db, &vault, &all_vaults, &config, &skill_dirs_inner).await;
+
+                if let Some(ready) = ready {
+                    let error = result.as_ref().err().map(|e| e.to_string());
+                    settle_write_guard(&db, &ready, error.as_deref());
+                }
+                result
             })
         },
         app,

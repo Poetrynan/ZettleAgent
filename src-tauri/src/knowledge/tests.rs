@@ -1449,3 +1449,393 @@ fn a_changeset_stuck_before_commit_shows_up_as_stale() {
     changeset::record_commit(&conn, &cs.id).unwrap();
     assert!(changeset::stale_changesets(&conn, 3_600_000).unwrap().is_empty());
 }
+
+// ── 写路径守卫 / the write guard ─────────────────────────────────────────────
+
+use super::write_guard::{self, Guarded, WriteContext};
+
+/// 一个真的落在磁盘上的临时 vault / a temp vault that really exists on disk.
+///
+/// 守卫要解析路径、要回读落盘内容，所以这一组测试不能只用内存里的假路径：假路径
+/// 会让 `resolve_path_multi_vault` 走到完全不同的分支上，测出来的行为不是生产行为。
+fn temp_vault(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "zettel_guard_{}_{}_{}",
+        tag,
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn guard_ctx(vault: &std::path::Path) -> WriteContext {
+    WriteContext {
+        actor: "agent".to_string(),
+        session_id: None,
+        run_id: Some("run-guard".to_string()),
+        primary_vault: vault.to_string_lossy().to_string(),
+        vaults: vec![vault.to_string_lossy().to_string()],
+    }
+}
+
+/// 写一个真文件并把它索引进库 / write a real note and index it.
+///
+/// 返回 (索引里的路径 key, 对象 ID)。
+fn vault_note(
+    conn: &Connection,
+    vault: &std::path::Path,
+    rel: &str,
+    body: &str,
+) -> (String, String) {
+    let full = vault.join(rel);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&full, body).unwrap();
+    let key = crate::tools::internal_tools::helpers::snapshot_path_key(&full);
+    let id = backfilled_note(conn, &key, rel, body);
+    (key, id)
+}
+
+/// 参数映射不能猜错文件 / the mapping must not guess the wrong file.
+///
+/// 审批卡片和 changeset 必须指向同一个路径。这里分开测是因为一旦两边漂移，症状是
+/// "用户批准了 A、程序改了 B"——那种 bug 从日志里看不出来。
+#[test]
+fn each_write_tool_maps_onto_the_path_it_will_actually_touch() {
+    let one = |tool: &str, args: &str| {
+        let mut got = write_guard::intents_of(tool, args);
+        assert_eq!(got.len(), 1, "{tool} must map to exactly one op");
+        got.remove(0)
+    };
+
+    let create = one("create_note", r#"{"path":"a.md","content":"正文"}"#);
+    assert_eq!(create.kind, ChangeOpKind::Create);
+    assert_eq!(create.raw_path, "a.md");
+    assert_eq!(create.content.as_deref(), Some("正文"));
+
+    let edit = one("edit_note", r#"{"path":"a.md","content":"新正文"}"#);
+    assert_eq!(edit.kind, ChangeOpKind::Edit);
+    assert_eq!(edit.content.as_deref(), Some("新正文"));
+
+    // patch 的参数里没有最终全文，内容必须留空等回读，不能编一个。
+    let patch = one("patch_note", r#"{"path":"a.md","patches":[]}"#);
+    assert_eq!(patch.kind, ChangeOpKind::Patch);
+    assert_eq!(patch.content, None);
+
+    let revert = one("revert_note", r#"{"note_path":"a.md","version":2}"#);
+    assert_eq!(revert.raw_path, "a.md", "revert_note 用的是 note_path");
+
+    let rename = one("rename_note", r#"{"old_path":"a.md","new_path":"b.md"}"#);
+    assert_eq!(rename.kind, ChangeOpKind::Rename);
+    assert_eq!(rename.dest.as_deref(), Some("b.md"));
+
+    let delete = one("delete_note", r#"{"path":"a.md"}"#);
+    assert_eq!(delete.kind, ChangeOpKind::Delete);
+}
+
+/// 合并拆成两个操作 / a merge is two operations, not one.
+///
+/// 只记"目标被改写"会让预览里看不到源笔记会消失——那是这次变更里最不可逆的一半。
+#[test]
+fn a_merge_shows_both_the_rewrite_and_the_disappearance() {
+    let ops = write_guard::intents_of(
+        "merge_notes",
+        r#"{"source_path":"旧.md","target_path":"新.md"}"#,
+    );
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].kind, ChangeOpKind::Edit);
+    assert_eq!(ops[0].raw_path, "新.md");
+    assert_eq!(ops[1].kind, ChangeOpKind::Delete);
+    assert_eq!(ops[1].raw_path, "旧.md");
+}
+
+/// 读不懂的写工具不装懂 / an unmapped write tool is not given a fake target.
+#[test]
+fn unmapped_tools_produce_no_operations() {
+    for (tool, args) in [
+        ("modify_canvas", r#"{"canvas_path":"a.canvas"}"#),
+        ("mcp_fs_write_file", r#"{"path":"/tmp/x"}"#),
+        ("search_notes", r#"{"query":"x"}"#),
+        ("create_note", r#"{"content":"没有路径"}"#),
+    ] {
+        assert!(
+            write_guard::intents_of(tool, args).is_empty(),
+            "{tool} must not be mapped onto a guessed path"
+        );
+    }
+}
+
+/// 读工具不进守卫 / read tools are not gated.
+///
+/// 每次召回都开一个 changeset 会把审计表变成噪音，也会让"有 changeset"不再等于
+/// "有人写过东西"。
+#[test]
+fn a_read_tool_passes_through_ungated() {
+    let conn = migrated_db();
+    let vault = temp_vault("read");
+    let ctx = guard_ctx(&vault);
+
+    let decision =
+        write_guard::open(&conn, &ctx, "search_notes", r#"{"query":"x"}"#).unwrap();
+    assert!(matches!(decision, Guarded::Unguarded));
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM changesets", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+/// 库外路径写不进去 / a path outside every vault is refused.
+#[test]
+fn a_write_outside_every_vault_is_refused_before_execution() {
+    let conn = migrated_db();
+    let vault = temp_vault("scope");
+    let ctx = guard_ctx(&vault);
+
+    let outside = std::env::temp_dir().join("definitely_not_in_the_vault.md");
+    let args = serde_json::json!({
+        "path": outside.to_string_lossy(),
+        "content": "偷偷写到库外",
+    })
+    .to_string();
+
+    match write_guard::open(&conn, &ctx, "edit_note", &args).unwrap() {
+        Guarded::Refused { refusal, .. } => {
+            assert!(matches!(refusal, Refusal::OutOfScope(_)));
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    // 被拒的批次要留痕，但一个操作都不该登记进去。
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM changeset_ops", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+/// 完整一轮：放行 → 写盘 → 记账 / the full round trip.
+#[test]
+fn a_guarded_edit_versions_the_object_after_the_write_lands() {
+    let conn = migrated_db();
+    let vault = temp_vault("edit");
+    let ctx = guard_ctx(&vault);
+    let (key, object_id) = vault_note(&conn, &vault, "a.md", "原来的内容");
+    let before = object_store::get_object(&conn, &object_id).unwrap().unwrap();
+
+    let args = r#"{"path":"a.md","content":"改写后的内容"}"#;
+    let ready = match write_guard::open(&conn, &ctx, "edit_note", args).unwrap() {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the write to be allowed, got {other:?}"),
+    };
+    assert_eq!(ready.paths, vec![key.clone()]);
+
+    // 记账之前对象没动过——守卫本身不写内容。
+    assert_eq!(
+        object_store::get_object(&conn, &object_id).unwrap().unwrap().current_version,
+        before.current_version
+    );
+
+    // 这一步是 note_ops 在生产里做的事。
+    std::fs::write(vault.join("a.md"), "改写后的内容").unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+
+    let after = object_store::get_object(&conn, &object_id).unwrap().unwrap();
+    assert_eq!(after.current_version, before.current_version + 1);
+    assert_eq!(
+        changeset::get(&conn, &ready.changeset_id).unwrap().unwrap().state,
+        ChangeSetState::Committed
+    );
+}
+
+/// 参数里没有全文时，指纹要来自磁盘 / the checksum must come from what landed.
+///
+/// `patch_note` 只给出补丁。要是记账时把内容当成空字符串写进版本表，下一次写入就会
+/// 撞上一个根本不存在的 checksum 冲突——一个自己造出来的死锁。
+#[test]
+fn a_patch_records_the_content_that_actually_landed() {
+    let conn = migrated_db();
+    let vault = temp_vault("patch");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "第一行\n第二行");
+
+    let args = r#"{"path":"a.md","patches":[{"old":"第二行","new":"改过的第二行"}]}"#;
+    let ready = match write_guard::open(&conn, &ctx, "patch_note", args).unwrap() {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the patch to be allowed, got {other:?}"),
+    };
+
+    let landed = "第一行\n改过的第二行";
+    std::fs::write(vault.join("a.md"), landed).unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+
+    let object = object_store::get_object(&conn, &object_id).unwrap().unwrap();
+    let version = object_store::get_object_version(&conn, &object_id, object.current_version)
+        .unwrap()
+        .unwrap();
+    assert_eq!(version.checksum, checksum(landed), "指纹必须是落盘那份的指纹");
+}
+
+/// 写盘失败要如实记下来 / a failed write is recorded as failed.
+#[test]
+fn a_failed_tool_call_leaves_the_object_untouched() {
+    let conn = migrated_db();
+    let vault = temp_vault("fail");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "原来的内容");
+    let before = object_store::get_object(&conn, &object_id).unwrap().unwrap();
+
+    let ready = match write_guard::open(
+        &conn,
+        &ctx,
+        "edit_note",
+        r#"{"path":"a.md","content":"没写成的内容"}"#,
+    )
+    .unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the write to be allowed, got {other:?}"),
+    };
+
+    write_guard::settle(&conn, &ready, Err("disk is full")).unwrap();
+
+    let cs = changeset::get(&conn, &ready.changeset_id).unwrap().unwrap();
+    assert_eq!(cs.state, ChangeSetState::Failed);
+    assert_eq!(cs.commit_error.as_deref(), Some("disk is full"));
+    assert_eq!(
+        object_store::get_object(&conn, &object_id).unwrap().unwrap().current_version,
+        before.current_version,
+        "失败的写入不该留下版本"
+    );
+}
+
+/// 别人先改了就不许写 / a concurrent change blocks the write instead of losing it.
+///
+/// 这是守卫最值钱的一条：Agent 基于旧版本算出来的全文覆盖上去，用户刚写的那段就没
+/// 了，而且没人会知道。所以冲突必须在**执行之前**拦住。
+#[test]
+fn a_stale_write_is_blocked_before_it_can_overwrite() {
+    let conn = migrated_db();
+    let vault = temp_vault("conflict");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "原来的内容");
+
+    // 用户（或另一条路径）先提交了一版。
+    object_store::update_object_patch(
+        &conn,
+        &object_id,
+        ObjectPatch {
+            content: Some("用户刚写的内容".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Agent 这时才来写它读到的旧版本。守卫在 add_op 时取的基线已经是新版本，
+    // 所以这里要模拟"基线过期"：直接把 op 的 old_version 退回一版。
+    let ready = match write_guard::open(
+        &conn,
+        &ctx,
+        "edit_note",
+        r#"{"path":"a.md","content":"Agent 基于旧版算的全文"}"#,
+    )
+    .unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the first open to succeed, got {other:?}"),
+    };
+    conn.execute(
+        "UPDATE changeset_ops SET old_version = old_version - 1 WHERE changeset_id = ?1",
+        params![ready.changeset_id],
+    )
+    .unwrap();
+
+    let report = changeset::dry_run(&conn, &ready.changeset_id).unwrap();
+    assert!(report.has_conflicts);
+    assert!(matches!(
+        report.ops[0].conflict,
+        Some(changeset::Conflict::Version { .. })
+    ));
+    assert_eq!(
+        changeset::get(&conn, &ready.changeset_id).unwrap().unwrap().state,
+        ChangeSetState::Conflicted
+    );
+    // 冲突的批次提交不了，用户刚写的内容还在。
+    assert!(changeset::record_commit(&conn, &ready.changeset_id).is_err());
+    assert_eq!(
+        object_store::get_object(&conn, &object_id)
+            .unwrap()
+            .unwrap()
+            .canonical_content
+            .as_deref(),
+        Some("用户刚写的内容")
+    );
+}
+
+/// 改名不换身份 / a rename repoints the object, it does not replace it.
+///
+/// 对象 ID 换掉的话，之前挂在这篇笔记上的证据、关系、changeset 会一起指向空气。
+#[test]
+fn a_rename_rebinds_the_same_object_to_the_new_path() {
+    let conn = migrated_db();
+    let vault = temp_vault("rename");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "旧名.md", "内容没变");
+
+    let ready = match write_guard::open(
+        &conn,
+        &ctx,
+        "rename_note",
+        r#"{"old_path":"旧名.md","new_path":"新名.md"}"#,
+    )
+    .unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the rename to be allowed, got {other:?}"),
+    };
+
+    std::fs::rename(vault.join("旧名.md"), vault.join("新名.md")).unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+
+    let new_key =
+        crate::tools::internal_tools::helpers::snapshot_path_key(&vault.join("新名.md"));
+    let found = object_store::find_by_source(&conn, &SourceRef::file(&new_key))
+        .unwrap()
+        .expect("对象必须跟着新路径走");
+    assert_eq!(found.id, object_id, "改名不该换掉对象身份");
+}
+
+/// 删除留墓碑 / a delete leaves a tombstone, not an empty version.
+///
+/// 写一条空内容的新版本等于宣称"这篇笔记现在是空的"。事实是它被删了，而撤销一轮
+/// 变更需要对象身份还在。
+#[test]
+fn a_delete_tombstones_the_object_instead_of_emptying_it() {
+    let conn = migrated_db();
+    let vault = temp_vault("delete");
+    let ctx = guard_ctx(&vault);
+    let (_, object_id) = vault_note(&conn, &vault, "a.md", "要被删掉的内容");
+    let before = object_store::get_object(&conn, &object_id).unwrap().unwrap();
+
+    let ready = match write_guard::open(&conn, &ctx, "delete_note", r#"{"path":"a.md"}"#).unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the delete to be allowed, got {other:?}"),
+    };
+
+    std::fs::remove_file(vault.join("a.md")).unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+
+    let after = object_store::get_object(&conn, &object_id)
+        .unwrap()
+        .expect("墓碑不是物理删除，行必须还在");
+    assert_eq!(after.status, ObjectStatus::Deleted);
+    assert_eq!(
+        after.current_version, before.current_version,
+        "删除不该伪造一个新版本"
+    );
+}

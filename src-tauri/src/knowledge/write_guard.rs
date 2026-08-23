@@ -1,0 +1,419 @@
+//! 写路径守卫 / the guard that forces agent writes through a ChangeSet.
+//!
+//! ## 它补的是哪个洞
+//!
+//! [`changeset`](super::changeset) 有了提议、预演、冲突检测与记账，但它不知道工具
+//! 参数长什么样，也刻意不碰文件系统。于是"Agent 的写入必须走 ChangeSet"这句话在
+//! 那一层还只是个约定——只要有人直接调 `note_ops`，约定就作废了。
+//!
+//! 本模块把约定变成代码：它挂在 `execute_tool` 的调用点上。凡是
+//! `capability::capability_of(tool).requires_changeset` 为真的调用，都必须先拿到
+//! 一个 [`Guarded::Ready`] 才能执行，执行完必须 [`settle`]。
+//!
+//! ## 为什么分成 open / settle 两半
+//!
+//! 真实写盘留在 `note_ops`（快照、回收站、journal、undo、wikilink retarget 都在那
+//! 儿），本模块不去抢那份工作。所以：
+//!
+//! - [`open`] 在写之前跑：映射参数 → 定位对象 → scope/能力校验 → 预演冲突 → 记审批；
+//! - 中间调用方去写盘；
+//! - [`settle`] 在写之后跑：把落定的内容与新路径记账，或者把失败如实记下来。
+//!
+//! 中间那一步故意不搬进来。硬把文件 IO 塞进 rusqlite 事务，只会得到一个 SQLite 能
+//! 回滚、磁盘不能的四不像。
+//!
+//! ## 未映射的写工具
+//!
+//! Canvas、第三方 MCP、以及任何还没登记的写工具，参数形状本模块读不懂。这些调用
+//! **不会被放过**：仍然开一个 changeset 记下"某个写工具跑过、目标未知"，只是没有
+//! op 可以预演。假装知道目标比承认不知道更危险。
+//!
+//! ## 冲突检测覆盖到哪里，没覆盖到哪里
+//!
+//! [`open`] 取的基线是**调用那一刻**对象层记录的版本，所以它能拦住的是"提议与提交
+//! 之间有人改过"。它拦不住"Agent 在这一轮早些时候读了这篇笔记、之后用户改了、
+//! Agent 再写"——那需要知道 Agent 当时读到的是哪一版，而读取记录属于 evidence 层。
+//!
+//! 这条限制写在这里而不是留一个 TODO：把它说清楚，比让人以为这层已经防住了要好。
+
+use rusqlite::{params, Connection, OptionalExtension};
+
+use super::changeset::{self, DryRunReport, NewChangeSet, NewOp, Refusal};
+use super::object_store::{self, ObjectResult};
+use super::types::{ChangeOpKind, ObjectKind, SourceRef};
+use crate::tools::capability;
+use crate::tools::internal_tools::helpers::{resolve_path_multi_vault, snapshot_path_key};
+
+/// 一次 Agent 写调用的上下文 / who is writing, where, and under which run.
+#[derive(Debug, Clone, Default)]
+pub struct WriteContext {
+    pub actor: String,
+    pub session_id: Option<String>,
+    pub run_id: Option<String>,
+    /// 主 vault：相对路径的解析基准。
+    pub primary_vault: String,
+    /// 所有 vault 根目录。既是 scope，也是多库解析的候选集。
+    pub vaults: Vec<String>,
+}
+
+/// 拦截的结果 / what the guard decided.
+#[derive(Debug)]
+pub enum Guarded {
+    /// 不是知识写入（读、出网、索引、控制面）。照常执行。
+    Unguarded,
+    /// 拒绝执行。把 [`Refusal::message`] 回给模型，让它换个目标重试。
+    Refused {
+        changeset_id: Option<String>,
+        refusal: Refusal,
+    },
+    /// 有冲突。不执行，让用户先看一眼。
+    Conflicted {
+        changeset_id: String,
+        report: DryRunReport,
+    },
+    /// 可以执行。执行完**必须**调 [`settle`]，否则批次会停在 `approved`，
+    /// 由 `changeset::stale_changesets` 兜底查出来。
+    Ready(ReadyWrite),
+}
+
+/// 已经开好、等写盘结果的批次 / an approved change set awaiting its outcome.
+#[derive(Debug, Clone)]
+pub struct ReadyWrite {
+    pub changeset_id: String,
+    /// 这次会碰到的绝对路径，按 op 顺序。用于写盘后回读内容。
+    pub paths: Vec<String>,
+}
+
+/// 改名/移动要重绑的目标 / the rebind recorded in `changeset_ops.side_effects`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SideEffect {
+    /// 重命名/移动之后的绝对路径。
+    new_path: String,
+}
+
+// ── 参数映射 / mapping tool arguments onto operations ────────────────────────
+
+/// 一个工具调用打算做的事 / what a tool call intends, before any path resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Intent {
+    pub kind: ChangeOpKind,
+    /// 工具参数里给的路径，可能是 vault 相对路径。
+    pub raw_path: String,
+    /// 已经落定的完整新内容。`None` 表示要等写盘后回读（patch/append/改名）。
+    pub content: Option<String>,
+    /// 改名/移动的目标路径（相对或绝对，按工具的参数原样）。
+    pub dest: Option<String>,
+    pub target_kind: ObjectKind,
+}
+
+/// 把一次工具调用拆成若干意图 / decompose one tool call.
+///
+/// 参数名与 `approval::build_approval_diff_data` 保持一致——同一次调用在审批卡片上
+/// 和在 changeset 里必须指向同一个文件，两处各猜一遍就会出现"批准了 A、改了 B"。
+///
+/// 返回空 vec = 读不懂这个工具的参数。调用方据此走"未映射写入"那条路，而不是放行。
+pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
+    let get = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
+    let note = |kind: ChangeOpKind, path: Option<String>, content: Option<String>| {
+        path.filter(|p| !p.is_empty())
+            .map(|raw_path| Intent {
+                kind,
+                raw_path,
+                content,
+                dest: None,
+                target_kind: ObjectKind::Document,
+            })
+            .into_iter()
+            .collect::<Vec<_>>()
+    };
+
+    match tool_name {
+        "create_note" => note(ChangeOpKind::Create, get("path"), get("content")),
+        "edit_note" => note(ChangeOpKind::Edit, get("path"), get("content")),
+        "append_to_note" => note(ChangeOpKind::Append, get("path"), get("content")),
+        // patch/apply_edit/revert 的参数里没有最终全文，内容留到写盘后回读。
+        "patch_note" | "apply_edit" => note(ChangeOpKind::Patch, get("path"), None),
+        "revert_note" => note(ChangeOpKind::Patch, get("note_path"), None),
+        "delete_note" => note(ChangeOpKind::Delete, get("path"), None),
+        "rename_note" => match (get("old_path"), get("new_path")) {
+            (Some(old), Some(new)) if !old.is_empty() && !new.is_empty() => vec![Intent {
+                kind: ChangeOpKind::Rename,
+                raw_path: old,
+                content: None,
+                dest: Some(new),
+                target_kind: ObjectKind::Document,
+            }],
+            _ => Vec::new(),
+        },
+        "move_note" => match (get("path"), get("destination")) {
+            (Some(path), Some(dest)) if !path.is_empty() && !dest.is_empty() => vec![Intent {
+                kind: ChangeOpKind::Move,
+                raw_path: path,
+                content: None,
+                dest: Some(dest),
+                target_kind: ObjectKind::Document,
+            }],
+            _ => Vec::new(),
+        },
+        // 合并是两件事：目标被改写、源被吃掉。拆成两个 op，UI 才能把"源笔记会消失"
+        // 显示出来，而不是只看到目标变长了。
+        "merge_notes" => {
+            let mut ops = Vec::new();
+            if let Some(target) = get("target_path").filter(|p| !p.is_empty()) {
+                ops.push(Intent {
+                    kind: ChangeOpKind::Edit,
+                    raw_path: target,
+                    content: None,
+                    dest: None,
+                    target_kind: ObjectKind::Document,
+                });
+            }
+            if let Some(source) = get("source_path").filter(|p| !p.is_empty()) {
+                ops.push(Intent {
+                    kind: ChangeOpKind::Delete,
+                    raw_path: source,
+                    content: None,
+                    dest: None,
+                    target_kind: ObjectKind::Document,
+                });
+            }
+            if ops.len() == 2 {
+                ops
+            } else {
+                // 只拿到一半的合并没法预演，交给未映射分支去记账。
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+// ── 定位 / locating the real target ─────────────────────────────────────────
+
+/// 把工具参数里的路径变成索引里用的那个字符串 / the path key the index actually uses.
+///
+/// `chunks.file_path` / `files.path` 存的是同步时走文件树得到的绝对路径，而工具参数
+/// 给的通常是 vault 相对路径。两者对不上的后果不是报错，而是**静默失去基线**——
+/// `find_by_source` 查不到对象，冲突检测就永远说"没冲突"。所以这一步必须做对。
+fn path_key(ctx: &WriteContext, raw: &str) -> Option<String> {
+    let resolved = resolve_path_multi_vault(raw, &ctx.primary_vault, &ctx.vaults).ok()?;
+    Some(snapshot_path_key(&resolved))
+}
+
+/// 找到这个路径对应的对象 / the knowledge object backing this path, if any.
+///
+/// 查不到就返回 `None`：可能是还没 backfill、也可能是新建。两种都不是错误，但
+/// 都意味着没有乐观并发基线，`dry_run` 会如实地不报冲突。
+fn locate(conn: &Connection, key: &str) -> ObjectResult<(String, Option<String>)> {
+    if let Some(object) = object_store::find_by_source(conn, &SourceRef::file(key))? {
+        return Ok((key.to_string(), Some(object.id)));
+    }
+
+    // 大小写/盘符拼写不同（`d:\` vs `D:\`）会让上面的精确匹配落空。索引里存的那个
+    // 拼法才是权威，拿它再试一次，顺便把 op 的路径也统一成索引的拼法。
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT path FROM files WHERE path = ?1 COLLATE NOCASE",
+            params![key],
+            |r| r.get(0),
+        )
+        .optional()?;
+
+    if let Some(stored) = stored {
+        if stored != key {
+            if let Some(object) = object_store::find_by_source(conn, &SourceRef::file(&stored))? {
+                return Ok((stored, Some(object.id)));
+            }
+            return Ok((stored, None));
+        }
+    }
+    Ok((key.to_string(), None))
+}
+
+/// 改名/移动之后的绝对路径 / where the note will live after the move.
+///
+/// `move_note` 的 `destination` 是目录，最终文件名沿用原来的——这与
+/// `note_ops::execute_move_note` 的算法一致。两处算得不一样的话，重绑就会指向一个
+/// 不存在的路径，对象从此与它的文件失联。
+fn destination_key(ctx: &WriteContext, intent: &Intent) -> Option<String> {
+    let dest = intent.dest.as_deref()?;
+    match intent.kind {
+        ChangeOpKind::Rename => path_key_unchecked(ctx, dest),
+        ChangeOpKind::Move => {
+            let old = resolve_path_multi_vault(&intent.raw_path, &ctx.primary_vault, &ctx.vaults)
+                .ok()?;
+            let filename = old.file_name()?;
+            let dir = resolve_path_multi_vault(dest, &ctx.primary_vault, &ctx.vaults)
+                .unwrap_or_else(|_| std::path::PathBuf::from(&ctx.primary_vault).join(dest));
+            Some(snapshot_path_key(&dir.join(filename)))
+        }
+        _ => None,
+    }
+}
+
+/// 目标路径还不存在时也要能算出 key / the key for a path that is not on disk yet.
+///
+/// 改名的目标文件在写盘前当然不存在，`resolve_path_multi_vault` 对相对路径会退回
+/// 主 vault，这正是我们要的。
+fn path_key_unchecked(ctx: &WriteContext, raw: &str) -> Option<String> {
+    let resolved = resolve_path_multi_vault(raw, &ctx.primary_vault, &ctx.vaults)
+        .unwrap_or_else(|_| std::path::PathBuf::from(&ctx.primary_vault).join(raw));
+    Some(snapshot_path_key(&resolved))
+}
+
+// ── 写之前 / before the write ────────────────────────────────────────────────
+
+/// 拦下一次工具调用 / gate one tool call.
+///
+/// 审批本身已经在上游发生过了（`approval::decide` 在 orchestrator 循环里，早于工具
+/// 执行器被调用）。所以这里直接 [`changeset::record_decision`]`(true)` 记的是一件
+/// 已经发生的事实，不是本模块自己批的——审批逻辑有两份实现的那天，就是它们开始不
+/// 一致的那天。
+pub fn open(
+    conn: &Connection,
+    ctx: &WriteContext,
+    tool_name: &str,
+    args_json: &str,
+) -> ObjectResult<Guarded> {
+    if !capability::capability_of(tool_name).requires_changeset {
+        return Ok(Guarded::Unguarded);
+    }
+
+    let mut req = NewChangeSet::new(if ctx.actor.is_empty() { "agent" } else { &ctx.actor });
+    req.session_id = ctx.session_id.clone();
+    req.run_id = ctx.run_id.clone();
+    req.intent = Some(tool_name.to_string());
+    req.scopes = ctx.vaults.clone();
+    let cs = changeset::propose(conn, &req)?;
+
+    let intents = intents_of(tool_name, args_json);
+    let mut paths = Vec::new();
+
+    for intent in &intents {
+        // scope 判断交给 `resolve_path_multi_vault`：它已经是全仓库唯一的"路径在不在
+        // 库里"的答案，再写一个前缀比较就是第二份实现。
+        let Some(key) = path_key(ctx, &intent.raw_path) else {
+            changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
+            return Ok(Guarded::Refused {
+                changeset_id: Some(cs.id),
+                refusal: Refusal::OutOfScope(intent.raw_path.clone()),
+            });
+        };
+        let (key, object_id) = locate(conn, &key)?;
+
+        let mut op = NewOp::new(intent.kind, tool_name);
+        op.legacy_path = Some(key.clone());
+        op.target_object_id = object_id;
+        op.new_content = intent.content.clone();
+        op.target_kind = intent.target_kind;
+        op.side_effects = destination_key(ctx, intent)
+            .and_then(|new_path| serde_json::to_string(&SideEffect { new_path }).ok());
+
+        match changeset::add_op(conn, &cs.id, &ctx.vaults, &op)? {
+            Ok(_) => paths.push(key),
+            Err(refusal) => {
+                changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
+                return Ok(Guarded::Refused {
+                    changeset_id: Some(cs.id),
+                    refusal,
+                });
+            }
+        }
+    }
+
+    let report = changeset::dry_run(conn, &cs.id)?;
+    if report.has_conflicts {
+        return Ok(Guarded::Conflicted {
+            changeset_id: cs.id,
+            report,
+        });
+    }
+
+    changeset::record_decision(conn, &cs.id, true)?;
+    Ok(Guarded::Ready(ReadyWrite {
+        changeset_id: cs.id,
+        paths,
+    }))
+}
+
+// ── 写之后 / after the write ─────────────────────────────────────────────────
+
+/// 记账 / book the outcome of the real write.
+///
+/// `outcome` 是 `note_ops` 的返回值：`Ok(())` = 文件已经落盘，`Err(msg)` = 没落盘。
+/// 两种都必须报回来。什么都不调的话批次会停在 `approved`，靠
+/// `changeset::stale_changesets` 才能发现——那是兜底，不是正常路径。
+pub fn settle(conn: &Connection, ready: &ReadyWrite, outcome: Result<(), &str>) -> ObjectResult<()> {
+    if let Err(error) = outcome {
+        changeset::mark_failed(conn, &ready.changeset_id, error)?;
+        return Ok(());
+    }
+
+    backfill_landed_content(conn, &ready.changeset_id)?;
+    apply_rebinds(conn, &ready.changeset_id)?;
+    changeset::record_commit(conn, &ready.changeset_id)?;
+    Ok(())
+}
+
+/// 把落盘后的真实内容补进 op / read back what actually landed.
+///
+/// `patch_note` / `apply_edit` / `merge_notes` 的参数里没有最终全文，写之前也算不出
+/// 来。写之后文件里那份才是事实，所以在记账前回读一次。
+///
+/// 不回读的代价不是"少记一版"，而是**记一个假指纹**：`record_commit` 会给对象写一个
+/// 空内容的新版本，下一次写入就会撞上一个不存在的 checksum 冲突。
+fn backfill_landed_content(conn: &Connection, changeset_id: &str) -> ObjectResult<()> {
+    for op in changeset::list_ops(conn, changeset_id)? {
+        if op.new_content.is_some() {
+            continue;
+        }
+        // 删除与改名不需要内容：一个变墓碑，一个只换 source_id。
+        if matches!(
+            op.op_kind,
+            ChangeOpKind::Delete | ChangeOpKind::Rename | ChangeOpKind::Move
+        ) {
+            continue;
+        }
+        let Some(path) = &op.legacy_path else { continue };
+        let Ok(body) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        conn.execute(
+            "UPDATE changeset_ops SET new_content = ?2 WHERE id = ?1",
+            params![op.id, body],
+        )?;
+    }
+    Ok(())
+}
+
+/// 改名后把对象重新绑到新路径 / repoint moved objects at their new file.
+///
+/// 对象 ID 不变，只有 `source_id` 跟着走。这正是对象身份不能等于 `file_path` 的
+/// 理由：改一次名如果换掉身份，evidence、relation、changeset 全指向空气。
+fn apply_rebinds(conn: &Connection, changeset_id: &str) -> ObjectResult<()> {
+    for op in changeset::list_ops(conn, changeset_id)? {
+        if !matches!(op.op_kind, ChangeOpKind::Rename | ChangeOpKind::Move) {
+            continue;
+        }
+        let Some(object_id) = &op.target_object_id else {
+            continue;
+        };
+        let Some(raw) = &op.side_effects else { continue };
+        let Ok(effect) = serde_json::from_str::<SideEffect>(raw) else {
+            continue;
+        };
+        object_store::rebind_source(conn, object_id, &SourceRef::file(&effect.new_path))?;
+    }
+    Ok(())
+}
+
+
+
+

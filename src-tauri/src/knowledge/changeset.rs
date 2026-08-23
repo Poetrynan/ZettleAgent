@@ -77,6 +77,11 @@ pub struct NewOp {
     pub tool_name: String,
     /// 操作针对的对象类型，用于越权检查。
     pub target_kind: ObjectKind,
+    /// 除了改内容之外还会发生什么（改名的新路径、合并的目标）。
+    ///
+    /// 落在库里而不是只存在调用方的内存里：一次改名如果写盘成功、进程随后被杀，
+    /// 重绑信息还得能从 `changeset_ops` 里捞出来，否则对象就永久指着旧路径。
+    pub side_effects: Option<String>,
 }
 
 impl NewOp {
@@ -92,6 +97,7 @@ impl NewOp {
             evidence_ids: Vec::new(),
             tool_name: tool_name.into(),
             target_kind: ObjectKind::Document,
+            side_effects: None,
         }
     }
 
@@ -219,7 +225,7 @@ pub fn add_op(
             (id, changeset_id, seq, target_object_id, legacy_path, legacy_chunk_id, op_kind,
              old_version, expected_checksum, new_content, patch, reason, evidence_ids,
              affected_objects, side_effects)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '[]', NULL)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, '[]', ?14)",
         params![
             id,
             changeset_id,
@@ -234,6 +240,7 @@ pub fn add_op(
             op.patch,
             op.reason,
             serde_json::to_string(&op.evidence_ids).unwrap_or_else(|_| "[]".into()),
+            op.side_effects,
         ],
     )?;
 
@@ -589,20 +596,36 @@ pub fn record_commit(conn: &Connection, changeset_id: &str) -> ObjectResult<usiz
             let Some(object_id) = &op.target_object_id else {
                 continue;
             };
-            let content = op.new_content.as_deref().unwrap_or("");
-            object_store::update_object_patch(
-                conn,
-                object_id,
-                object_store::ObjectPatch {
-                    content: Some(content.to_string()),
-                    expected_version: op.old_version,
-                    changeset_id: Some(changeset_id.to_string()),
-                    actor: cs.actor.clone(),
-                    run_id: cs.run_id.clone(),
-                    session_id: cs.session_id.clone(),
-                    ..Default::default()
-                },
-            )?;
+            match op.op_kind {
+                // 文件已经不在了。写一条空内容的新版本等于宣称"这篇笔记现在是空的"，
+                // 而事实是它被删了——墓碑才是那个事实。
+                ChangeOpKind::Delete => {
+                    object_store::tombstone_object(conn, object_id)?;
+                }
+                // 改名/移动不改内容，不该占一个版本号。`source_id` 的重绑由调用方
+                // 在写盘成功后做（它才知道新路径），见 `write_guard::settle`。
+                ChangeOpKind::Rename | ChangeOpKind::Move => continue,
+                _ => {
+                    // 没有落定内容就没有可信的校验和。跳过比记一个假指纹强：假指纹
+                    // 会让下一次写入报出一个不存在的 checksum 冲突。
+                    let Some(content) = op.new_content.as_deref() else {
+                        continue;
+                    };
+                    object_store::update_object_patch(
+                        conn,
+                        object_id,
+                        object_store::ObjectPatch {
+                            content: Some(content.to_string()),
+                            expected_version: op.old_version,
+                            changeset_id: Some(changeset_id.to_string()),
+                            actor: cs.actor.clone(),
+                            run_id: cs.run_id.clone(),
+                            session_id: cs.session_id.clone(),
+                            ..Default::default()
+                        },
+                    )?;
+                }
+            }
             versioned += 1;
         }
         Ok(())

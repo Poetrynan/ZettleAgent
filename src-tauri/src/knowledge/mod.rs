@@ -23,6 +23,7 @@
 //! - [`backfill`]：`files` → `document` 对象的可恢复批处理与真实进度统计。
 //! - [`retrieval`]：在 `db::search` 之上加 provenance 与 scope 的统一召回。
 //! - [`changeset`]：Agent 写入的提议、预演、冲突检测与提交记账。
+//! - [`write_guard`]：把"写必须走 ChangeSet"从约定变成工具调用点上的代码。
 
 pub mod backfill;
 pub mod changeset;
@@ -32,6 +33,7 @@ pub mod migration;
 pub mod object_store;
 pub mod retrieval;
 pub mod types;
+pub mod write_guard;
 
 use rusqlite::Connection;
 
