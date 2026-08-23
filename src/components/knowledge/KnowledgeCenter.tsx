@@ -5,7 +5,8 @@ import { useApp } from '../../contexts/AppContext';
 import { KnowledgeInbox } from './KnowledgeInbox';
 import { AgentActivity } from './AgentActivity';
 import { MemoryCenter } from './MemoryCenter';
-import { ChangesTab, HealthTab, TasksTab } from '../chat/KnowledgePanel';
+import { ChangeReview } from './ChangeReview';
+import { HealthTab, TasksTab } from '../chat/KnowledgePanel';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import '../../styles/knowledge-center.css';
@@ -49,12 +50,24 @@ const PAGES: { key: KnowledgePage; labelKey: TranslationKey; hintKey: Translatio
 export { useInboxCounts } from './useInboxCounts';
 
 export function KnowledgeCenter() {
-  const { state, toggleChat } = useApp();
+  const { state, toggleChat, setCurrentFile, setView } = useApp();
   const [page, setPage] = useState<KnowledgePage>('inbox');
   const { counts, refresh } = useInboxCounts();
   const isZh = state.lang === 'zh';
   const vaultPath = state.vaultPath ?? null;
   const current = PAGES.find(p => p.key === page) ?? PAGES[0];
+
+  /**
+   * 打开被改动的那个文件 / jump to the file a change touched.
+   *
+   * 只到文件一级。编辑器现在没有"跳到某一行"的入口，硬做一个会得到一个假的定位——
+   * 打开正确的文件、停在顶部，比声称跳到了某处更诚实。
+   */
+  const openFile = (path: string) => {
+    setCurrentFile(path);
+    setView('note');
+  };
+
 
   const badge = (key: KnowledgePage): number => {
     if (!counts) return 0;
@@ -106,12 +119,13 @@ export function KnowledgeCenter() {
               onOpenChat={state.isChatOpen ? undefined : toggleChat}
             />
           )}
-          {/* 记忆有了完整页面（全生命周期 + 改写 + 来历）；变更/任务/健康这三块仍是
-              Chat 侧栏那同一份实现，不是复制品，后续批次会一起升级。 */}
+          {/* 记忆与变更都有了完整页面（变更：一个 diff 渲染器、一套状态词、一条时间线、
+              可用时才出现的撤销）；任务/健康这两块仍是 Chat 侧栏那同一份实现，不是复制
+              品，后续批次会一起升级。 */}
           {page === 'memory' && (
             <MemoryCenter vaultPath={vaultPath} onChanged={refresh} />
           )}
-          {page === 'changes' && <ChangesTab isZh={isZh} />}
+          {page === 'changes' && <ChangeReview onOpenSource={openFile} />}
           {page === 'tasks' && <TasksTab isZh={isZh} />}
           {page === 'health' && <HealthTab isZh={isZh} />}
           {page === 'activity' && <AgentActivity />}

@@ -344,6 +344,8 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_memory_recall,
             commands::knowledge_sync_memory_file,
             commands::knowledge_pending_changesets,
+            commands::knowledge_changeset_history,
+            commands::knowledge_changeset_detail,
             commands::knowledge_preview_changeset,
             commands::knowledge_decide_changeset,
             commands::knowledge_commitment_inbox,

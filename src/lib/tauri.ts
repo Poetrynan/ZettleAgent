@@ -2412,6 +2412,40 @@ export async function getPendingChangeSets(limit?: number): Promise<PendingChang
   return invoke<PendingChangeSet[]>('knowledge_pending_changesets', { limit });
 }
 
+/** 已经落地的批次：committed / rejected / rolled_back / failed。 */
+export async function getChangeSetHistory(limit?: number): Promise<PendingChangeSet[]> {
+  return invoke<PendingChangeSet[]>('knowledge_changeset_history', { limit });
+}
+
+export interface ChangeOpDetail extends ChangeOpPreview {
+  /** 改名/移动之后的路径。 */
+  newPath: string | null;
+  /**
+   * `before` 是哪来的：`recorded_version`（提交时记下的上一版）、`current_index`
+   * （索引里的当前内容）、`none`（两处都没有）。文案由这个代码查，不在前端另猜一套。
+   */
+  beforeSource: 'recorded_version' | 'current_index' | 'none';
+}
+
+export interface ChangeSetDetail {
+  changeset: ChangeSet;
+  ops: ChangeOpDetail[];
+  /** journal 里属于这一轮、还没撤销的写入条数。0 = 撤销按钮按下去不会有任何效果。 */
+  undoableEntries: number;
+  /** journal 里属于这一轮的写入总数。0 = 这一轮压根没有可回滚的记录。 */
+  journalEntries: number;
+}
+
+/**
+ * 读一个批次的明细。
+ *
+ * 与 {@link previewChangeSet} 的区别是**它不改状态**：预演会把批次推到
+ * `previewed`/`conflicted`，所以那个只能用在还没落地的批次上。回看历史用这个。
+ */
+export async function getChangeSetDetail(changesetId: string): Promise<ChangeSetDetail | null> {
+  return invoke<ChangeSetDetail | null>('knowledge_changeset_detail', { changesetId });
+}
+
 /** 预演一个批次。只读，但会把状态推到 `previewed` 或 `conflicted`。 */
 export async function previewChangeSet(changesetId: string): Promise<ChangeSetDryRun> {
   return invoke<ChangeSetDryRun>('knowledge_preview_changeset', { changesetId });

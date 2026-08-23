@@ -490,6 +490,89 @@ pub async fn knowledge_decide_changeset(
     Ok(changeset::record_decision(&conn, &changeset_id, approved)?)
 }
 
+/// 已经落地的批次 / change sets that already reached a terminal state.
+///
+/// 与 [`knowledge_pending_changesets`] 分开是因为两组的用途不同：待处理的要“做决定”，
+/// 已落地的要“回看和撤销”。同一个列表里混着两种诉求，用户就得先分辨哪一行还能操作。
+#[tauri::command]
+pub async fn knowledge_changeset_history(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<PendingChangeSet>, ZettelError> {
+    let conn = state.db.lock()?;
+    let limit = limit.unwrap_or(50).clamp(1, 200) as i64;
+
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.actor, c.run_id, c.intent, c.state, c.created_at_ms, c.updated_at_ms,
+                c.commit_error, (SELECT COUNT(*) FROM changeset_ops o WHERE o.changeset_id = c.id)
+         FROM changesets c
+         WHERE c.state IN ('committed', 'rejected', 'rolled_back', 'failed')
+         ORDER BY c.updated_at_ms DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map([limit], |r| {
+            Ok(PendingChangeSet {
+                id: r.get(0)?,
+                actor: r.get(1)?,
+                run_id: r.get(2)?,
+                intent: r.get(3)?,
+                state: r.get(4)?,
+                created_at_ms: r.get(5)?,
+                updated_at_ms: r.get(6)?,
+                commit_error: r.get(7)?,
+                op_count: r.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// 一个批次的明细，以及它还能不能撤销 / one change set, and whether it can still be undone.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeSetDetailView {
+    #[serde(flatten)]
+    pub detail: changeset::ChangeSetDetail,
+    /// 这一轮在 journal 里还剩几条没撤销的写入。
+    ///
+    /// 撤销走的是既有的 `undo_agent_run`（按轮、按 journal 逐条回滚），不是本层另写一
+    /// 套。所以能不能撤销由 journal 说，而不是由批次状态推测：状态是 `committed` 但
+    /// journal 里一条都没有（比如那一轮没有 run_id）时，界面不该给出一个按下去什么也
+    /// 不做的撤销按钮。
+    pub undoable_entries: i64,
+    /// journal 里属于这一轮的写入总数。0 = 这一轮没有可回滚的记录。
+    pub journal_entries: i64,
+}
+
+/// 读一个批次的明细 / load one change set without changing its state.
+#[tauri::command]
+pub async fn knowledge_changeset_detail(
+    state: State<'_, AppState>,
+    changeset_id: String,
+) -> Result<Option<ChangeSetDetailView>, ZettelError> {
+    let conn = state.db.lock()?;
+    let Some(detail) = changeset::detail(&conn, &changeset_id)? else {
+        return Ok(None);
+    };
+
+    let (journal_entries, undoable_entries) = match detail.changeset.run_id.as_deref() {
+        Some(run_id) if !run_id.is_empty() => conn.query_row(
+            "SELECT COUNT(*), SUM(CASE WHEN undone = 0 THEN 1 ELSE 0 END)
+             FROM agent_run_journal WHERE run_id = ?1",
+            rusqlite::params![run_id],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+        )?,
+        _ => (0, 0),
+    };
+
+    Ok(Some(ChangeSetDetailView {
+        detail,
+        undoable_entries,
+        journal_entries,
+    }))
+}
+
 // ── 承诺 / commitments ──────────────────────────────────────────────────────
 //
 // 这组命令是 Task/Commitment View 的后端。全部走 `knowledge::commitments`，所以

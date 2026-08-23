@@ -4,7 +4,6 @@ import '@testing-library/jest-dom';
 
 import { KnowledgePanel } from '../KnowledgePanel';
 import {
-  ChangeSetDryRun,
   ContextPackageSummary,
   KnowledgeIndexHealth,
   MemoryItem,
@@ -12,11 +11,11 @@ import {
   TaskCommitment,
   confirmMemory,
   decideCommitment,
+  getChangeSetDetail,
   getCommitmentInbox,
   getKnowledgeIndexHealth,
   getMemoryInbox,
   getPendingChangeSets,
-  previewChangeSet,
   runKnowledgeBackfill,
   syncMemoryFile,
 } from '../../../lib/tauri';
@@ -28,6 +27,8 @@ vi.mock('../../../lib/tauri', () => ({
   decideCommitment: vi.fn(),
   forgetMemory: vi.fn(),
   getCommitmentInbox: vi.fn(),
+  getChangeSetDetail: vi.fn().mockResolvedValue(null),
+  getChangeSetHistory: vi.fn().mockResolvedValue([]),
   getEvidenceByIds: vi.fn().mockResolvedValue([]),
   getKnowledgeAuditTrail: vi.fn().mockResolvedValue([]),
   getKnowledgeIndexHealth: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../../lib/tauri', () => ({
   runKnowledgeBackfill: vi.fn(),
   scanCommitments: vi.fn(),
   syncMemoryFile: vi.fn(),
+  undoAgentRun: vi.fn(),
 }));
 
 // i18n 不 mock：Context Inspector 的全部文案都来自字典，mock 掉等于把要验的东西
@@ -331,115 +333,54 @@ function changeSet(over: Partial<PendingChangeSet> = {}): PendingChangeSet {
   };
 }
 
-function dryRun(over: Partial<ChangeSetDryRun> = {}): ChangeSetDryRun {
-  return {
-    changesetId: 'cs-1',
-    hasConflicts: false,
-    touchedPaths: ['notes/caching.md'],
-    ops: [
-      {
-        opId: 'op-1',
-        seq: 1,
-        opKind: 'edit',
-        targetObjectId: 'obj-1',
-        path: 'notes/caching.md',
-        before: 'old body',
-        after: 'new body',
-        reason: 'merge duplicate section',
-        evidenceIds: ['ev-1'],
-        affectedObjects: [],
-        conflict: null,
-        conflictMessage: null,
-      },
-    ],
-    ...over,
-  } as ChangeSetDryRun;
-}
-
+/**
+ * 侧栏的变更页 / the sidebar's Changes tab.
+ *
+ * 这里曾经是第二套实现，有自己的 diff（before/after 两坨原文）和自己的状态显示（直接
+ * 印后端串）。现在它就是知识中心那一份 `ChangeReview`，所以这一组只验"侧栏没有回到老
+ * 路"：状态说人话、展开走的是同一个明细接口。diff 本身的行为在
+ * `knowledge/__tests__/ChangeReview.test.tsx` 里验。
+ */
 describe('Change Preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     quietBackend();
   });
 
-  it('runs the dry run on expand and shows both sides of the edit', async () => {
+  it('names the state in plain language instead of printing the backend string', async () => {
+    vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet({ state: 'awaiting_approval' })]);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    openTab(/Changes/);
+
+    expect(await screen.findByText('Waiting on you')).toBeInTheDocument();
+    expect(screen.queryByText('awaiting_approval')).toBeNull();
+  });
+
+  it('loads the diff from the shared detail command, not a second dry-run path', async () => {
     vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet()]);
-    vi.mocked(previewChangeSet).mockResolvedValue(dryRun());
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Changes/);
 
-    fireEvent.click(await screen.findByText('tidy up the caching note'));
+    fireEvent.click(await screen.findByText('Review diff'));
 
-    await waitFor(() => expect(previewChangeSet).toHaveBeenCalledWith('cs-1'));
-    expect(await screen.findByText('old body')).toBeInTheDocument();
-    expect(screen.getByText('new body')).toBeInTheDocument();
-    expect(screen.getByText('merge duplicate section')).toBeInTheDocument();
-    expect(screen.getByText('ev-1')).toBeInTheDocument();
+    await waitFor(() => expect(getChangeSetDetail).toHaveBeenCalledWith('cs-1'));
   });
 
-  /** 有冲突就不能签。这份 diff 是照旧版本算的，批准等于盲签。 */
-  it('refuses to offer approval while a conflict stands', async () => {
-    vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet({ state: 'conflicted' })]);
-    vi.mocked(previewChangeSet).mockResolvedValue(
-      dryRun({
-        hasConflicts: true,
-        ops: [
-          {
-            ...dryRun().ops[0],
-            conflict: { kind: 'version', expected: 3, actual: 5 },
-          },
-        ],
-      }),
-    );
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Changes/);
-
-    fireEvent.click(await screen.findByText('tidy up the caching note'));
-
-    expect(await screen.findByText(/Conflict/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled();
-  });
-
-  it('shows the commit error instead of pretending the batch is still fine', async () => {
+  it('says a write failed in a sentence, keeping the raw error out of the headline', async () => {
     vi.mocked(getPendingChangeSets).mockResolvedValue([
       changeSet({ state: 'failed', commitError: 'disk full' }),
     ]);
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Changes/);
 
-    expect(await screen.findByText('disk full')).toBeInTheDocument();
-  });
-
-  /**
-   * 冲突要说人话 / a conflict has to be readable.
-   *
-   * 直接渲染 `kind` 等于把内部枚举名甩给用户：`stale_read` 说不出"你在 Agent 读过之后
-   * 改了这篇笔记，所以它没写"。措辞由后端给一份，前端只负责显示。
-   */
-  it('reads out the backend explanation rather than the conflict enum name', async () => {
-    vi.mocked(getPendingChangeSets).mockResolvedValue([changeSet({ state: 'conflicted' })]);
-    vi.mocked(previewChangeSet).mockResolvedValue(
-      dryRun({
-        hasConflicts: true,
-        ops: [
-          {
-            ...dryRun().ops[0],
-            conflict: { kind: 'stale_read', readVersion: 3, actual: 4, readAtMs: 1_700_000_000_000 },
-            conflictMessage: '这篇笔记在 Agent 读到 v3 之后被改到了 v4。你的编辑还在。',
-          },
-        ],
-      }),
-    );
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Changes/);
-
-    fireEvent.click(await screen.findByText('tidy up the caching note'));
-
-    expect(await screen.findByText(/读到 v3 之后被改到了 v4/)).toBeInTheDocument();
-    expect(screen.queryByText(/stale_read/)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText('The write failed. Your content was not overwritten.'),
+    ).toBeInTheDocument();
+    // 原始错误还在 DOM 里给排查用，但不是主文案。
+    expect(screen.getByText('disk full')).toHaveClass('kc-sr-only');
   });
 });
+
 
 function commitment(over: Partial<TaskCommitment> = {}): TaskCommitment {
   return {

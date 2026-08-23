@@ -886,5 +886,166 @@
   outline-offset: 1px;
 }
 
+/* ── 变更审阅 / Change Review ───────────────────────────────────────────── */
+
+.kc-change-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kc-change-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* 时间线：当前那一步靠字重与实心记号区分，不只靠颜色。 */
+.kc-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kc-timeline-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.kc-timeline-mark {
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.kc-timeline-done {
+  color: var(--text-secondary);
+}
+
+.kc-timeline-done .kc-timeline-mark {
+  background: currentColor;
+}
+
+.kc-timeline-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.kc-timeline-current .kc-timeline-mark {
+  background: currentColor;
+  box-shadow: 0 0 0 3px var(--accent-secondary-bg);
+}
+
+.kc-change-op {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.kc-change-op-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kc-change-op-path {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.kc-change-op-reason {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* diff：符号 + 行号 + 底色三重编码，灰度打印下也读得出增删。 */
+.kc-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kc-diff-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.kc-diff-chunk {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.kc-diff-skip {
+  padding: 2px var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.kc-diff-line {
+  display: grid;
+  grid-template-columns: 3.5em 1.5em 1fr;
+  gap: var(--space-1);
+  padding: 1px var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kc-diff-gutter,
+.kc-diff-sign {
+  color: var(--text-tertiary);
+  text-align: right;
+  user-select: none;
+}
+
+.kc-diff-added {
+  background: var(--success-bg);
+  border-left: 3px solid var(--success);
+}
+
+.kc-diff-removed {
+  background: var(--danger-bg);
+  border-left: 3px solid var(--danger);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-tertiary);
+}
+
+.kc-diff-unchanged {
+  border-left: 3px solid transparent;
+  color: var(--text-secondary);
+}
+
+.kc-diff-move {
+  gap: var(--space-1);
+}
+
+
+
 
 

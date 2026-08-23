@@ -756,6 +756,110 @@ pub fn mark_failed(conn: &Connection, changeset_id: &str, error: &str) -> Object
 
 // ── 查询 / reads ────────────────────────────────────────────────────────────
 
+/// 一个批次的完整明细 / one change set, read without moving it.
+///
+/// 与 [`dry_run`] 的区别是**它不改状态**。`dry_run` 会把批次推到 `previewed` /
+/// `conflicted`，所以它只能看还没落地的批次；已经 `committed` 的批次一调用就报非法迁
+/// 移。审阅界面要能回看历史，所以这一份是纯读的。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeSetDetail {
+    pub changeset: ChangeSet,
+    pub ops: Vec<OpDetail>,
+}
+
+/// 明细里的一步 / one operation, with both sides of the change.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpDetail {
+    pub op_id: String,
+    pub seq: i64,
+    pub op_kind: ChangeOpKind,
+    pub path: Option<String>,
+    /// 改名/移动之后的路径。
+    pub new_path: Option<String>,
+    pub target_object_id: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    /// `before` 是哪来的：`recorded_version` = 提交时记下的上一版，`current_index` =
+    /// 索引里的当前内容，`none` = 两处都没有（新建，或者索引还没覆盖到）。
+    ///
+    /// 给出来是因为这两件事对用户的意义不同：前者是"改动发生前它长这样"，后者只是
+    /// "它现在长这样"。UI 拿代码去查文案，不自己猜。
+    pub before_source: &'static str,
+    pub reason: Option<String>,
+    pub evidence_ids: Vec<String>,
+    pub affected_objects: Vec<String>,
+    /// 只对还没落地的批次算。已落地的批次谈"冲突"没有意义——它已经写完了。
+    pub conflict: Option<Conflict>,
+    pub conflict_message: Option<String>,
+}
+
+/// 读一个批次 / load one change set and its operations.
+pub fn detail(conn: &Connection, changeset_id: &str) -> ObjectResult<Option<ChangeSetDetail>> {
+    let Some(changeset) = get(conn, changeset_id)? else {
+        return Ok(None);
+    };
+    let settled = matches!(
+        changeset.state,
+        ChangeSetState::Committed
+            | ChangeSetState::RolledBack
+            | ChangeSetState::Rejected
+            | ChangeSetState::Failed
+    );
+
+    let mut ops = Vec::new();
+    for op in list_ops(conn, changeset_id)? {
+        // 已落地的批次要给"改之前那一版"，而不是"现在的内容"——现在的内容就是改动
+        // 之后的结果，拿它当 before 会画出一个空 diff。
+        let recorded = match (&op.target_object_id, op.old_version) {
+            (Some(id), Some(v)) => object_store::get_object_version(conn, id, v)?
+                .and_then(|version| version.content),
+            _ => None,
+        };
+        let (before, before_source) = match recorded {
+            Some(content) => (Some(content), "recorded_version"),
+            None => match current_content(conn, &op)? {
+                Some(content) => (Some(content), "current_index"),
+                None => (None, "none"),
+            },
+        };
+
+        let conflict = if settled {
+            None
+        } else {
+            detect_conflict(conn, &op)?
+        };
+
+        ops.push(OpDetail {
+            op_id: op.id,
+            seq: op.seq,
+            op_kind: op.op_kind,
+            new_path: op
+                .side_effects
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|v| {
+                    v.get("new_path")
+                        .and_then(|p| p.as_str())
+                        .map(|s| s.to_string())
+                }),
+            path: op.legacy_path,
+            target_object_id: op.target_object_id,
+            before,
+            before_source,
+            after: op.new_content,
+            reason: op.reason,
+            evidence_ids: op.evidence_ids,
+            affected_objects: op.affected_objects,
+            conflict_message: conflict.as_ref().map(|c| c.message()),
+            conflict,
+        });
+    }
+
+    Ok(Some(ChangeSetDetail { changeset, ops }))
+}
+
 pub fn get(conn: &Connection, id: &str) -> ObjectResult<Option<ChangeSet>> {
     conn.query_row(
         "SELECT id, actor, session_id, run_id, intent, state, risk, requires_approval,

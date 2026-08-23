@@ -5,19 +5,14 @@ import {
   KnowledgeBackfillProgress,
   KnowledgeIndexHealth,
   MemoryItem,
-  PendingChangeSet,
-  ChangeSetDryRun,
   TaskCommitment,
   confirmMemory,
-  decideChangeSet,
   decideCommitment,
   forgetMemory,
   getCommitmentInbox,
   getKnowledgeAuditTrail,
   getKnowledgeIndexHealth,
   getMemoryInbox,
-  getPendingChangeSets,
-  previewChangeSet,
   rejectMemory,
   runKnowledgeBackfill,
   scanCommitments,
@@ -25,6 +20,7 @@ import {
 } from '../../lib/tauri';
 import { getLang } from '../../lib/i18n';
 import { ContextInspector } from '../knowledge/ContextInspector';
+import { ChangeReview } from '../knowledge/ChangeReview';
 
 /**
  * 知识层面板 / the knowledge layer's in-chat surface.
@@ -396,124 +392,19 @@ export function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: strin
  * 展开一个批次会真的跑一次预演（只读），所以显示的 before/after 是当下的现状算出来
  * 的，不是提议那一刻的缓存。有冲突时批准按钮就不该给——那份 diff 是基于旧版本算的。
  */
-export function ChangesTab({ isZh }: { isZh: boolean }) {
-  const { data, error, busy, reload } = useLoader<PendingChangeSet[]>(
-    () => getPendingChangeSets(50),
-    [],
-  );
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<ChangeSetDryRun | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  const open = async (id: string) => {
-    if (openId === id) {
-      setOpenId(null);
-      setPreview(null);
-      return;
-    }
-    setOpenId(id);
-    setPreview(null);
-    setPreviewError(null);
-    try {
-      setPreview(await previewChangeSet(id));
-    } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const decide = async (id: string, approved: boolean) => {
-    await decideChangeSet(id, approved);
-    setOpenId(null);
-    setPreview(null);
-    await reload();
-  };
-
-  if (error) return <Failed error={error} onRetry={reload} label={isZh ? '重试' : 'Retry'} />;
-  if (busy && !data) return <Empty text={isZh ? '读取中…' : 'Loading…'} />;
-  if (!data || data.length === 0) {
-    return <Empty text={isZh ? '没有待决的变更批次。' : 'No pending change sets.'} />;
-  }
-
-  return (
-    <div className="knowledge-list">
-      {data.map(cs => (
-        <div className="knowledge-item" key={cs.id}>
-          <div className="knowledge-item-head" onClick={() => void open(cs.id)}>
-            <span className={`knowledge-state knowledge-state-${cs.state}`}>{cs.state}</span>
-            <span className="knowledge-item-title">{cs.intent ?? cs.actor}</span>
-            <span className="knowledge-item-score">{cs.opCount}</span>
-          </div>
-          <div className="knowledge-item-meta">
-            <span>{cs.actor}</span>
-            <span>{timeLabel(cs.updatedAtMs)}</span>
-            {cs.runId && <span className="knowledge-item-locator">{cs.runId}</span>}
-          </div>
-          {cs.commitError && (
-            <div className="knowledge-error-text">{cs.commitError}</div>
-          )}
-
-          {openId === cs.id && (
-            <div className="knowledge-preview">
-              {previewError && (
-                <div className="knowledge-error-text">{previewError}</div>
-              )}
-              {!preview && !previewError && (
-                <Empty text={isZh ? '预演中…' : 'Running dry run…'} />
-              )}
-              {preview?.ops.map(op => (
-                <div className="knowledge-op" key={op.opId}>
-                  <div className="knowledge-op-head">
-                    <span className="knowledge-item-kind">{op.opKind}</span>
-                    <span className="knowledge-item-locator">{op.path ?? '—'}</span>
-                  </div>
-                  {op.reason && <div className="knowledge-op-reason">{op.reason}</div>}
-                  {op.conflict && (
-                    <div className="knowledge-op-conflict">
-                      {isZh ? '冲突：' : 'Conflict: '}
-                      {op.conflictMessage ?? op.conflict.kind}
-                    </div>
-                  )}
-                  <div className="knowledge-diff">
-                    <pre className="knowledge-diff-before">{op.before ?? ''}</pre>
-                    <pre className="knowledge-diff-after">{op.after ?? ''}</pre>
-                  </div>
-                  {op.evidenceIds.length > 0 && (
-                    <Chips items={op.evidenceIds} tone="why" />
-                  )}
-                  {op.affectedObjects.length > 0 && (
-                    <Chips items={op.affectedObjects} tone="warning" />
-                  )}
-                </div>
-              ))}
-              <div className="knowledge-item-actions">
-                <button
-                  className="knowledge-mini-btn primary"
-                  disabled={!preview || preview.hasConflicts}
-                  title={
-                    preview?.hasConflicts
-                      ? (isZh
-                          ? '有冲突：这份改动是基于旧版本算的，先让 Agent 重新读一遍'
-                          : 'Conflicted — the diff was computed against a stale version')
-                      : undefined
-                  }
-                  onClick={() => void decide(cs.id, true)}
-                >
-                  {isZh ? '批准' : 'Approve'}
-                </button>
-                <button
-                  className="knowledge-mini-btn danger"
-                  onClick={() => void decide(cs.id, false)}
-                >
-                  {isZh ? '拒绝' : 'Reject'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+/**
+ * 侧栏的变更页 / the sidebar's Changes tab.
+ *
+ * 这里曾经是第二套实现：把后端状态串（`awaiting_approval`）直接印给用户，diff 是
+ * before/after 两坨原文并排。现在它就是知识中心那一份 `ChangeReview`——同一份改动在
+ * 侧栏和中心看到的必须是同一个 diff、同一套状态词，否则用户会以为是两件事。
+ *
+ * `isZh` 不再需要：文案走 i18n 字典，不在组件里分叉。留着参数是为了不动调用点。
+ */
+export function ChangesTab(_props: { isZh: boolean }) {
+  return <ChangeReview />;
 }
+
 
 // ── Task / Commitment View ──────────────────────────────────────────────────
 
