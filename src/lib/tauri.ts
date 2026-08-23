@@ -2111,8 +2111,8 @@ export async function getMemoryInbox(limit?: number): Promise<MemoryItem[]> {
   return invoke<MemoryItem[]>('knowledge_memory_inbox', { limit });
 }
 
-export async function confirmMemory(memoryId: string): Promise<MemoryItem> {
-  return invoke<MemoryItem>('knowledge_memory_confirm', { memoryId });
+export async function confirmMemory(memoryId: string, vaultPath?: string): Promise<MemoryItem> {
+  return invoke<MemoryItem>('knowledge_memory_confirm', { memoryId, vaultPath });
 }
 
 /** 否掉候选。归档而非删除，所以同一条错误提案不会反复回到 Inbox。 */

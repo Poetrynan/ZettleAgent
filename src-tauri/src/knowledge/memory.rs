@@ -699,6 +699,77 @@ fn kind_for_section(section: &str) -> MemoryKind {
     }
 }
 
+/// 反过来：种类决定它该落在哪个 section / where a kind belongs in the file.
+fn section_for_kind(kind: MemoryKind) -> &'static str {
+    match kind {
+        MemoryKind::Profile => "User Preferences",
+        MemoryKind::Procedural => "Workflow Habits",
+        MemoryKind::Resource => "Research Topics",
+        _ => "Important Decisions",
+    }
+}
+
+/// 把一条已生效的记忆写进 `memory.md` / project one active memory into the file.
+///
+/// `memory.md` 是永远在 prompt 里的 Core Memory。一条记忆只进 `ai_memory` 而不进这个
+/// 文件，就只能靠召回命中，不会稳定地在场——用户确认过的偏好本该稳定在场。
+///
+/// **只在确认那一刻追加一次**，不做全量重写。全量重写会把用户手工删掉的行又贴回去，
+/// 那是最让人恼火的一种"软件不听话"；而反向的手工删除由
+/// [`reconcile_from_markdown`] 负责解释。代价是文件和库对来自对话的条目可能漂移——
+/// 这是刻意的：`memory.md` 是投影，不是记忆的全集。
+///
+/// 返回是否真的写了盘（已经在文件里的不重复追加）。
+pub fn project_to_markdown(
+    conn: &Connection,
+    vault_path: &str,
+    id: &str,
+) -> ObjectResult<bool> {
+    let item = get(conn, id)?.ok_or_else(|| ObjectError::NotFound(id.to_string()))?;
+    if item.lifecycle != MemoryLifecycle::Active && item.lifecycle != MemoryLifecycle::Verified {
+        return Ok(false);
+    }
+
+    use crate::tools::internal_tools::workspace_ops::{
+        parse_structured_memory, serialize_structured_memory, StructuredMemory,
+    };
+
+    let path = memory_file_path(vault_path);
+    let mut memory: StructuredMemory = match std::fs::read_to_string(&path) {
+        Ok(raw) => parse_structured_memory(&raw),
+        Err(_) => StructuredMemory::default(),
+    };
+
+    let target = crate::db::memory_store::normalize(&item.claim);
+    let already = memory
+        .sections
+        .iter()
+        .any(|(_, items)| items.iter().any(|l| crate::db::memory_store::normalize(l) == target));
+    if already {
+        return Ok(false);
+    }
+
+    let section = item
+        .section
+        .clone()
+        .unwrap_or_else(|| section_for_kind(item.kind).to_string());
+    match memory.sections.iter_mut().find(|(name, _)| name == &section) {
+        Some((_, items)) => items.push(item.claim.clone()),
+        None => memory.sections.push((section, vec![item.claim.clone()])),
+    }
+    memory.last_updated = Some(chrono::Local::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            ObjectError::Search(format!("cannot create {}: {e}", parent.display()))
+        })?;
+    }
+    std::fs::write(&path, serialize_structured_memory(&memory))
+        .map_err(|e| ObjectError::Search(format!("cannot write {}: {e}", path.display())))?;
+    Ok(true)
+}
+
+
 /// 用户从文件里删掉的那些，忘掉 / forget what the user deleted from the file.
 fn forget_removed_from_file(
     conn: &Connection,

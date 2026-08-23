@@ -203,10 +203,10 @@ describe('Memory Inbox', () => {
   });
 
   /** 确认是唯一写 `confirmed_by` 的路径，所以它必须由用户点出来。 */
-  it('confirms only when the user asks, then re-reads the inbox', async () => {
+  it('confirms only when the user asks, and hands over the vault so Core Memory gets it', async () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
     vi.mocked(confirmMemory).mockResolvedValue(memory({ claim: 'confirmed' }));
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath="/vault" onClose={() => {}} />);
     openTab(/Memory/);
     await screen.findByText('writes weekly reviews on Friday');
 
@@ -214,9 +214,10 @@ describe('Memory Inbox', () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([]);
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    await waitFor(() => expect(confirmMemory).toHaveBeenCalledWith('mem-1'));
+    await waitFor(() => expect(confirmMemory).toHaveBeenCalledWith('mem-1', '/vault'));
     expect(await screen.findByText(/No candidate memories/)).toBeInTheDocument();
   });
+
 
   it('marks a memory that contradicts an existing one', async () => {
     vi.mocked(getMemoryInbox).mockResolvedValue([memory({ conflicts_with_id: 'mem-0' })]);

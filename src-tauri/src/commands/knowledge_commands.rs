@@ -249,14 +249,28 @@ pub async fn knowledge_memory_inbox(
 }
 
 /// 用户确认一条候选 / the user confirms a candidate.
+///
+/// 给了 `vault_path` 就顺手把它追加进 `memory.md`：那是永远在 prompt 里的 Core
+/// Memory，确认过的偏好本该稳定在场，而不是只能靠召回碰巧命中。
+///
+/// 投影失败不回滚确认——确认已经落库，报错会让用户以为白点了一下。失败只记日志，
+/// 下一次确认或 `knowledge_sync_memory_file` 会再试。
 #[tauri::command]
 pub async fn knowledge_memory_confirm(
     state: State<'_, AppState>,
     memory_id: String,
+    vault_path: Option<String>,
 ) -> Result<types::MemoryItem, ZettelError> {
     let conn = state.db.lock()?;
-    Ok(memory::confirm(&conn, &memory_id, "user")?)
+    let item = memory::confirm(&conn, &memory_id, "user")?;
+    if let Some(vault) = vault_path.as_deref() {
+        if let Err(e) = memory::project_to_markdown(&conn, vault, &memory_id) {
+            log::warn!("memory {memory_id} confirmed but not projected into memory.md: {e}");
+        }
+    }
+    Ok(item)
 }
+
 
 /// 把 `memory.md` 的手工编辑吸收回记忆层 / absorb hand edits to `memory.md`.
 ///

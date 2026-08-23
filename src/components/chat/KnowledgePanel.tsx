@@ -405,7 +405,7 @@ function MemoryTab({ isZh, vaultPath }: { isZh: boolean; vaultPath: string | nul
             <button
               className="knowledge-mini-btn primary"
               disabled={acting === item.id}
-              onClick={() => void act(item.id, confirmMemory)}
+              onClick={() => void act(item.id, id => confirmMemory(id, vaultPath ?? undefined))}
             >
               {isZh ? '确认' : 'Confirm'}
             </button>

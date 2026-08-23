@@ -2677,6 +2677,43 @@ fn reconciling_without_a_memory_file_is_a_no_op() {
     assert_eq!(report.forgotten, 0);
 }
 
+/// 确认过的记忆会进 Core Memory / a confirmed memory reaches the always-on file.
+///
+/// 只进 `ai_memory` 的话，它只能靠召回碰巧命中；`memory.md` 是每轮都在 prompt 里的
+/// 那一份。这条同时锁"追加一次、不重复"。
+#[test]
+fn confirming_a_memory_appends_it_to_the_core_memory_file() {
+    let conn = migrated_db();
+    let vault = temp_vault("memfile_proj");
+    let path = vault.to_string_lossy().to_string();
+
+    let mut p = MemoryProposal::new(MemoryKind::Profile, "解释代码时先说结论", "global");
+    p.confidence = 0.6;
+    let item = memory::propose(&conn, p).unwrap();
+
+    // 候选阶段不投影：没确认的东西不该进 prompt 里那一份。
+    assert!(!memory::project_to_markdown(&conn, &path, &item.id).unwrap());
+    assert!(!memory::memory_file_path(&path).exists());
+
+    memory::confirm(&conn, &item.id, "user").unwrap();
+    assert!(memory::project_to_markdown(&conn, &path, &item.id).unwrap());
+
+    let body = std::fs::read_to_string(memory::memory_file_path(&path)).unwrap();
+    assert!(body.contains("## User Preferences"), "画像类要落在偏好段");
+    assert!(body.contains("- 解释代码时先说结论"));
+
+    // 再投一次不重复追加。
+    assert!(!memory::project_to_markdown(&conn, &path, &item.id).unwrap());
+    let again = std::fs::read_to_string(memory::memory_file_path(&path)).unwrap();
+    assert_eq!(again.matches("解释代码时先说结论").count(), 1);
+
+    // 而且这一份写出去的文件读回来还是同一条，不会因为格式变化被当成新记忆。
+    let report = memory::reconcile_from_markdown(&conn, &path).unwrap();
+    assert_eq!(report.adopted, 0);
+    assert_eq!(report.unchanged, 1);
+    assert_eq!(report.forgotten, 0);
+}
+
 
 
 
