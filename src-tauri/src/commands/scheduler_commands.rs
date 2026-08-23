@@ -199,6 +199,94 @@ pub fn sync_vault(
     })
 }
 
+/// 每轮整理之后跑一遍承诺层 / drive the commitment layer once per scheduler tick.
+///
+/// 在这之前 `scan_notes` / `due_notifications` 只有用户点按钮才会跑——也就是说
+/// "主动提醒"实际上得靠用户主动来问，那不成立。这里把它挂到调度器已有的循环上。
+///
+/// 三个刻意的选择：
+/// - **策略关着就直接返回**：`proactive_enabled` 默认 false，闸门本身就是同意机制。
+///   新装的用户不会因为开了调度器就突然收到弹窗。
+/// - **先清逾期再挑提醒**：顺序反了，逾期任务会先被提醒一次再被标成过期。
+/// - **任何失败只记日志**：这一趟是整理循环的搭车项，它坏掉不该拖垮整理本身。
+fn run_knowledge_pass(db: &Arc<Mutex<Connection>>, app: &tauri::AppHandle) {
+    let conn = match db.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("knowledge pass skipped, db lock poisoned: {}", e);
+            return;
+        }
+    };
+
+    let nudges = knowledge_pass(&conn);
+    drop(conn);
+
+    if !nudges.is_empty() {
+        if let Err(e) = app.emit("proactive-nudge", serde_json::json!({ "items": nudges })) {
+            log::warn!("knowledge pass: emitting proactive-nudge failed: {}", e);
+        }
+    }
+}
+
+/// 承诺层这一趟的全部决策 / everything the pass decides, minus the emit.
+///
+/// 拆出来是为了能测：`AppHandle` 在单测里造不出来，但"关着的时候什么都不做"
+/// 恰恰是这套东西最需要被钉住的行为。
+fn knowledge_pass(conn: &Connection) -> Vec<crate::knowledge::types::TaskCommitment> {
+    use crate::knowledge::{commitments, types};
+
+    let policy = commitments::load_policy(conn);
+    if !policy.enabled {
+        // 没开主动提醒就一点都不做：连扫描都不做，因为扫描会往收件箱里塞东西。
+        return Vec::new();
+    }
+
+    let now = types::now_ms();
+    match commitments::expire_overdue(conn, now, 86_400_000) {
+        Ok(n) if n > 0 => log::info!("knowledge pass: {} commitment(s) expired", n),
+        Ok(_) => {}
+        Err(e) => log::warn!("knowledge pass: expiring overdue commitments failed: {}", e),
+    }
+
+    match commitments::scan_notes(conn, 200) {
+        Ok(report) if report.created > 0 => {
+            log::info!(
+                "knowledge pass: {} dated todo(s) seen, {} new commitment(s) proposed",
+                report.found,
+                report.created
+            );
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("knowledge pass: scanning notes for todos failed: {}", e),
+    }
+
+    let hour = commitments::local_hour_now();
+    match commitments::due_notifications(conn, &policy, now, hour, 5) {
+        Ok(Ok(items)) => {
+            // 先记 notified 再交出去：反过来的话事件发出去而记录失败，
+            // 最小间隔闸门就形同虚设，用户会被同一条任务反复戳。
+            for item in &items {
+                if let Err(e) = commitments::record_notified(conn, &item.id, now) {
+                    log::warn!(
+                        "knowledge pass: recording notification for {} failed: {}",
+                        item.id,
+                        e
+                    );
+                }
+            }
+            items
+        }
+        Ok(Err(reason)) => {
+            log::debug!("knowledge pass: staying silent ({:?})", reason);
+            Vec::new()
+        }
+        Err(e) => {
+            log::warn!("knowledge pass: picking due notifications failed: {}", e);
+            Vec::new()
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn start_scheduler(
     app: tauri::AppHandle,
@@ -328,6 +416,8 @@ pub async fn start_scheduler(
                     *guard = None;
                 }
             }
+
+            run_knowledge_pass(&db, &app_clone);
 
             if !background_active.load(Ordering::SeqCst) {
                 break;
@@ -498,4 +588,101 @@ pub async fn run_scheduler_now(
     end_batch(&state);
 
     Ok(s.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema::set_setting;
+
+    fn migrated_db() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        crate::knowledge::migration::run_knowledge_migrations(&conn).unwrap();
+        conn
+    }
+
+    /// 一条"今天到期"的待办 / a todo that comes due today.
+    ///
+    /// 日期取当天而不是写死：写死的日期过一天就同时逾期又不可提醒，测试会自己烂掉。
+    fn note_with_todo_due_today(conn: &Connection) {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        conn.execute(
+            "INSERT INTO files (path, hash, title) VALUES ('inbox.md', 'h1', 'Inbox')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, content) VALUES ('inbox.md', 0, ?1)",
+            rusqlite::params![format!("- [ ] send the quarterly numbers {today}")],
+        )
+        .unwrap();
+    }
+
+    fn open_the_gates(conn: &Connection) {
+        set_setting(conn, "proactive_enabled", "true").unwrap();
+        // `0-0` 表示没有免打扰时段，否则测试会在半夜的 CI 上随机变绿变红。
+        set_setting(conn, "proactive_quiet_hours", "0-0").unwrap();
+        set_setting(conn, "proactive_max_per_day", "50").unwrap();
+        set_setting(conn, "proactive_min_gap_minutes", "0").unwrap();
+    }
+
+    fn commitment_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM task_commitments", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn the_scheduler_pass_does_nothing_at_all_while_proactive_is_off() {
+        let conn = migrated_db();
+        note_with_todo_due_today(&conn);
+
+        let nudges = knowledge_pass(&conn);
+
+        assert!(nudges.is_empty(), "关着的时候不该有任何提醒");
+        assert_eq!(
+            commitment_count(&conn),
+            0,
+            "关着的时候连扫描都不该跑——扫描会往收件箱里塞东西，那也是打扰"
+        );
+    }
+
+    #[test]
+    fn the_scheduler_pass_surfaces_a_due_todo_once_the_gates_are_open() {
+        let conn = migrated_db();
+        note_with_todo_due_today(&conn);
+        open_the_gates(&conn);
+
+        let nudges = knowledge_pass(&conn);
+
+        assert_eq!(nudges.len(), 1, "开着的时候今天到期的待办应该被端出来");
+        assert!(nudges[0].title.contains("send the quarterly numbers"));
+
+        // 提醒必须被记下来，否则频率闸门永远不推进，用户会被同一条反复戳。
+        let notified: i64 = conn
+            .query_row(
+                "SELECT notify_count FROM task_commitments WHERE id = ?1",
+                rusqlite::params![nudges[0].id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(notified, 1);
+    }
+
+    #[test]
+    fn a_second_pass_in_the_same_minute_stays_quiet() {
+        let conn = migrated_db();
+        note_with_todo_due_today(&conn);
+        open_the_gates(&conn);
+        // 最小间隔改回 4 小时：第一趟提醒之后，紧接着的第二趟必须闭嘴。
+        set_setting(&conn, "proactive_min_gap_minutes", "240").unwrap();
+
+        assert_eq!(knowledge_pass(&conn).len(), 1);
+        assert!(
+            knowledge_pass(&conn).is_empty(),
+            "同一分钟内的第二趟不该再提醒同一件事"
+        );
+    }
 }

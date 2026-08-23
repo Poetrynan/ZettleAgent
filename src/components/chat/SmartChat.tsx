@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom } from '../../lib/tauri';
-import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary } from '../../lib/tauri';
+import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary, TaskCommitment } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
 import { IconSend, IconGlobe } from '../icons';
 import { t } from '../../lib/i18n';
@@ -454,6 +454,28 @@ export function SmartChat() {
 
     return () => { unlisten.then((fn) => fn()); };
   }, []);
+
+  // 主动提醒 / proactive nudges from the scheduler's knowledge pass.
+  //
+  // 后端已经过了四道闸门（总开关 / 免打扰 / 每日上限 / 最小间隔）并记下了
+  // `last_notified_at_ms`，所以这里不再做二次判断——重复判断只会让"为什么没提醒"
+  // 变得无法解释。事件到了就说一次，说完就算数。
+  //
+  // 刻意不自动弹开知识面板：用户正在打字的时候抢走版面是另一种打扰。承诺本身留在
+  // 收件箱里（Tasks 页），错过这条 toast 不会丢东西。
+  useEffect(() => {
+    const unlisten = listen<{ items: TaskCommitment[] }>('proactive-nudge', (event) => {
+      const items = event.payload?.items ?? [];
+      if (items.length === 0) return;
+      const first = items[0].title;
+      const message = items.length === 1
+        ? first
+        : `${first} (+${items.length - 1})`;
+      showToast(message, 'info');
+    });
+
+    return () => { unlisten.then((fn) => fn()); };
+  }, [showToast]);
 
   // Listen for Agent events (tool_call_detected, tool_start, tool_result, done)
   useEffect(() => {

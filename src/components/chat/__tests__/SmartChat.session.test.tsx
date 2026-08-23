@@ -114,13 +114,17 @@ const appState = {
   llmConfig: { apiUrl: 'https://x/v1', apiKey: '', model: 'm', providerId: 'custom' },
 };
 
+// `showToast` 在生产里是 `useCallback(..., [])`，身份稳定；这里也给一个稳定的
+// spy，否则每次 render 都换一个函数，依赖它的 effect 会反复重注册。
+const showToast = vi.fn();
+
 vi.mock('../../../contexts/AppContext', () => ({
   useApp: () => ({
     state: appState,
     toggleChat: vi.fn(),
     clearPendingAttachments: vi.fn(),
     clearPendingChatPrompt: vi.fn(),
-    showToast: vi.fn(),
+    showToast,
   }),
 }));
 
@@ -293,6 +297,63 @@ describe('SmartChat agent-event generations', () => {
     });
 
     expect(container.querySelector('[data-testid="ctx-query"]')!.textContent).toBe('unstamped but real');
+  });
+});
+
+/**
+ * 调度器发出的主动提醒 / the nudges the scheduler's knowledge pass emits.
+ *
+ * 后端已经过完四道闸门才发这个事件，所以前端的责任只有一条：**收到了就说出来**。
+ * 把它悄悄丢掉，用户开了主动提醒却什么都听不到，那比不做更糟。
+ */
+describe('SmartChat proactive nudges', () => {
+  beforeEach(() => {
+    handlers.clear();
+    vi.clearAllMocks();
+    let tick = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => (tick += 1_000));
+  });
+
+  function commitment(id: string, title: string) {
+    return { id, title, status: 'active', commitment_type: 'deadline' };
+  }
+
+  it('surfaces a nudge that reached the frontend', async () => {
+    render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('proactive-nudge')?.length).toBe(1));
+
+    await act(async () => {
+      emitEvent('proactive-nudge', { items: [commitment('c1', 'send the quarterly numbers')] });
+    });
+
+    expect(showToast).toHaveBeenCalledWith('send the quarterly numbers', 'info');
+  });
+
+  /** 多条只说一条 + 计数：一次弹五个 toast 是骚扰，不是提醒。 */
+  it('names one commitment and counts the rest', async () => {
+    render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('proactive-nudge')?.length).toBe(1));
+
+    await act(async () => {
+      emitEvent('proactive-nudge', {
+        items: [commitment('c1', 'first'), commitment('c2', 'second'), commitment('c3', 'third')],
+      });
+    });
+
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith('first (+2)', 'info');
+  });
+
+  /** 空列表不该冒出一个空 toast——后端静默的时候前端也该静默。 */
+  it('says nothing when the pass surfaced nothing', async () => {
+    render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('proactive-nudge')?.length).toBe(1));
+
+    await act(async () => {
+      emitEvent('proactive-nudge', { items: [] });
+    });
+
+    expect(showToast).not.toHaveBeenCalled();
   });
 });
 
