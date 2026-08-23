@@ -1,6 +1,6 @@
 //! 记忆生命周期 / the memory lifecycle.
 //!
-//! 旧的替代语义是 `DELETE old + INSERT new`（`memory_store::delete_matching`）。
+//! 旧的替代语义是 `DELETE old + INSERT new`（那个按子串匹配删行的函数已删掉）。
 //! 那让"用户以前说过什么"、"为什么改的"、"两条说法冲突"全部消失。这里把替代改成
 //! 一条链：
 //!
@@ -245,7 +245,7 @@ pub fn reject(conn: &Connection, id: &str) -> ObjectResult<MemoryItem> {
 
 /// 永久遗忘 / the explicit permanent-forget path.
 ///
-/// 这是 `delete_matching` 唯一还该扮演的角色：用户说"忘掉这件事"。
+/// 这是唯一还该真删行的场合：用户说"忘掉这件事"。
 pub fn forget(conn: &Connection, id: &str) -> ObjectResult<MemoryItem> {
     set_lifecycle(conn, id, MemoryLifecycle::Forgotten)?;
     unproject_from_legacy(conn, id)?;
@@ -379,7 +379,7 @@ fn project_to_legacy(conn: &Connection, id: &str) -> ObjectResult<()> {
 /// 撤下投影 / remove the legacy projection for one memory.
 fn unproject_from_legacy(conn: &Connection, id: &str) -> ObjectResult<()> {
     let Some(item) = get(conn, id)? else { return Ok(()) };
-    // 精确匹配 claim，不用 `delete_matching` 的子串匹配：子串匹配会误删别的事实。
+    // 精确匹配 claim，不做子串匹配：子串匹配会误删别的事实。
     conn.execute(
         "DELETE FROM ai_memory WHERE content = ?1",
         params![item.claim],

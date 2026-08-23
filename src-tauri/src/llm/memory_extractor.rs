@@ -154,7 +154,7 @@ fn extraction_user_message(messages: &[ChatMessage], existing_memory: &str) -> S
 /// `taint` is the untrusted-content provenance of the turn, captured by the
 /// caller **before** spawning this task — `tool_hooks`' taint slot is global and
 /// gets cleared when the next run starts, so reading it from here would race.
-pub async fn extract_and_merge(
+async fn extract_and_merge(
     config: &LlmConfig,
     messages: &[ChatMessage],
     vault_path: &str,
@@ -437,10 +437,9 @@ pub fn message_importance(message: &ChatMessage) -> u8 {
 
 /// Extraction entry point: gate on conversation substance, then extract.
 ///
-/// This is what callers should use. The importance gate exists so a session of
-/// "ok", "thanks", "do that" never triggers a paid LLM call and never dilutes
-/// memory with filler. `extract_and_merge` remains public for callers that
-/// want to bypass the gate.
+/// The only entry point. The importance gate exists so a session of "ok",
+/// "thanks", "do that" never triggers a paid LLM call and never dilutes memory
+/// with filler — bypassing it was never something a caller should want.
 pub async fn extract_and_merge_enhanced(
     config: &LlmConfig,
     messages: &[ChatMessage],
@@ -480,36 +479,6 @@ pub async fn extract_and_merge_enhanced(
         taint,
     )
     .await
-}
-
-/// Detect and resolve memory conflicts
-pub fn detect_memory_conflicts(existing: &str, new_facts: &[ExtractedFact]) -> Vec<(String, String)> {
-    let mut conflicts: Vec<(String, String)> = Vec::new();
-    
-    let existing_lower = existing.to_lowercase();
-    
-    for fact in new_facts {
-        let fact_lower = fact.content.to_lowercase();
-        
-        // Check for contradictions (simplified heuristic)
-        let contradiction_pairs = [
-            ("always", "never"),
-            ("prefer", "don't prefer"),
-            ("喜欢", "不喜欢"),
-        ];
-        
-        for (pos, neg) in &contradiction_pairs {
-            if fact_lower.contains(pos) {
-                // Check if existing has the negative form
-                if existing_lower.contains(neg) {
-                    // Potential conflict
-                    conflicts.push((fact.content.clone(), format!("Contradicts existing: {}", neg)));
-                }
-            }
-        }
-    }
-    
-    conflicts
 }
 
 #[cfg(test)]

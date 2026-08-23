@@ -825,7 +825,7 @@ fn confirming_a_candidate_activates_it_and_records_who_confirmed() {
 
 /// 取代保留旧事实 / superseding keeps the old claim and its history.
 ///
-/// 这是本模块相对 `delete_matching` 的核心差别。
+/// 这是本模块相对旧的 `DELETE + INSERT` 替代语义的核心差别。
 #[test]
 fn superseding_keeps_the_old_memory_readable_and_off_recall() {
     let conn = migrated_db();

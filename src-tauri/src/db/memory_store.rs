@@ -169,33 +169,6 @@ pub fn upsert_fact(
     Ok(true)
 }
 
-/// Delete rows whose content contains `needle` (case-insensitive).
-///
-/// Backs the extractor's `replaces` field: when a new fact supersedes an old
-/// one, the old row must go, or recall will surface both sides of a
-/// contradiction. Returns the number of rows removed.
-pub fn delete_matching(conn: &Connection, needle: &str) -> rusqlite::Result<usize> {
-    let n = needle.trim();
-    if n.len() < 4 {
-        // Too short to match safely — would delete unrelated memories.
-        return Ok(0);
-    }
-    let mut stmt = conn.prepare("SELECT id, content FROM ai_memory")?;
-    let rows: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .filter_map(|r| r.ok())
-        .collect();
-    let needle_lower = n.to_lowercase();
-    let mut removed = 0;
-    for (id, content) in rows {
-        if content.to_lowercase().contains(&needle_lower) {
-            conn.execute("DELETE FROM ai_memory WHERE id = ?1", params![id])?;
-            removed += 1;
-        }
-    }
-    Ok(removed)
-}
-
 /// Drop memories whose TTL has passed. Cheap enough to run per turn.
 pub fn prune_expired(conn: &Connection) -> rusqlite::Result<usize> {
     let n = conn.execute(
@@ -327,20 +300,6 @@ mod tests {
         upsert_fact(&conn, "用户偏好用中文回复", "preferences", 1.0, None, None).unwrap();
         let hits = recall(&conn, "我应该用什么语言回复用户", 5).unwrap();
         assert!(!hits.is_empty(), "CJK unigram matching should find the fact");
-    }
-
-    #[test]
-    fn delete_matching_honors_replaces_and_guards_short_needles() {
-        let conn = test_db();
-        upsert_fact(&conn, "User prefers English responses", "preferences", 1.0, None, None).unwrap();
-        upsert_fact(&conn, "Vault root is D:/notes", "vault", 1.0, None, None).unwrap();
-
-        assert_eq!(delete_matching(&conn, "prefers English").unwrap(), 1);
-        assert_eq!(live_count(&conn).unwrap(), 1);
-
-        // A 1-2 char needle would nuke everything; it must be refused.
-        assert_eq!(delete_matching(&conn, "a").unwrap(), 0);
-        assert_eq!(live_count(&conn).unwrap(), 1);
     }
 
     #[test]
