@@ -855,7 +855,7 @@ export interface PlanStep {
 }
 
 export interface AgentEvent {
-type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage' | 'batch_progress';
+  type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage' | 'batch_progress' | 'context_package_ready';
 message?: string;
 tool_call_id?: string;
 name?: string;
@@ -933,6 +933,10 @@ answer_preview?: string;
   file_path?: string;
   /** Per-item outcome: ok | error | skipped */
   status?: 'ok' | 'error' | 'skipped';
+  // Context assembly (context_package_ready, emitted once per turn before the model call).
+  // Carries the *summary* only — never chunk bodies, so the event stays safe to log.
+  /** What the retrieval layer actually decided to put in front of the model */
+  package?: ContextPackageSummary;
 }
 
 export async function agentChat(request: AgentChatRequest): Promise<string> {
@@ -2225,8 +2229,50 @@ export async function decideChangeSet(
   return invoke<ChangeSet>('knowledge_decide_changeset', { changesetId, approved });
 }
 
-// ── 承诺 / Commitments ──────────────────────────────────────────────────────
+// ── Context Inspector ───────────────────────────────────────────────────────
+//
+// `context_package_ready` 事件的载荷。它来自后端 `ContextPackage::inspector_summary()`,
+// 与真正进 prompt 的那份是同一个结构体——所以界面上显示的召回结果就是模型看到的，
+// 不存在"UI 说召回了 A、实际给模型的是 B"。
+//
+// 刻意不含正文：摘要只带 title / locator / score / why / warnings。正文要看就点进
+// 原文，不通过 IPC 和日志再抄一遍。
 
+export interface ContextInspectorItem {
+  objectId: string | null;
+  kind: string;
+  title: string;
+  locator: string | null;
+  score: number;
+  /** 为什么它被召回：`lexical`、`vector`、`current_file`、`memory_recall`… */
+  why: string[];
+  /** `stale`、`low_confidence`、`unconfirmed`、`conflicting`、`out_of_scope`… */
+  warnings: string[];
+}
+
+export interface ContextPackageSummary {
+  query: string;
+  intent: string;
+  scope: string[];
+  counts: {
+    facts: number;
+    memories: number;
+    openTasks: number;
+    related: number;
+    conflicts: number;
+  };
+  items: ContextInspectorItem[];
+  knowledgeGaps: string[];
+  warnings: string[];
+  budget: {
+    maxTokens: number;
+    usedTokens: number;
+    /** 被裁掉的候选数。为 0 才说明全都装下了。 */
+    truncatedCandidates: number;
+  };
+}
+
+// ── 承诺 / Commitments ──────────────────────────────────────────────────────
 export type CommitmentStatus =
   | 'proposed'
   | 'active'

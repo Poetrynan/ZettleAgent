@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom } from '../../lib/tauri';
-import type { SearchMode, AgentEvent, SearchResult, PlanStep } from '../../lib/tauri';
+import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
 import { IconSend, IconGlobe } from '../icons';
 import { t } from '../../lib/i18n';
@@ -10,6 +10,7 @@ import { useChatSessions } from './useChatSessions';
 import type { Message, TimelineEntry, ToolCallInfo } from './useChatSessions';
 
 import { SessionListPanel } from './SessionListPanel';
+import { KnowledgePanel } from './KnowledgePanel';
 import { ChatHeader } from './ChatHeader';
 import { ChatMessageList } from './ChatMessageList';
 import { Modal } from '../common/Modal';
@@ -257,6 +258,14 @@ export function SmartChat() {
   const [exportFormat, setExportFormat] = useState<'markdown' | 'json'>('markdown');
   const [exportSuccessPath, setExportSuccessPath] = useState<string | null>(null);
   const [exportIsRunning, setExportIsRunning] = useState(false);
+
+  // Knowledge panel: Context Inspector / Memory Inbox / Change Preview /
+  // Tasks / Index Health. `knowledgeContext` is the compiled ContextPackage
+  // summary for the run being rendered — the same structure that produced the
+  // prompt, so the panel cannot disagree with what the model actually saw.
+  const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
+  const [knowledgeContext, setKnowledgeContext] = useState<ContextPackageSummary | null>(null);
+  const [knowledgeRunId, setKnowledgeRunId] = useState<string | null>(null);
 
   const isZh = (state.lang || 'zh') === 'zh';
 
@@ -546,6 +555,19 @@ export function SmartChat() {
             }
             return prev;
           });
+          break;
+        }
+        case 'context_package_ready': {
+          // The compiled ContextPackage for this turn, feeding the Context
+          // Inspector. Carries no bodies — only titles, locators, scores, why
+          // and warnings (IPC/log hygiene lives in `inspector_summary()`).
+          //
+          // Additive: an older frontend that does not know this case simply
+          // falls through to `default` and the turn is unaffected.
+          if (e.package) {
+            setKnowledgeContext(e.package as ContextPackageSummary);
+            setKnowledgeRunId(e.run_id || null);
+          }
           break;
         }
         case 'stage': {
@@ -1593,8 +1615,19 @@ export function SmartChat() {
         isLoading={isLoading}
         showSessionList={sess.showSessionList}
         setShowSessionList={sess.setShowSessionList}
+        showKnowledgePanel={showKnowledgePanel}
+        setShowKnowledgePanel={setShowKnowledgePanel}
         toggleChat={toggleChat}
       />
+
+      {/* Knowledge panel: context / memory / changes / tasks / index health */}
+      {showKnowledgePanel && (
+        <KnowledgePanel
+          contextPackage={knowledgeContext}
+          runId={knowledgeRunId}
+          onClose={() => setShowKnowledgePanel(false)}
+        />
+      )}
 
       {/* Session list panel */}
       {sess.showSessionList && (

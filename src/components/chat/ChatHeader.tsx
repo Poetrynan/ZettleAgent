@@ -11,6 +11,9 @@ interface ChatHeaderProps {
   isLoading: boolean;
   showSessionList: boolean;
   setShowSessionList: (show: boolean | ((p: boolean) => boolean)) => void;
+  /** 知识面板开关：上下文、记忆、变更、承诺、索引都在那一个面板里。 */
+  showKnowledgePanel: boolean;
+  setShowKnowledgePanel: (show: boolean | ((p: boolean) => boolean)) => void;
   toggleChat: () => void;
 }
 
@@ -28,6 +31,8 @@ export function ChatHeader({
   isLoading,
   showSessionList,
   setShowSessionList,
+  showKnowledgePanel,
+  setShowKnowledgePanel,
   toggleChat,
 }: ChatHeaderProps) {
   const isZh = getLang() === 'zh';
@@ -139,6 +144,16 @@ export function ChatHeader({
         </div>
 
         <div className="chat-header-actions">
+          <button
+            className={`chat-header-icon-btn ${showKnowledgePanel ? 'active' : ''}`}
+            onClick={() => setShowKnowledgePanel(p => !p)}
+            title={isZh ? '知识面板：上下文 / 记忆 / 变更 / 承诺 / 索引' : 'Knowledge: context, memory, changes, tasks, index'}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>
+            </svg>
+          </button>
           <button
             className={`chat-header-icon-btn ${showSessionList ? 'active' : ''}`}
             onClick={() => setShowSessionList(p => !p)}

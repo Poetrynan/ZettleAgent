@@ -3466,3 +3466,519 @@
     animation: none;
   }
 }
+
+/* ── Knowledge Panel ────────────────────────────────────────────────
+   Context Inspector / Memory Inbox / Change Preview / Commitments / Index.
+   Drops in under the chat header, so it borrows the header's border and
+   never floats: everything here is a claim about state the user can act
+   on, and a floating overlay would hide the conversation it refers to. */
+
+.knowledge-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  border-bottom: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.18));
+  background: var(--bg-secondary, #0f172a);
+  font-size: 12px;
+}
+
+.knowledge-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.18));
+}
+
+.knowledge-panel-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.knowledge-panel-tab {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.knowledge-panel-tab:hover {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.1));
+  color: var(--text-primary, #e2e8f0);
+}
+
+.knowledge-panel-tab.active {
+  background: var(--accent-secondary-bg, rgba(59, 130, 246, 0.14));
+  color: var(--accent-secondary, #3b82f6);
+  font-weight: 600;
+}
+
+.knowledge-panel-close {
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.knowledge-panel-close:hover {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.1));
+  color: var(--text-primary, #e2e8f0);
+}
+
+.knowledge-panel-body {
+  overflow-y: auto;
+  padding: 8px 10px 10px;
+}
+
+.knowledge-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.knowledge-empty {
+  padding: 14px 8px;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.55;
+}
+
+/* 失败和空是两件事：失败要给出重试，空只是没有内容。 */
+.knowledge-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px;
+}
+
+.knowledge-error-text {
+  color: var(--danger, #ef4444);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.knowledge-warn-row {
+  padding: 6px 8px;
+  border-left: 2px solid var(--warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-primary, #e2e8f0);
+  line-height: 1.5;
+  border-radius: 0 4px 4px 0;
+}
+
+.knowledge-mini-btn {
+  padding: 3px 9px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary, #e2e8f0);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.knowledge-mini-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.1));
+}
+
+.knowledge-mini-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.knowledge-mini-btn.primary {
+  border-color: transparent;
+  background: var(--accent-secondary, #3b82f6);
+  color: #fff;
+}
+
+.knowledge-mini-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.knowledge-mini-btn.danger {
+  color: var(--danger, #ef4444);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.knowledge-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  background: var(--bg-primary, #0b1220);
+  color: var(--text-primary, #e2e8f0);
+  font-size: 12px;
+}
+
+.knowledge-kv {
+  display: flex;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.knowledge-kv-key {
+  flex-shrink: 0;
+  width: 52px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.knowledge-kv-val {
+  color: var(--text-primary, #e2e8f0);
+  word-break: break-word;
+}
+
+/* 预算条。装不下的候选要单独说出来——"用了 3k/8k"和"裁掉了 12 条"
+   是两个不同的事实，只显示前者会让人以为召回是完整的。 */
+.knowledge-budget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.knowledge-budget-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-hover, rgba(148, 163, 184, 0.16));
+  overflow: hidden;
+}
+
+.knowledge-budget-fill {
+  height: 100%;
+  background: var(--accent-secondary, #3b82f6);
+}
+
+.knowledge-budget-text {
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+}
+
+.knowledge-budget-cut {
+  color: var(--warning, #f59e0b);
+  font-weight: 600;
+}
+
+.knowledge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.knowledge-item {
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.16));
+  border-radius: 8px;
+  background: var(--bg-primary, #0b1220);
+}
+
+.knowledge-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.knowledge-item-kind {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover, rgba(148, 163, 184, 0.14));
+  color: var(--text-muted, #94a3b8);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.knowledge-item-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary, #e2e8f0);
+  word-break: break-word;
+}
+
+.knowledge-item-score {
+  flex-shrink: 0;
+  color: var(--text-muted, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-item-locator,
+.knowledge-item-meta {
+  margin-top: 2px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.knowledge-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.knowledge-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.knowledge-chip {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.knowledge-chip-why {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.14));
+  color: var(--text-muted, #94a3b8);
+}
+
+/* 警示角标永远用警示色：它出现的唯一理由就是要被看见。 */
+.knowledge-chip-warning {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--warning, #f59e0b);
+}
+
+.knowledge-sub-title {
+  color: var(--text-muted, #94a3b8);
+  font-weight: 600;
+}
+
+.knowledge-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.knowledge-gap {
+  padding: 4px 8px;
+  border-left: 2px solid var(--border-subtle, rgba(148, 163, 184, 0.3));
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.5;
+}
+
+.knowledge-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.knowledge-toolbar-note {
+  color: var(--text-muted, #94a3b8);
+}
+
+.knowledge-audit-fold {
+  margin-top: 4px;
+}
+
+.knowledge-fold-btn {
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.knowledge-fold-btn:hover {
+  color: var(--text-primary, #e2e8f0);
+}
+
+.knowledge-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.knowledge-audit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.knowledge-audit-event {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary, #e2e8f0);
+  word-break: break-all;
+}
+
+.knowledge-audit-result {
+  flex-shrink: 0;
+  color: var(--success, #16a34a);
+}
+
+/* 失败的审计条目不能和成功的长得一样，否则审计等于没审。 */
+.knowledge-audit-result.bad {
+  color: var(--danger, #ef4444);
+  font-weight: 600;
+}
+
+.knowledge-audit-actor,
+.knowledge-audit-time {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.knowledge-state {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover, rgba(148, 163, 184, 0.14));
+  color: var(--text-muted, #94a3b8);
+  font-size: 10.5px;
+}
+
+/* 状态色只给"需要行动"和"已经出错"上色。中间态保持灰：
+   把 proposed/previewed 也染成彩色会让整张列表看起来全都在报警。 */
+.knowledge-state-conflicted,
+.knowledge-state-failed {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--danger, #ef4444);
+}
+
+.knowledge-state-awaiting_approval,
+.knowledge-state-expired {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--warning, #f59e0b);
+}
+
+.knowledge-state-committed,
+.knowledge-state-done {
+  background: rgba(22, 163, 74, 0.16);
+  color: var(--success, #16a34a);
+}
+
+.knowledge-state-active {
+  background: var(--accent-secondary-bg, rgba(59, 130, 246, 0.14));
+  color: var(--accent-secondary, #3b82f6);
+}
+
+.knowledge-preview {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle, rgba(148, 163, 184, 0.18));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.knowledge-op-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.knowledge-op {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-secondary, rgba(148, 163, 184, 0.06));
+}
+
+.knowledge-op-reason {
+  margin-top: 2px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+}
+
+.knowledge-op-conflict {
+  margin-top: 4px;
+  color: var(--danger, #ef4444);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 改前/改后并排。谁也不许只显示一半：只看到"改后"就等于让人盲签。 */
+.knowledge-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.knowledge-diff-before,
+.knowledge-diff-after {
+  margin: 0;
+  padding: 6px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.knowledge-diff-before {
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--text-muted, #94a3b8);
+}
+
+.knowledge-diff-after {
+  background: rgba(22, 163, 74, 0.08);
+  color: var(--text-primary, #e2e8f0);
+}
+
+.knowledge-complete-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.knowledge-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.knowledge-health-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.16));
+  border-radius: 8px;
+  background: var(--bg-primary, #0b1220);
+}
+
+.knowledge-health-value {
+  color: var(--text-primary, #e2e8f0);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-health-label {
+  color: var(--text-muted, #94a3b8);
+  font-size: 10.5px;
+}
+
+@media (max-width: 560px) {
+  .knowledge-diff {
+    grid-template-columns: 1fr;
+  }
+}
