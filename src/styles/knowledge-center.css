@@ -18,8 +18,8 @@
 .kc-nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  width: 176px;
+  gap: 2px;
+  width: 188px;
   flex-shrink: 0;
   padding: var(--space-4) var(--space-2);
   border-right: 1px solid var(--border-subtle);
@@ -27,6 +27,7 @@
 }
 
 .kc-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -41,7 +42,9 @@
   font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
-  transition: background var(--transition-fast, 120ms) ease;
+  transition:
+    background var(--transition-fast, 160ms) ease,
+    color var(--transition-fast, 160ms) ease;
 }
 
 .kc-nav-item:hover {
@@ -49,25 +52,44 @@
   color: var(--text-primary);
 }
 
+/*
+   选中态不只是"底色深一点"。
+   一排灰底里再来一格更深的灰，扫一眼分不出哪个是当前页；左侧那条实心竖标是形状差别，
+   缩放、灰度、色盲下都还在。
+*/
 .kc-nav-item.active {
-  background: var(--bg-active);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
   font-weight: 600;
 }
 
+.kc-nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: var(--accent-primary);
+  transform: translateY(-50%);
+}
+
+
 /*
    键盘焦点。列在一起是为了以后加一个可聚焦元件时不会漏掉它：这一层里能按的东西
-   全在这个选择器里，`.kc-chip` 用 `:focus-within` 是因为筛选那组是包着 checkbox
-   的 label（button 形态的 chip 自身获得焦点也会命中）。
+   全在这个选择器里。`.kc-chip` 两条都写——按钮形态的 chip 自己获得焦点，筛选那组是
+   包着 checkbox 的 label，焦点落在里面的 input 上。
 */
 .kc-nav-item:focus-visible,
 .kc-btn:focus-visible,
 .kc-btn-quiet:focus-visible,
-.kc-health-link:focus-visible,
+.kc-chip:focus-visible,
 .kc-details > summary:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
+
 
 
 /* ── 页面 ─────────────────────────────────────────────────────────── */
@@ -81,14 +103,16 @@
 }
 
 .kc-page-head {
-  padding: var(--space-4) var(--space-5) var(--space-3);
+  padding: var(--space-5) var(--space-6) var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .kc-page-title {
   margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
 }
 
 .kc-page-hint {
@@ -101,7 +125,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
 /* ── 列表与卡片 ───────────────────────────────────────────────────── */
@@ -113,12 +137,27 @@
   max-width: 680px;
 }
 
+/*
+   卡片是这个页面的主要节奏。
+   一点点阴影 + 比列表底色更亮一档的表面，让"一条待办"读起来是一个对象，而不是被两条
+   分割线夹住的一段文字。hover 只动阴影和边框——不动 transform，避免鼠标划过时整列跳动。
+*/
 .kc-card {
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--transition-fast, 160ms) ease,
+    box-shadow var(--transition-fast, 160ms) ease;
 }
+
+.kc-card:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-md);
+}
+
 
 .kc-card-head {
   display: flex;
@@ -195,19 +234,35 @@
 /* ── 按钮 ─────────────────────────────────────────────────────────── */
 
 .kc-btn {
-  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* 32px 太矮，指针稍偏就点空；36px 和导航项对齐，视觉上也成一条线。 */
+  min-height: 36px;
   padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-primary);
   font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background var(--transition-fast, 120ms) ease;
+  transition:
+    background var(--transition-fast, 160ms) ease,
+    border-color var(--transition-fast, 160ms) ease,
+    color var(--transition-fast, 160ms) ease;
 }
 
+/*
+   hover 一定同时声明前景色。
+   只换背景、让文字继承的写法在两套主题里各有一半概率撞色——那正是"hover 之后字看不
+   清了"的来源。这一层所有 hover 都遵守：背景动，文字色跟着一起动。
+*/
 .kc-btn:hover:not(:disabled) {
+  border-color: var(--border);
   background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .kc-btn:disabled {
@@ -215,27 +270,42 @@
   cursor: default;
 }
 
-/* 每个区域只有一个 primary。 */
+/*
+   每个区域只有一个 primary。
+   底色朝"文字色"的方向混一档：浅色主题下强调绿被压深、深色主题下被提亮，两边都是朝
+   着和字色拉开对比的方向走。`--accent-primary` 直接配 `--text-inverse` 在浅色下只有
+   3.3:1，不到 4.5:1 的正文门槛。
+*/
 .kc-btn-primary {
   border-color: transparent;
-  background: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 88%, var(--text-primary));
   color: var(--text-inverse);
+  font-weight: 600;
 }
 
+/*
+   hover 继续往同一个方向深一档，不用 `filter: brightness()`。
+   filter 作用于整个元素，会把文字一起提亮——底和字同时变亮就是"字被糊进背景里"。
+*/
 .kc-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  background: var(--accent-primary);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-primary) 76%, var(--text-primary));
+  color: var(--text-inverse);
 }
 
 /* 破坏性动作用明确文字 + 危险色描边，不用一个孤立的 ×。 */
 .kc-btn-danger {
   border-color: var(--danger-border);
+  background: var(--bg-secondary);
   color: var(--danger);
 }
 
 .kc-btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
   background: var(--danger-bg);
+  color: var(--danger);
 }
+
 
 /* ── 状态标 ───────────────────────────────────────────────────────── */
 
@@ -243,14 +313,18 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 1px var(--space-2);
+  /* 1px 的上下内距让状态标看起来像被压扁的标签。 */
+  min-height: 20px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  font-weight: 500;
   white-space: nowrap;
 }
+
 
 /* 形状随语义变，所以色盲用户也能区分三个警示级别，而不是只能靠颜色。 */
 .kc-pill-mark {
@@ -299,14 +373,17 @@
   min-width: 18px;
   padding: 0 5px;
   border-radius: var(--radius-full);
-  background: var(--accent-primary);
+  /* 10px 的字更吃对比度，所以底色和按钮一样朝字色方向压一档。 */
+  background: color-mix(in srgb, var(--accent-primary) 88%, var(--text-primary));
   color: var(--text-inverse);
   font-size: 10px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-align: center;
   flex-shrink: 0;
 }
+
 
 /*
    顶栏窄容器下 `toolbar.css` 会把 `.toolbar-nav-btn span` 整体隐藏（只留图标）。
@@ -419,10 +496,21 @@
 }
 
 .kc-details > summary {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   font-size: var(--text-xs);
   cursor: pointer;
+  transition: color var(--transition-fast, 160ms) ease;
 }
+
+/* 折叠标题也是一个按钮。三级文字色本来就淡，hover 时提一档才看得出能点。 */
+.kc-details > summary:hover {
+  color: var(--text-secondary);
+}
+
 
 .kc-pre {
   margin: var(--space-2) 0 0;
@@ -478,10 +566,15 @@
 }
 
 .kc-table td {
-  padding: 3px var(--space-2) 3px 0;
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   vertical-align: top;
+}
+
+/* 审计一行有四列，扫读时靠一层极淡的底色锁定当前行。 */
+.kc-table tr:hover td {
+  background: var(--bg-secondary);
 }
 
 .kc-table-event {
@@ -489,14 +582,21 @@
   color: var(--text-primary);
 }
 
+
+/*
+   成功不用绿色。
+   `--success` 在浅色主题下配白底只有 3.9:1，而这里是 12px 的小字；更重要的是一整列
+   绿色的"成功"会把真正需要被看见的失败淹掉。
+*/
 .kc-table-ok {
-  color: var(--success);
+  color: var(--text-secondary);
 }
 
 .kc-table-bad {
   color: var(--danger);
   font-weight: 600;
 }
+
 
 .kc-table-time {
   text-align: right;
@@ -700,21 +800,36 @@
   gap: var(--space-2);
 }
 
+/*
+   次要动作 / the quiet button.
+   之前写了 `border-color` 却没有 `border-style`，所以 hover 时那条边框根本画不出来，
+   唯一的变化是下划线消失——hover 之后看起来比 hover 之前更不像按钮。现在是加底色、
+   文字加深、下划线保留。
+*/
 .kc-btn-quiet {
+  min-height: 24px;
   padding: 2px var(--space-2);
-  border-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--accent-secondary);
   font-size: var(--text-xs);
   text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast, 160ms) ease,
+    color var(--transition-fast, 160ms) ease;
 }
 
 .kc-btn-quiet:hover:not(:disabled) {
-  border-color: var(--border-subtle);
-  text-decoration: none;
+  border-color: var(--accent-secondary-border);
+  background: var(--accent-secondary-bg);
+  color: var(--accent-secondary);
 }
 
 .kc-gap {
+
   padding: var(--space-1) 0;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -869,21 +984,41 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
+  /* 22px 的高度点起来太细，尤其是这一排要当 tab 用。 */
+  min-height: 28px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   cursor: pointer;
+  transition:
+    background var(--transition-fast, 160ms) ease,
+    border-color var(--transition-fast, 160ms) ease,
+    color var(--transition-fast, 160ms) ease;
+}
+
+/* 没有 hover 反馈的东西读起来不像能点。文字色一起给，不让它继承。 */
+.kc-chip:hover {
+  border-color: var(--text-tertiary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .kc-chip.active {
-  border-color: var(--accent-secondary);
+  border-color: var(--accent-secondary-border);
   background: var(--accent-secondary-bg);
   color: var(--text-primary);
   font-weight: 600;
 }
+
+.kc-chip.active:hover {
+  border-color: var(--accent-secondary);
+  background: var(--accent-secondary-bg);
+  color: var(--text-primary);
+}
+
 
 .kc-chip-input {
   position: absolute;
@@ -1114,6 +1249,7 @@
   line-height: 1.6;
 }
 
+/* 一条断链是一个可操作的分组，所以整块给 hover 反馈，而不只是里面那个按钮。 */
 .kc-health-link {
   display: flex;
   flex-direction: column;
@@ -1121,7 +1257,16 @@
   padding: var(--space-2);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  transition:
+    background var(--transition-fast, 160ms) ease,
+    border-color var(--transition-fast, 160ms) ease;
 }
+
+.kc-health-link:hover {
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
 
 
 
