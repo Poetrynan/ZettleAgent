@@ -67,13 +67,25 @@ vi.mock('../../../lib/i18n', () => ({ t: (k: string) => k }));
 // The real subtrees drag in Markdown/KaTeX/Mermaid and are irrelevant here.
 // The header stub exposes the two controls the scenario needs.
 vi.mock('../ChatHeader', () => ({
-  ChatHeader: ({ setMode, setShowSessionList }: any) => (
+  ChatHeader: ({ setMode, setShowSessionList, setShowKnowledgePanel }: any) => (
     <div>
       <button data-testid="use-rag" onClick={() => setMode('rag')}>rag</button>
       <button data-testid="open-sessions" onClick={() => setShowSessionList(true)}>sessions</button>
+      <button data-testid="open-knowledge" onClick={() => setShowKnowledgePanel(true)}>knowledge</button>
     </div>
   ),
 }));
+
+// 面板本身另有测试；这里只要看清 SmartChat 递给它的是哪一轮的上下文。
+vi.mock('../KnowledgePanel', () => ({
+  KnowledgePanel: ({ contextPackage, runId }: any) => (
+    <div>
+      <span data-testid="ctx-query">{contextPackage?.query ?? ''}</span>
+      <span data-testid="ctx-run">{runId ?? ''}</span>
+    </div>
+  ),
+}));
+
 
 vi.mock('../SessionListPanel', () => ({
   SessionListPanel: ({ sessionId, onNewSession }: any) => (
@@ -209,4 +221,80 @@ describe('SmartChat session ownership of async stream callbacks', () => {
     expect(persistedTo).not.toContain(switchedSession);
   });
 });
+
+/**
+ * `agent-event` 的世代过滤 / lifecycle generation on the agent event bus.
+ *
+ * 每个事件都盖着 `run_id`。上一轮的事件（崩溃重启、快速重发）不能改这一轮的界面，
+ * 但旧后端不带 `run_id` 的事件必须照旧生效——否则一次升级会让界面整体失聪。
+ */
+describe('SmartChat agent-event generations', () => {
+  beforeEach(() => {
+    handlers.clear();
+    vi.clearAllMocks();
+    let tick = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => (tick += 1_000));
+  });
+
+  function ctxEvent(runId: string | undefined, query: string) {
+    return {
+      type: 'context_package_ready',
+      run_id: runId,
+      package: {
+        query,
+        intent: 'search',
+        scope: [],
+        counts: { facts: 0, memories: 0, openTasks: 0, related: 0, conflicts: 0 },
+        items: [],
+        knowledgeGaps: [],
+        warnings: [],
+        budget: { maxTokens: 100, usedTokens: 1, truncatedCandidates: 0 },
+      },
+    };
+  }
+
+  it('hands the compiled context of the live run to the knowledge panel', async () => {
+    const { container } = render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('agent-event')?.length).toBe(1));
+    fireEvent.click(container.querySelector('[data-testid="open-knowledge"]')!);
+
+    await act(async () => {
+      emitEvent('agent-event', { type: 'run_started', run_id: 'run-1' });
+      emitEvent('agent-event', ctxEvent('run-1', 'live question'));
+    });
+
+    expect(container.querySelector('[data-testid="ctx-query"]')!.textContent).toBe('live question');
+    expect(container.querySelector('[data-testid="ctx-run"]')!.textContent).toBe('run-1');
+  });
+
+  it('drops an event stamped with a superseded run', async () => {
+    const { container } = render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('agent-event')?.length).toBe(1));
+    fireEvent.click(container.querySelector('[data-testid="open-knowledge"]')!);
+
+    await act(async () => {
+      emitEvent('agent-event', { type: 'run_started', run_id: 'run-2' });
+      emitEvent('agent-event', ctxEvent('run-2', 'the live one'));
+      emitEvent('agent-event', ctxEvent('run-1', 'the abandoned one'));
+    });
+
+    expect(container.querySelector('[data-testid="ctx-query"]')!.textContent).toBe('the live one');
+  });
+
+  /** 旧后端不带 `run_id`。把它们一并丢掉等于升级即失聪。 */
+  it('still accepts events from a backend that stamps no run id', async () => {
+    const { container } = render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('agent-event')?.length).toBe(1));
+    fireEvent.click(container.querySelector('[data-testid="open-knowledge"]')!);
+
+    await act(async () => {
+      emitEvent('agent-event', { type: 'run_started', run_id: 'run-3' });
+      emitEvent('agent-event', ctxEvent(undefined, 'unstamped but real'));
+    });
+
+    expect(container.querySelector('[data-testid="ctx-query"]')!.textContent).toBe('unstamped but real');
+  });
+});
+
+
 
