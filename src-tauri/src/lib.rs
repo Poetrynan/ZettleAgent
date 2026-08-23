@@ -353,6 +353,7 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_scan_commitments,
             commands::knowledge_inbox,
             commands::knowledge_inbox_counts,
+            commands::knowledge_get_evidence,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

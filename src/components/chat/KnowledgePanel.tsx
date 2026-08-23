@@ -24,6 +24,7 @@ import {
   syncMemoryFile,
 } from '../../lib/tauri';
 import { getLang } from '../../lib/i18n';
+import { ContextInspector } from '../knowledge/ContextInspector';
 
 /**
  * 知识层面板 / the knowledge layer's in-chat surface.
@@ -57,6 +58,13 @@ interface KnowledgePanelProps {
   vaultPath: string | null;
   /** 跳到知识中心的对应页面。没传就不显示跳转入口。 */
   onOpenCenter?: (page: 'inbox' | 'memory' | 'changes' | 'tasks' | 'health') => void;
+  /**
+   * 打开某条召回内容的来源文件。没传就不显示"打开来源"。
+   *
+   * 只到文件级：编辑器还没有行级导航，所以 `locator` 里的行号不会被当成能跳到的
+   * 位置用——按钮不承诺它做不到的事。
+   */
+  onOpenSource?: (locator: string) => void;
   onClose: () => void;
 }
 
@@ -65,6 +73,7 @@ export function KnowledgePanel({
   runId,
   vaultPath,
   onOpenCenter,
+  onOpenSource,
   onClose,
 }: KnowledgePanelProps) {
   const isZh = getLang() === 'zh';
@@ -112,7 +121,7 @@ export function KnowledgePanel({
 
       <div className="knowledge-panel-body">
         {tab === 'context' && (
-          <ContextTab pkg={contextPackage} runId={runId} isZh={isZh} />
+          <ContextTab pkg={contextPackage} runId={runId} isZh={isZh} onOpenSource={onOpenSource} />
         )}
         {tab === 'memory' && <MemoryTab isZh={isZh} vaultPath={vaultPath} />}
         {tab === 'changes' && <ChangesTab isZh={isZh} />}
@@ -187,103 +196,26 @@ function timeLabel(ms: number | null | undefined): string {
 }
 
 // ── Context Inspector ───────────────────────────────────────────────────────
+//
+// 实现在 `components/knowledge/ContextInspector.tsx`：知识中心和侧栏用的是同一个
+// 组件，避免"侧栏说召回了 3 条、中心说 5 条"这种自相矛盾。这里只负责把本轮审计
+// 明细塞进它的尾部插槽——审计是"这一轮"的东西，只在聊天侧栏有意义。
 
 function ContextTab({
   pkg,
   runId,
   isZh,
+  onOpenSource,
 }: {
   pkg: ContextPackageSummary | null;
   runId: string | null;
   isZh: boolean;
+  onOpenSource?: (locator: string) => void;
 }) {
   const [showAudit, setShowAudit] = useState(false);
 
-  if (!pkg) {
-    return (
-      <Empty
-        text={
-          isZh
-            ? '这一轮还没有编译上下文。发一条消息后，这里会显示模型实际看到的召回结果。'
-            : 'No context compiled yet. Send a message and this shows what the model actually saw.'
-        }
-      />
-    );
-  }
-
-  const { budget } = pkg;
-  const pct = budget.maxTokens > 0
-    ? Math.min(100, Math.round((budget.usedTokens / budget.maxTokens) * 100))
-    : 0;
-
   return (
-    <div className="knowledge-section">
-      <div className="knowledge-kv">
-        <span className="knowledge-kv-key">{isZh ? '问题' : 'Query'}</span>
-        <span className="knowledge-kv-val">{pkg.query}</span>
-      </div>
-      <div className="knowledge-kv">
-        <span className="knowledge-kv-key">{isZh ? '意图' : 'Intent'}</span>
-        <span className="knowledge-kv-val">{pkg.intent}</span>
-      </div>
-      <div className="knowledge-kv">
-        <span className="knowledge-kv-key">{isZh ? '范围' : 'Scope'}</span>
-        <span className="knowledge-kv-val">
-          {pkg.scope.length ? pkg.scope.join(', ') : (isZh ? '（未限定）' : '(unscoped)')}
-        </span>
-      </div>
-
-      {/* 预算：被裁掉多少候选必须显示出来，否则"装不下"会变成静默丢失。 */}
-      <div className="knowledge-budget">
-        <div className="knowledge-budget-bar">
-          <div className="knowledge-budget-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <span className="knowledge-budget-text">
-          {budget.usedTokens} / {budget.maxTokens} tokens
-          {budget.truncatedCandidates > 0 && (
-            <strong className="knowledge-budget-cut">
-              {isZh
-                ? ` · 裁掉 ${budget.truncatedCandidates} 条候选`
-                : ` · ${budget.truncatedCandidates} candidates dropped`}
-            </strong>
-          )}
-        </span>
-      </div>
-
-      {pkg.warnings.length > 0 && (
-        <div className="knowledge-warn-row">
-          <Chips items={pkg.warnings} tone="warning" />
-        </div>
-      )}
-
-      {pkg.items.length === 0 ? (
-        <Empty text={isZh ? '没有召回任何条目。' : 'Nothing was retrieved.'} />
-      ) : (
-        <div className="knowledge-list">
-          {pkg.items.map((item, idx) => (
-            <div className="knowledge-item" key={`${item.objectId ?? item.locator ?? idx}`}>
-              <div className="knowledge-item-head">
-                <span className="knowledge-item-kind">{item.kind}</span>
-                <span className="knowledge-item-title">{item.title}</span>
-                <span className="knowledge-item-score">{item.score.toFixed(2)}</span>
-              </div>
-              {item.locator && <div className="knowledge-item-locator">{item.locator}</div>}
-              <Chips items={item.why} tone="why" />
-              <Chips items={item.warnings} tone="warning" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {pkg.knowledgeGaps.length > 0 && (
-        <div className="knowledge-gaps">
-          <div className="knowledge-sub-title">{isZh ? '知识缺口' : 'Knowledge gaps'}</div>
-          {pkg.knowledgeGaps.map(gap => (
-            <div className="knowledge-gap" key={gap}>{gap}</div>
-          ))}
-        </div>
-      )}
-
+    <ContextInspector pkg={pkg} onOpenSource={onOpenSource}>
       {runId && (
         <div className="knowledge-audit-fold">
           <button className="knowledge-fold-btn" onClick={() => setShowAudit(v => !v)}>
@@ -294,7 +226,7 @@ function ContextTab({
           {showAudit && <AuditList runId={runId} isZh={isZh} />}
         </div>
       )}
-    </div>
+    </ContextInspector>
   );
 }
 

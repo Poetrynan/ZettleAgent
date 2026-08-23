@@ -207,7 +207,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
 };
 
 export function SmartChat() {
-  const { state, toggleChat, clearPendingAttachments, clearPendingChatPrompt, showToast, setView } = useApp();
+  const { state, toggleChat, clearPendingAttachments, clearPendingChatPrompt, showToast, setView, setCurrentFile } = useApp();
   const currentView = state.view;
   const viewTemplates = WORKFLOW_TEMPLATES[currentView] || [];
   const activeTemplates = [...viewTemplates, ...WORKFLOW_TEMPLATES.generic].slice(0, 4);
@@ -268,6 +268,31 @@ export function SmartChat() {
   const [knowledgeRunId, setKnowledgeRunId] = useState<string | null>(null);
 
   const isZh = (state.lang || 'zh') === 'zh';
+
+  /**
+   * 打开一条召回内容的来源笔记。
+   *
+   * `locator` 的形状是 `<file_path>#chunk:<id>`，或者对核心记忆是
+   * `.zettelagent/memory.md` 这种 vault 相对路径。这里只用文件那一段：**编辑器目前
+   * 没有行级/块级定位能力**，所以不假装能跳到段落，`#` 后面的部分被丢掉，只把文件
+   * 打开。等编辑器有了定位入口再把它接上，而不是现在给一个跳不准的按钮。
+   */
+  const openLocator = useCallback((locator: string) => {
+    const path = locator.split('#')[0].trim();
+    if (!path) return;
+    const isAbsolute = /^[a-zA-Z]:[/\\]/.test(path) || path.startsWith('/') || path.startsWith('\\\\');
+    const full = isAbsolute
+      ? path
+      : state.vaultPath
+        ? `${state.vaultPath.replace(/[/\\]$/, '')}/${path}`
+        : null;
+    if (!full) {
+      showToast(isZh ? '没有打开 vault，无法定位这条来源' : 'No vault is open, so this source cannot be located');
+      return;
+    }
+    setCurrentFile(full);
+    setView('note');
+  }, [state.vaultPath, isZh, setCurrentFile, setView, showToast]);
 
   // Session management (extracted hook)
   const sess = useChatSessions(state.vaultPath);
@@ -1649,6 +1674,7 @@ export function SmartChat() {
           runId={knowledgeRunId}
           vaultPath={state.vaultPath || null}
           onOpenCenter={() => setView('knowledge')}
+          onOpenSource={openLocator}
           onClose={() => setShowKnowledgePanel(false)}
         />
       )}

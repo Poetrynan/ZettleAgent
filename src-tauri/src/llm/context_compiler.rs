@@ -436,14 +436,20 @@ impl ContextPackage {
                 "related": self.related_objects.len(),
                 "conflicts": self.conflicts.len(),
             },
-            "items": self.all_items().map(|i| serde_json::json!({
+            "items": self.all_items_with_section().map(|(section, i)| serde_json::json!({
                 "objectId": i.object_id,
                 "kind": i.kind.as_str(),
+                // 哪个桶召回的它。UI 靠这个把条目分组成人话标题（当前笔记 / 事实 /
+                // 记忆 / 未完成的事 / 相关 / 冲突），而不是自己按 kind 猜。
+                "section": section,
                 "title": i.title,
                 "locator": i.locator,
                 "score": i.score,
                 "why": i.why,
                 "warnings": i.warnings,
+                // 只有 id，没有正文。Evidence 抽屉要看原文时再按 id 去
+                // `knowledge_get_evidence` 取，摘要本身仍然不搬内容。
+                "evidenceIds": i.evidence_ids,
             })).collect::<Vec<_>>(),
             "knowledgeGaps": self.knowledge_gaps,
             "warnings": self.warnings,
@@ -452,13 +458,19 @@ impl ContextPackage {
     }
 
     fn all_items(&self) -> impl Iterator<Item = &ContextItem> {
+        self.all_items_with_section().map(|(_, item)| item)
+    }
+
+    /// 同一个遍历顺序，但带上条目来自哪个桶。
+    fn all_items_with_section(&self) -> impl Iterator<Item = (&'static str, &ContextItem)> {
         self.current_object
             .iter()
-            .chain(self.facts.iter())
-            .chain(self.memories.iter())
-            .chain(self.open_tasks.iter())
-            .chain(self.related_objects.iter())
-            .chain(self.conflicts.iter())
+            .map(|i| ("current", i))
+            .chain(self.facts.iter().map(|i| ("fact", i)))
+            .chain(self.memories.iter().map(|i| ("memory", i)))
+            .chain(self.open_tasks.iter().map(|i| ("task", i)))
+            .chain(self.related_objects.iter().map(|i| ("related", i)))
+            .chain(self.conflicts.iter().map(|i| ("conflict", i)))
     }
 }
 
@@ -687,5 +699,37 @@ mod tests {
         assert_eq!(listed, pkg.facts.len() + pkg.memories.len() + pkg.open_tasks.len()
             + pkg.related_objects.len() + pkg.conflicts.len()
             + usize::from(pkg.current_object.is_some()));
+    }
+
+    /// 每个条目都说清自己是哪个桶召回的 / every item names the bucket it came from.
+    ///
+    /// Context Inspector 的默认视图按人话分组（当前笔记 / 事实 / 记忆 / …）。分组
+    /// 依据必须来自后端，否则前端只能按 `kind` 猜，猜错了显示的分类就是假的。
+    #[test]
+    fn the_inspector_summary_names_each_items_section() {
+        let conn = db();
+        add_note(&conn, "d:/vault/a.md", "A", "graph traversal notes");
+
+        let mut req = CompileRequest::new("graph traversal", ContextIntent::Answer);
+        req.current_file = Some("d:/vault/a.md".to_string());
+        let pkg = compile(&conn, &req).unwrap();
+        let summary = pkg.inspector_summary();
+        let items = summary["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "expected at least the current note");
+
+        for item in items {
+            let section = item["section"].as_str().expect("section is always present");
+            assert!(
+                matches!(section, "current" | "fact" | "memory" | "task" | "related" | "conflict"),
+                "unknown section {section}"
+            );
+            // 证据 id 出现，证据正文不出现。
+            assert!(item["evidenceIds"].is_array(), "evidenceIds is always an array");
+        }
+        assert_eq!(
+            items[0]["section"].as_str(),
+            Some("current"),
+            "the current note is listed first, matching the prompt order"
+        );
     }
 }

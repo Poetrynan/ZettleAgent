@@ -128,6 +128,53 @@ pub fn attach_evidence(
     Ok(())
 }
 
+/// 按 ID 取证据 / evidence rows by id.
+///
+/// 上下文里的每一项都带着一串 `evidence_ids`，用户点"查看证据"时要的就是这些行。
+/// 顺序按传入的 ID 排：调用方给的顺序通常是有意义的（支持在前、反驳在后）。
+///
+/// 找不到的 ID 直接不在结果里——不返回占位行，因为一条编造的证据比缺一条更糟。
+pub fn evidence_by_ids(conn: &Connection, ids: &[String]) -> ObjectResult<Vec<Evidence>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // ID 数量由调用方决定，所以占位符按需生成，不拼字符串值。
+    let placeholders = vec!["?"; ids.len()].join(", ");
+    let sql = format!(
+        "SELECT id, source_type, source_id, locator, excerpt, checksum,
+                captured_at_ms, author, extraction_model, pipeline_version
+         FROM evidence
+         WHERE id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+            Ok(Evidence {
+                id: row.get(0)?,
+                source_type: row.get(1)?,
+                source_id: row.get(2)?,
+                locator: row.get(3)?,
+                excerpt: row.get(4)?,
+                checksum: row.get(5)?,
+                captured_at_ms: row.get(6)?,
+                author: row.get(7)?,
+                extraction_model: row.get(8)?,
+                pipeline_version: row.get(9)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(ObjectError::from)?;
+
+    // SQL 的 `IN` 不保证顺序，所以按入参顺序重排。
+    let mut ordered = Vec::with_capacity(rows.len());
+    for id in ids {
+        if let Some(found) = rows.iter().find(|e| &e.id == id) {
+            ordered.push(found.clone());
+        }
+    }
+    Ok(ordered)
+}
+
 /// 某个对象的全部证据 / all evidence attached to an object.
 pub fn evidence_for_object(
     conn: &Connection,

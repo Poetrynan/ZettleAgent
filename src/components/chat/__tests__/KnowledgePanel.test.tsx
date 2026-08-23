@@ -20,6 +20,7 @@ import {
   runKnowledgeBackfill,
   syncMemoryFile,
 } from '../../../lib/tauri';
+import { setLang } from '../../../lib/i18n';
 
 vi.mock('../../../lib/tauri', () => ({
   confirmMemory: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../../../lib/tauri', () => ({
   decideCommitment: vi.fn(),
   forgetMemory: vi.fn(),
   getCommitmentInbox: vi.fn(),
+  getEvidenceByIds: vi.fn().mockResolvedValue([]),
   getKnowledgeAuditTrail: vi.fn().mockResolvedValue([]),
   getKnowledgeIndexHealth: vi.fn(),
   getMemoryInbox: vi.fn(),
@@ -38,7 +40,9 @@ vi.mock('../../../lib/tauri', () => ({
   syncMemoryFile: vi.fn(),
 }));
 
-vi.mock('../../../lib/i18n', () => ({ getLang: () => 'en' }));
+// i18n 不 mock：Context Inspector 的全部文案都来自字典，mock 掉等于把要验的东西
+// 换成假的。只把语言钉在 en，断言用英文原文。
+beforeEach(() => setLang('en'));
 
 /** 面板每个 tab 都自己拉数据，所以默认让每个命令都有一个“空但成功”的回答。 */
 function quietBackend() {
@@ -76,11 +80,13 @@ function pkg(over: Partial<ContextPackageSummary> = {}): ContextPackageSummary {
       {
         objectId: 'obj-1',
         kind: 'note',
+        section: 'fact',
         title: 'Caching decision',
-        locator: 'notes/caching.md#L3',
+        locator: 'notes/caching.md#chunk:3',
         score: 0.82,
-        why: ['fts', 'backlink'],
+        why: ['lexical'],
         warnings: [],
+        evidenceIds: [],
       },
     ],
     knowledgeGaps: [],
@@ -100,18 +106,46 @@ describe('Context Inspector', () => {
     quietBackend();
   });
 
-  it('shows the query, the budget and every reason an item was recalled', async () => {
+  /**
+   * 默认视图说人话。
+   *
+   * 断言里刻意没有 score、objectId、`lexical` 这些原始值：它们都在"技术详情"折叠
+   * 里，主视图给的是"用到几条、为什么在这儿"。
+   */
+  it('leads with what was used and why, in plain language', () => {
     render(<KnowledgePanel contextPackage={pkg()} runId="run-1" vaultPath={null} onClose={() => {}} />);
 
     expect(screen.getByText('what did I decide about caching')).toBeInTheDocument();
+    expect(screen.getByText('Used 1 item(s) from your knowledge base')).toBeInTheDocument();
+    expect(screen.getByText('From your notes')).toBeInTheDocument();
     expect(screen.getByText('Caching decision')).toBeInTheDocument();
-    expect(screen.getByText('notes/caching.md#L3')).toBeInTheDocument();
-    expect(screen.getByText('fts')).toBeInTheDocument();
-    expect(screen.getByText('backlink')).toBeInTheDocument();
-    expect(screen.getByText(/1200 \/ 4000/)).toBeInTheDocument();
+    expect(screen.getByText('Keyword match')).toBeInTheDocument();
+    // 分数是排查信息，不是主文案。
+    expect(screen.queryByText('0.82')).not.toBeInTheDocument();
   });
 
-  /** 被裁掉的候选必须单独说。只显示“用了多少 token”会让人以为召回是完整的。 */
+  /**
+   * token 数不做成百分比。
+   *
+   * `usedTokens/maxTokens` 结构上永远到不了 100%（检索只拿到 3/4 预算，注入项还不
+   * 计账），画成进度条就是在骗人。所以它只作为技术详情里的一行数字出现，并且必须
+   * 附带"这只算召回内容"的说明。
+   */
+  it('does not present the token count as a fullness percentage', () => {
+    render(
+      <KnowledgePanel
+        contextPackage={pkg({ budget: { maxTokens: 4000, usedTokens: 1200, truncatedCandidates: 0 } })}
+        runId={null}
+        vaultPath={null} onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/1200 of 4000 tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/counts retrieved notes only/)).toBeInTheDocument();
+    expect(screen.queryByText('30%')).not.toBeInTheDocument();
+  });
+
+  /** 被裁掉的候选必须单独说。只显示"用了多少 token"会让人以为召回是完整的。 */
   it('says out loud how many candidates the budget cut', () => {
     render(
       <KnowledgePanel
@@ -121,24 +155,42 @@ describe('Context Inspector', () => {
       />,
     );
 
-    expect(screen.getByText(/7 candidates dropped/)).toBeInTheDocument();
+    expect(screen.getByText(/7 more match\(es\) did not fit/)).toBeInTheDocument();
+  });
+
+  /** 只按关键词检索过就得说出来——这是"答案可能漏了东西"最常见的原因。 */
+  it('admits when the turn was keyword-only recall', () => {
+    render(
+      <KnowledgePanel
+        contextPackage={pkg({ warnings: ['fts_only_no_query_embedding'] })}
+        runId={null}
+        vaultPath={null} onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('Keywords only')).toBeInTheDocument();
+    expect(screen.getByText(/notes that mean the same thing in different words may have been missed/))
+      .toBeInTheDocument();
+    // 原始 code 不出现在界面上。
+    expect(screen.queryByText('fts_only_no_query_embedding')).not.toBeInTheDocument();
   });
 
   it('surfaces per-item warnings and knowledge gaps instead of hiding them', () => {
     render(
       <KnowledgePanel
         contextPackage={pkg({
-          warnings: ['untrusted source in context'],
           knowledgeGaps: ['no note covers the retention policy'],
           items: [
             {
               objectId: 'obj-2',
               kind: 'memory',
+              section: 'memory',
               title: 'prefers dark mode',
               locator: null,
               score: 0.4,
-              why: ['memory'],
+              why: ['memory_recall'],
               warnings: ['unconfirmed'],
+              evidenceIds: [],
             },
           ],
         })}
@@ -147,15 +199,25 @@ describe('Context Inspector', () => {
       />,
     );
 
-    expect(screen.getByText('untrusted source in context')).toBeInTheDocument();
+    expect(screen.getByText('What the Agent remembers about you')).toBeInTheDocument();
     expect(screen.getByText('no note covers the retention policy')).toBeInTheDocument();
-    expect(screen.getByText('unconfirmed')).toBeInTheDocument();
+    expect(screen.getByText('Not confirmed by you')).toBeInTheDocument();
+    // 没有 locator 就明说追不回原文，而不是给一个点了没反应的按钮。
+    expect(screen.getByText(/cannot be traced back to a note/)).toBeInTheDocument();
   });
 
-  /** 没编译过上下文不是错误，也不能渲染成“召回为空”。 */
+  /** 没编译过上下文不是"召回为空"，两句话必须不一样。 */
   it('distinguishes "nothing compiled yet" from "nothing found"', () => {
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    expect(screen.getByText(/No context compiled yet/)).toBeInTheDocument();
+    const { unmount } = render(
+      <KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />,
+    );
+    expect(screen.getByText('Nothing compiled for this turn yet.')).toBeInTheDocument();
+    unmount();
+
+    render(
+      <KnowledgePanel contextPackage={pkg({ items: [] })} runId={null} vaultPath={null} onClose={() => {}} />,
+    );
+    expect(screen.getByText('Nothing in your notes matched this question.')).toBeInTheDocument();
   });
 });
 

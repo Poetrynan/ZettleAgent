@@ -1239,4 +1239,68 @@ export const en = {
     'knowledge.activity.undoDone': 'Restored {0}, moved {1} to the recycle bin.',
     'knowledge.activity.auditTrail': 'Audit trail',
     'knowledge.activity.noAudit': 'No audit events for this turn.',
+
+    // Context Inspector — "what did the Agent go on this turn?"
+    'knowledge.context.empty': 'Nothing compiled for this turn yet.',
+    'knowledge.context.emptyHint': 'Send a message and this shows exactly what the Agent had in front of it.',
+    'knowledge.context.nothingFound': 'Nothing in your notes matched this question.',
+    'knowledge.context.nothingFoundHint': 'The Agent answered from the conversation alone, not from your knowledge base.',
+    'knowledge.context.question': 'Question',
+    'knowledge.context.usedCount': 'Used {0} item(s) from your knowledge base',
+    'knowledge.context.scope': 'Limited to',
+    'knowledge.context.unscoped': 'Your whole knowledge base',
+    'knowledge.context.gaps': 'What the Agent knew it was missing',
+    'knowledge.context.recallPath': 'How it searched',
+    'knowledge.context.recall.hybrid': 'Meaning + keywords',
+    'knowledge.context.recall.ftsOnly': 'Keywords only',
+    'knowledge.context.budgetUsed': 'Context used: {0} of {1} tokens for retrieved notes',
+    'knowledge.context.budgetNote': 'This counts retrieved notes only. Your message, the system prompt and attachments are not included, so the real prompt is larger.',
+    'knowledge.context.dropped': '{0} more match(es) did not fit and were left out',
+    'knowledge.context.openSource': 'Open source',
+    'knowledge.context.noLocator': 'No location recorded — this one cannot be traced back to a note',
+    'knowledge.context.evidenceCount': 'Evidence ({0})',
+    'knowledge.context.score': 'Relevance',
+
+    // Sections, i.e. which bucket recalled an item.
+    'knowledge.context.section.current': 'The note you have open',
+    'knowledge.context.section.fact': 'From your notes',
+    'knowledge.context.section.memory': 'What the Agent remembers about you',
+    'knowledge.context.section.task': 'Things still open',
+    'knowledge.context.section.related': 'Related',
+    'knowledge.context.section.conflict': 'Contradicting each other',
+
+    // Why an item was recalled.
+    'knowledge.why.lexical': 'Keyword match',
+    'knowledge.why.vector': 'Similar meaning',
+    'knowledge.why.current_file': 'It is the note you have open',
+    'knowledge.why.memory_recall': 'Remembered about you',
+    'knowledge.why.attached': 'You attached it',
+    'knowledge.why.core_memory': 'From your memory file',
+    'knowledge.why.commitment': 'An open commitment',
+    'knowledge.why.conflict': 'It contradicts another item',
+    'knowledge.why.related_object': 'Linked to a match',
+    'knowledge.why.recent': 'Edited recently',
+
+    // Per-item warnings. Plain language, because these are the reasons an
+    // answer might be wrong.
+    'knowledge.warning.stale': 'Possibly out of date',
+    'knowledge.warning.conflicting': 'Contradicts another item',
+    'knowledge.warning.no_stable_identity': 'Cannot be traced to a stable location',
+    'knowledge.warning.unconfirmed': 'Not confirmed by you',
+    'knowledge.warning.low_confidence': 'Low confidence',
+    'knowledge.warning.out_of_scope': 'Outside the scope you asked for',
+    'knowledge.warning.expanded': 'Pulled in beyond your question',
+    'knowledge.warning.overdue': 'Past its due date',
+    'knowledge.warning.fts_only_no_query_embedding': 'Searched by keyword only — notes that mean the same thing in different words may have been missed.',
+
+    // Evidence drawer
+    'knowledge.evidence.title': 'Evidence',
+    'knowledge.evidence.empty': 'No evidence is attached to this item.',
+    'knowledge.evidence.emptyHint': 'That means it cannot be verified against a source — treat it as unconfirmed.',
+    'knowledge.evidence.missing': '{0} evidence record(s) are no longer in the database.',
+    'knowledge.evidence.excerpt': 'Excerpt',
+    'knowledge.evidence.noExcerpt': 'No excerpt was stored.',
+    'knowledge.evidence.capturedAt': 'Captured',
+    'knowledge.evidence.extractedBy': 'Extracted by',
+    'knowledge.evidence.close': 'Close',
 } as const;

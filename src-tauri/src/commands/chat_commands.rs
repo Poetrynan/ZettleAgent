@@ -1199,6 +1199,10 @@ async fn run_agent_turn(
                 Some(core_memory_context.clone())
             };
             req.already_injected = Some(memories_context.clone());
+            // 前端算好的 query embedding。有它才是 hybrid + rerank，没有就是 FTS-only，
+            // 而 retrieval 会把 `fts_only_no_query_embedding` 写进 warnings——所以
+            // Context Inspector 显示的检索路径永远是真实发生过的那一条。
+            req.query_embedding = request.query_embedding.clone();
 
             match state.db.lock() {
                 Ok(conn) => crate::llm::context_compiler::compile(&conn, &req)
@@ -1556,6 +1560,10 @@ pub async fn run_batch_agent(
             vault_path: Some(request.vault_path.clone()),
             vault_paths: None,
             methodology: request.methodology.clone(),
+            // Batch runs are driven from Rust, so there is no WebView to compute
+            // a query embedding. Recall for these turns is FTS-only, and the
+            // ContextPackage warning says exactly that instead of implying hybrid.
+            query_embedding: None,
             // Batch runs never silently reach the internet.
             web_search: Some(false),
             current_file: Some(file_path.clone()),

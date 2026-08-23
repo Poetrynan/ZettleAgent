@@ -543,6 +543,25 @@ pub struct CommitmentScan {
     pub created: usize,
 }
 
+// ── 证据 / evidence ─────────────────────────────────────────────────────────
+
+/// 按 ID 取证据 / fetch evidence rows by id.
+///
+/// 上下文里的每一项、每条记忆、每个变更操作都带一串 `evidenceIds`。这个命令是"查看
+/// 证据"背后唯一的读路径：excerpt、locator、checksum、抽取模型都从这里来。
+///
+/// 一次最多 200 条：证据抽屉一屏放不下更多，而无上限的 `IN (...)` 只会变成一个
+/// 意外的全表读。
+#[tauri::command]
+pub async fn knowledge_get_evidence(
+    state: State<'_, AppState>,
+    evidence_ids: Vec<String>,
+) -> Result<Vec<types::Evidence>, ZettelError> {
+    let conn = state.db.lock()?;
+    let ids: Vec<String> = evidence_ids.into_iter().take(200).collect();
+    Ok(evidence::evidence_by_ids(&conn, &ids)?)
+}
+
 // ── 统一收件箱 / the unified inbox ──────────────────────────────────────────
 //
 // 四种"等用户判断的东西"本来分散在四张表里，用户得点四个地方才知道有没有活。这两个

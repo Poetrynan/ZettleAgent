@@ -220,6 +220,14 @@ pub struct AgentChatRequest {
     /// User-controlled native reasoning switch (from Settings). No model whitelist.
     #[serde(default)]
     pub supports_thinking: Option<bool>,
+    /// The query embedding, computed in the WebView.
+    ///
+    /// The model runs in a Web Worker on the frontend (transformers.js), so Rust
+    /// cannot produce this itself — same arrangement `RagChatRequest` already
+    /// uses. Absent means the turn falls back to FTS-only recall, and the
+    /// ContextPackage says so in its warnings rather than pretending it was
+    /// hybrid.
+    pub query_embedding: Option<Vec<f32>>,
 }
 
 // ── 批量 AI（体检台）— Batch AI over selected notes ──────────────────

@@ -833,6 +833,13 @@ export interface AgentChatRequest {
   currentFile?: string;
   /** Attached note context (pre-resolved content) */
   attachedContext?: string;
+  /**
+   * 本轮查询的 embedding，由前端 worker 算好。
+   *
+   * 有它后端才能走 hybrid + rerank；没有就是 FTS-only，而且 ContextPackage 的
+   * warnings 里会明说是 FTS-only——界面显示的检索路径必须是真实跑过的那一条。
+   */
+  queryEmbedding?: number[];
 }
 
 /** Structured diff data from the backend for the approval card */
@@ -939,8 +946,35 @@ answer_preview?: string;
   package?: ContextPackageSummary;
 }
 
+/**
+ * Attach a query embedding to an agent turn so recall is hybrid (vector + FTS +
+ * RRF + rerank) instead of FTS-only.
+ *
+ * The embedding is computed here rather than in `SmartChat` because every gate
+ * that decides whether an embedding is even possible already lives in this
+ * module: `getEmbeddingForSearch` checks the vector index stats, reads the
+ * embedding config, picks local vs custom provider, and times the call out. The
+ * agent path reusing it means the two retrieval paths can never disagree.
+ *
+ * Failure is not an error: when no embedding can be produced the field stays
+ * absent, retrieval falls back to FTS, and the ContextPackage carries the
+ * `fts_only_no_query_embedding` warning — so the Context Inspector shows the
+ * path that actually ran instead of the one we hoped for.
+ */
+async function withAgentQueryEmbedding(request: AgentChatRequest): Promise<AgentChatRequest> {
+  if (request.queryEmbedding?.length) return request;
+  // The turn's recall is about what the user just asked, so the last user
+  // message is the query — not the whole transcript.
+  const lastUser = [...(request.messages || [])].reverse().find((m) => m.role === 'user');
+  const queryText = lastUser?.content?.trim();
+  if (!queryText) return request;
+  const queryEmbedding = await getEmbeddingForSearch(queryText, 'hybrid');
+  if (!queryEmbedding) return request;
+  return { ...request, queryEmbedding };
+}
+
 export async function agentChat(request: AgentChatRequest): Promise<string> {
-  return invoke('agent_chat', { request });
+  return invoke('agent_chat', { request: await withAgentQueryEmbedding(request) });
 }
 
 export async function cancelAgentTurn(): Promise<boolean> {
@@ -1966,6 +2000,37 @@ export interface KnowledgeEvidence {
   confidence: number;
 }
 
+/**
+ * 一条证据本身，不带"在某个对象上扮演什么角色"。
+ *
+ * 与 `KnowledgeEvidence` 的区别就是少了 `role` / `confidence`——那两个字段属于
+ * object↔evidence 绑定，按 id 直接取证据时没有对象上下文，所以不编造。
+ */
+export interface EvidenceRecord {
+  id: string;
+  source_type: string;
+  source_id: string;
+  /** 回到原文的坐标，如 `notes/a.md#L12-L18`。为 null 时只能标为不可定位。 */
+  locator: string | null;
+  excerpt: string | null;
+  checksum: string | null;
+  captured_at_ms: number;
+  author: string | null;
+  extraction_model: string | null;
+  pipeline_version: string | null;
+}
+
+/**
+ * 按 id 批量取证据。返回顺序与传入顺序一致。
+ *
+ * 取不到的 id 直接不在结果里——不返回占位行，界面才能如实说"这条证据已经不在库里"，
+ * 而不是显示一条空白证据让人以为它存在。
+ */
+export async function getEvidenceByIds(evidenceIds: string[]): Promise<EvidenceRecord[]> {
+  if (evidenceIds.length === 0) return [];
+  return invoke<EvidenceRecord[]>('knowledge_get_evidence', { evidenceIds });
+}
+
 export interface KnowledgeAuditEvent {
   id: string;
   actor: string;
@@ -2314,6 +2379,11 @@ export async function decideChangeSet(
 export interface ContextInspectorItem {
   objectId: string | null;
   kind: string;
+  /**
+   * 它是哪个桶召回的：`current` | `fact` | `memory` | `task` | `related` | `conflict`。
+   * 分组标题由这个字段决定，前端不按 `kind` 猜。
+   */
+  section: string;
   title: string;
   locator: string | null;
   score: number;
@@ -2321,6 +2391,8 @@ export interface ContextInspectorItem {
   why: string[];
   /** `stale`、`low_confidence`、`unconfirmed`、`conflicting`、`out_of_scope`… */
   warnings: string[];
+  /** 支撑它的证据 id。只有 id，正文要看得去 `getEvidenceByIds`。 */
+  evidenceIds: string[];
 }
 
 export interface ContextPackageSummary {
