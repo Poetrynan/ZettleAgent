@@ -178,7 +178,31 @@ describe('QuickSwitcher', () => {
     });
     expect(await screen.findByText('No matching command')).toBeInTheDocument();
   });
+
+  /**
+   * 键盘选中要能被读出来。
+   *
+   * 焦点一直在输入框里，所以选项上的 `aria-selected` 本身不会被朗读；必须由
+   * `aria-activedescendant` 指过去。少了这一条，读屏用户按上下键听不到任何变化。
+   */
+  it('points aria-activedescendant at the row Enter would run', async () => {
+    render(<QuickSwitcher />);
+    openPalette(true);
+
+    const input = await screen.findByLabelText('Type a command…');
+    const first = (await screen.findAllByRole('option'))[0];
+    expect(input).toHaveAttribute('aria-activedescendant', first.id);
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+    const second = (await screen.findAllByRole('option'))[1];
+    await waitFor(() =>
+      expect(input).toHaveAttribute('aria-activedescendant', second.id),
+    );
+    expect(second).toHaveAttribute('aria-selected', 'true');
+  });
 });
+
 
 describe('copy', () => {
   it('has both languages for every palette string', () => {

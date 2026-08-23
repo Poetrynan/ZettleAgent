@@ -97,10 +97,19 @@
   user-select: none;
 }
 
-.quick-switcher-item:hover,
+/*
+   悬停和"当前选中"必须分得开：键盘上下移的那一行是回车会执行的那一行，鼠标恰好停在
+   别的行上时不能让人分不清哪个是真的。所以选中比悬停多一条左侧粗标——形状差别，不
+   只靠颜色。颜色一律走主题令牌：写死的蓝色在这套绿色强调色的主题里是错的。
+*/
+.quick-switcher-item:hover {
+  background: var(--bg-hover);
+}
+
 .quick-switcher-item.selected {
-  background: rgba(37, 99, 235, 0.05);
-  border-left-color: var(--accent-primary, #2563eb);
+  background: var(--bg-active);
+  border-left-color: var(--accent-primary);
+  font-weight: 600;
 }
 
 .quick-switcher-item-name {
@@ -137,13 +146,12 @@
 }
 
 .quick-switcher-hint kbd {
-  background: rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 1px 4px;
   font-family: inherit;
   font-size: 10px;
   margin-right: 4px;
-  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
   color: var(--text-secondary);
 }

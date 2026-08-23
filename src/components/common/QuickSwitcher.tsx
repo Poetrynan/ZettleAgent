@@ -154,6 +154,11 @@ interface PaletteItem {
   select: () => void;
 }
 
+/** 选项的 DOM id。`aria-activedescendant` 只能指 id，所以它必须是稳定可算的。 */
+function optionId(index: number): string {
+  return `quick-switcher-option-${index}`;
+}
+
 export function QuickSwitcher() {
   const { state, setCurrentFile, setView, toggleChat, toggleSidebar } = useApp();
   const [isOpen, setIsOpen] = useState(false);
@@ -318,10 +323,19 @@ export function QuickSwitcher() {
           <span className="quick-switcher-mode">
             {t(isCommands ? 'palette.modeCommands' : 'palette.modeNotes')}
           </span>
+          {/*
+            输入框保持焦点、用 `aria-activedescendant` 指向当前那一行，这是 combobox
+            的标准做法。少了它，读屏用户按上下键不会听到任何变化——`aria-selected`
+            只在焦点真的落在选项上时才会被读出来。
+          */}
           <input
             ref={inputRef}
             className="quick-switcher-input"
             type="text"
+            role="combobox"
+            aria-expanded
+            aria-controls="quick-switcher-list"
+            aria-activedescendant={items[selectedIndex] ? optionId(selectedIndex) : undefined}
             aria-label={t(isCommands ? 'palette.commandsPlaceholder' : 'palette.notesPlaceholder')}
             placeholder={t(
               isCommands ? 'palette.commandsPlaceholder' : 'palette.notesPlaceholder',
@@ -332,7 +346,13 @@ export function QuickSwitcher() {
           />
         </div>
 
-        <div ref={listRef} className="quick-switcher-list" role="listbox">
+        <div
+          ref={listRef}
+          id="quick-switcher-list"
+          className="quick-switcher-list"
+          role="listbox"
+          aria-label={t(isCommands ? 'palette.modeCommands' : 'palette.modeNotes')}
+        >
           {items.length === 0 ? (
             <div className="quick-switcher-empty">
               {t(isCommands ? 'palette.noCommands' : 'palette.noNotes')}
@@ -341,7 +361,9 @@ export function QuickSwitcher() {
             items.map((item, i) => (
               <button
                 key={item.key}
+                id={optionId(i)}
                 role="option"
+                tabIndex={-1}
                 aria-selected={i === selectedIndex}
                 className={`quick-switcher-item ${i === selectedIndex ? 'selected' : ''}`}
                 onClick={item.select}

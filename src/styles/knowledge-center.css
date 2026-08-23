@@ -55,11 +55,20 @@
   font-weight: 600;
 }
 
+/*
+   键盘焦点。列在一起是为了以后加一个可聚焦元件时不会漏掉它：这一层里能按的东西
+   全在这个选择器里，`.kc-chip` 用 `:focus-within` 是因为筛选那组是包着 checkbox
+   的 label（button 形态的 chip 自身获得焦点也会命中）。
+*/
 .kc-nav-item:focus-visible,
-.kc-btn:focus-visible {
+.kc-btn:focus-visible,
+.kc-btn-quiet:focus-visible,
+.kc-health-link:focus-visible,
+.kc-details > summary:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
+
 
 /* ── 页面 ─────────────────────────────────────────────────────────── */
 

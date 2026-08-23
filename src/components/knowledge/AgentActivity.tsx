@@ -182,8 +182,13 @@ export function AgentActivity({ onOpenFile }: { onOpenFile?: (path: string) => v
   );
 }
 
-/** 某一轮的审计明细 / the audit trail for one run. */
-function AuditTrail({ runId }: { runId: string }) {
+/**
+ * 某一轮的审计明细 / the audit trail for one run.
+ *
+ * 聊天侧栏的"这一轮"也用这一份：审计行的事件名、结果码、行为人怎么翻译成人话，
+ * 只该有一套规则。两处各写一遍的结果一定是其中一处继续印 `changeset_state`。
+ */
+export function AuditTrail({ runId }: { runId: string }) {
   const { data, error, busy, reload } = useAsync<KnowledgeAuditEvent[]>(
     () => getKnowledgeAuditTrail({ runId, limit: 100 }),
     [runId],

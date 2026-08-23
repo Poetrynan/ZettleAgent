@@ -9,15 +9,13 @@ import {
   MemoryItem,
   PendingChangeSet,
   TaskCommitment,
-  confirmMemory,
   getChangeSetDetail,
   getCommitmentList,
   getEmbeddingStats,
   getKnowledgeIndexHealth,
-  getMemoryInbox,
   getPendingChangeSets,
   getProactiveDigest,
-  syncMemoryFile,
+  listMemories,
 } from '../../../lib/tauri';
 import { setLang } from '../../../lib/i18n';
 
@@ -26,6 +24,7 @@ vi.mock('../../../lib/tauri', () => ({
   createNoteForLink: vi.fn(),
   decideChangeSet: vi.fn().mockResolvedValue(undefined),
   decideCommitment: vi.fn(),
+  editMemory: vi.fn(),
   finalizeEmbeddingIndex: vi.fn().mockResolvedValue(undefined),
   fixBrokenLink: vi.fn().mockResolvedValue(undefined),
   forgetMemory: vi.fn(),
@@ -36,13 +35,15 @@ vi.mock('../../../lib/tauri', () => ({
   getEvidenceByIds: vi.fn().mockResolvedValue([]),
   getKnowledgeAuditTrail: vi.fn().mockResolvedValue([]),
   getKnowledgeIndexHealth: vi.fn(),
-  getMemoryInbox: vi.fn(),
+  getMemoryDetail: vi.fn().mockResolvedValue(null),
   getPendingChangeSets: vi.fn(),
   getProactiveDigest: vi.fn(),
   getSetting: vi.fn().mockResolvedValue(null),
+  listMemories: vi.fn(),
   markCommitmentNotified: vi.fn().mockResolvedValue(undefined),
   previewChangeSet: vi.fn(),
   rejectMemory: vi.fn(),
+  restoreMemory: vi.fn(),
   runKnowledgeBackfill: vi.fn(),
   runVaultLint: vi.fn(),
   scanCommitments: vi.fn(),
@@ -58,7 +59,7 @@ beforeEach(() => setLang('en'));
 
 /** 面板每个 tab 都自己拉数据，所以默认让每个命令都有一个“空但成功”的回答。 */
 function quietBackend() {
-  vi.mocked(getMemoryInbox).mockResolvedValue([]);
+  vi.mocked(listMemories).mockResolvedValue([]);
   vi.mocked(getPendingChangeSets).mockResolvedValue([]);
   vi.mocked(getCommitmentList).mockResolvedValue([]);
   vi.mocked(getProactiveDigest).mockResolvedValue({ items: [], silenced: null, expired: 0 });
@@ -69,6 +70,7 @@ function quietBackend() {
     has_index: true,
   });
 }
+
 
 function health(over: Partial<KnowledgeIndexHealth> = {}): KnowledgeIndexHealth {
   return {
@@ -243,6 +245,7 @@ function memory(over: Partial<MemoryItem> = {}): MemoryItem {
   return {
     id: 'mem-1',
     kind: 'preference',
+    lifecycle: 'candidate',
     claim: 'writes weekly reviews on Friday',
     scope: 'global',
     confidence: 0.71,
@@ -253,85 +256,61 @@ function memory(over: Partial<MemoryItem> = {}): MemoryItem {
   } as MemoryItem;
 }
 
-describe('Memory Inbox', () => {
+/**
+ * 侧栏的记忆 tab 现在就是记忆中心本身。
+ *
+ * 这里只验"确实是同一个东西"，以及旧版那两个毛病没了：`kind` / `scope` 这类后端枚举名
+ * 和 `0.71` 这种置信度分数不再当主文案印出来。记忆本身的行为（确认是唯一写
+ * `confirmed_by` 的路径、改写不是覆盖、`memory.md` 回流）在 `MemoryCenter.test.tsx`
+ * 里验，不在两处各写一遍。
+ */
+describe('Memory tab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     quietBackend();
   });
 
-  it('shows the claim with the evidence it came from', async () => {
-    vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
+  it('renders the memory center, not a second inbox of its own', async () => {
+    vi.mocked(listMemories).mockResolvedValue([memory()]);
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
     expect(await screen.findByText('writes weekly reviews on Friday')).toBeInTheDocument();
-    expect(screen.getByText('msg-9')).toBeInTheDocument();
+    // 记忆中心的筛选是它的标志：旧版侧栏只有一条收件箱列表。
+    expect(screen.getByText('State')).toBeInTheDocument();
+    // 置信度分数和 Rust 枚举名都不是主文案。
+    expect(screen.queryByText('0.71')).toBeNull();
+    expect(screen.queryByText('global')).toBeNull();
   });
 
-  /** 失败必须长得像失败。把读取错误画成“没有候选”会让人以为提取器没工作。 */
-  it('renders a read failure as a failure with a retry, not as an empty inbox', async () => {
-    vi.mocked(getMemoryInbox).mockRejectedValueOnce(new Error('database is locked'));
+  it('asks the same query the Knowledge Center asks', async () => {
+    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
+    openTab(/Memory/);
+
+    await waitFor(() => expect(listMemories).toHaveBeenCalled());
+  });
+
+  /** 失败必须长得像失败。把读取错误画成“没有记忆”会让人以为提取器没工作。 */
+  it('renders a read failure as a failure, not as an empty memory', async () => {
+    vi.mocked(listMemories).mockRejectedValueOnce(new Error('database is locked'));
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
     expect(await screen.findByText('database is locked')).toBeInTheDocument();
-    expect(screen.queryByText(/No candidate memories/)).not.toBeInTheDocument();
-
-    vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('writes weekly reviews on Friday')).toBeInTheDocument();
-  });
-
-  /** 确认是唯一写 `confirmed_by` 的路径，所以它必须由用户点出来。 */
-  it('confirms only when the user asks, and hands over the vault so Core Memory gets it', async () => {
-    vi.mocked(getMemoryInbox).mockResolvedValue([memory()]);
-    vi.mocked(confirmMemory).mockResolvedValue(memory({ claim: 'confirmed' }));
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath="/vault" onClose={() => {}} />);
-    openTab(/Memory/);
-    await screen.findByText('writes weekly reviews on Friday');
-
-    expect(confirmMemory).not.toHaveBeenCalled();
-    vi.mocked(getMemoryInbox).mockResolvedValue([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-
-    await waitFor(() => expect(confirmMemory).toHaveBeenCalledWith('mem-1', '/vault'));
-    expect(await screen.findByText(/No candidate memories/)).toBeInTheDocument();
-  });
-
-
-  it('marks a memory that contradicts an existing one', async () => {
-    vi.mocked(getMemoryInbox).mockResolvedValue([memory({ conflicts_with_id: 'mem-0' })]);
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Memory/);
-
-    expect(await screen.findByText('conflicts')).toBeInTheDocument();
-  });
-
-  /** 收件箱空的时候恰恰最可能想手改文件，所以回流入口不能只在有候选时出现。 */
-  it('offers the memory.md sync in an empty inbox and reports what it did', async () => {
-    vi.mocked(getMemoryInbox).mockResolvedValue([]);
-    vi.mocked(syncMemoryFile).mockResolvedValue({ adopted: 2, unchanged: 1, forgotten: 1 });
-    render(<KnowledgePanel contextPackage={null} runId={null} vaultPath="/vault" onClose={() => {}} />);
-    openTab(/Memory/);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Absorb memory.md edits' }));
-
-    await waitFor(() => expect(syncMemoryFile).toHaveBeenCalledWith('/vault'));
-    expect(
-      await screen.findByText('2 adopted, 1 already known, 1 forgotten'),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing is remembered/)).toBeNull();
   });
 
   /** 没有 vault 就没有 memory.md，按钮不该在那里骗人。 */
-  it('hides the sync entry when there is no vault', async () => {
-    vi.mocked(getMemoryInbox).mockResolvedValue([]);
+  it('hides the memory.md sync entry when there is no vault', async () => {
+    vi.mocked(listMemories).mockResolvedValue([]);
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
     openTab(/Memory/);
 
-    await screen.findByText(/No candidate memories/);
-    expect(screen.queryByRole('button', { name: /memory.md/ })).not.toBeInTheDocument();
+    await screen.findByText(/Nothing is remembered/);
+    expect(screen.queryByRole('button', { name: /memory.md/ })).toBeNull();
   });
 });
+
 
 
 function changeSet(over: Partial<PendingChangeSet> = {}): PendingChangeSet {
@@ -476,7 +455,7 @@ describe('Health tab', () => {
       health({ totalFiles: 40, indexedDocuments: 31 }),
     );
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Index/);
+    openTab(/Health/);
 
     expect(
       await screen.findByText(
@@ -489,7 +468,8 @@ describe('Health tab', () => {
   it('does not present the query time as an index time', async () => {
     vi.mocked(getKnowledgeIndexHealth).mockResolvedValue(health({ lastRunAtMs: 1_700_000_000_000 }));
     render(<KnowledgePanel contextPackage={null} runId={null} vaultPath={null} onClose={() => {}} />);
-    openTab(/Index/);
+    openTab(/Health/);
+
 
     await screen.findByText('Identity and indexing');
     expect(screen.queryByText(/Last run/)).toBeNull();
