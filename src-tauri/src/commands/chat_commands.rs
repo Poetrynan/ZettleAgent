@@ -1349,26 +1349,38 @@ async fn run_agent_turn(
         result.len()
     ));
 
-    // ── Post-Conversation Memory Extraction (2026 Mem0-style) ────────
-    // Spawn a background task to extract facts from the conversation and
-    // dual-write them: Core Memory (memory.md, structured/bounded) + Archival
-    // Memory (ai_memory table, recall-scored). Does not block the response.
+    // ── Post-Conversation Memory Extraction ──────────────────────────
+    // Files what the model thinks is worth remembering as *proposals* in the
+    // memory layer. Nothing here becomes an active fact on its own unless the
+    // user asked for it outright and none of the confirmation gates fire —
+    // see `memory::requires_confirmation`. Does not block the response.
     {
         let extract_config = config.clone();
         let extract_messages = chat_history.clone();
         let extract_vault = vault_path.clone();
         let extract_db = state.db.clone();
+        // Captured here, not inside the task: the taint slot is process-global
+        // and gets cleared when the next run starts, so reading it later would
+        // lose the flag exactly when it matters.
+        let extract_taint = llm::tool_hooks::turn_taint();
+        let extract_session = llm::tool_hooks::current_run_id();
         tokio::spawn(async move {
             match crate::llm::memory_extractor::extract_and_merge_enhanced(
                 &extract_config,
                 &extract_messages,
                 &extract_vault,
                 Some(extract_db),
-                None,
+                extract_session.as_deref(),
+                extract_taint.as_deref(),
             ).await {
-                Ok(count) => {
-                    if count > 0 {
-                        log::info!("Memory extraction: merged {} new facts (core + archival)", count);
+                Ok(outcome) => {
+                    if outcome.proposed > 0 {
+                        log::info!(
+                            "memory extraction: {} proposal(s) — {} active now, {} awaiting the user",
+                            outcome.proposed,
+                            outcome.active_now,
+                            outcome.awaiting
+                        );
                     }
                 }
                 Err(e) => {

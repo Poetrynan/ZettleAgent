@@ -444,6 +444,47 @@ pub fn get(conn: &Connection, id: &str) -> ObjectResult<Option<MemoryItem>> {
 /// 同 scope 下语义等同的已有记忆 / an existing memory with the same normalized claim.
 ///
 /// 包含已归档和已拒绝的：用户拒绝过的提案不该被反复推到 Inbox。
+/// 找到一条可以被取代的旧记忆 / the active memory an update would supersede.
+///
+/// 抽取器给的 `replaces` 是一段**近似的旧文本**，不是 id。所以这里按归一化后的
+/// 包含关系找，取最近确认的那一条。
+///
+/// 三个刻意的收窄：
+///
+/// - 只找 `active` / `verified`。取代一条用户从没确认过的候选没有意义，而动到
+///   `archived` / `forgotten` 等于把用户否掉的东西又翻出来。
+/// - 找不到就返回 `None`，调用方据此把 `supersedes_id` 留空——旧实现在这里执行的是
+///   `DELETE ... LIKE`，一个模型随口写的短语就能删掉一条它根本没打算碰的记忆。
+/// - 空串直接返回 `None`：否则"包含空串"匹配所有记忆。
+pub fn find_supersedable(
+    conn: &Connection,
+    approximate_old_claim: &str,
+    scope: &str,
+) -> ObjectResult<Option<MemoryItem>> {
+    let needle = crate::db::memory_store::normalize(approximate_old_claim);
+    if needle.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let sql = format!(
+        "SELECT {MEMORY_COLUMNS} FROM memory_items
+         WHERE scope = ?1 AND lifecycle IN ('active', 'verified')
+         ORDER BY updated_at_ms DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<_> = stmt
+        .query_map(params![scope], |row| Ok(map_memory(row)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for row in rows {
+        let item = row?;
+        let existing = crate::db::memory_store::normalize(&item.claim);
+        if existing.contains(&needle) || needle.contains(&existing) {
+            return Ok(Some(item));
+        }
+    }
+    Ok(None)
+}
+
 fn find_duplicate(
     conn: &Connection,
     claim: &str,
