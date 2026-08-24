@@ -478,6 +478,22 @@ export function IconTimeline({ size = 16 }: { size?: number }) {
   );
 }
 
+/**
+ * 这一轮 / inspect what a turn was built from.
+ *
+ * 不复用 IconSearch（那是"去找"）也不复用 IconSun（那是浅色主题）：这里要说的是
+ * "看看这条回答的依据"，所以是一份记录加一个放大镜。
+ */
+export function IconInspect({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h13M4 10h8" />
+      <circle cx="13" cy="16" r="4" />
+      <path d="M16 19l3.5 3.5" />
+    </svg>
+  );
+}
+
 export function IconMerge({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
