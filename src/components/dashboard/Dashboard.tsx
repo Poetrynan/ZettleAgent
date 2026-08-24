@@ -264,56 +264,57 @@ export function Dashboard() {
   return (
     <div className="panel">
       <div className="panel-content">
-        {/* Welcome Banner — gradient background with radial glow */}
-        <div className="dashboard-welcome animate-enter">
-          <h1>
-            {t('dashboard.welcome')}{' '}
-            <span className="logo-wordmark" style={{ fontSize: 'inherit' }}>
-              <span className="logo-zettel">Zettel</span>
-              <span className="logo-lambda-wrap"><span className="logo-agent-lambda">Λ</span></span>
-              <span className="logo-agent-rest">gent</span>
-            </span>
-          </h1>
-          <p>{t('app.tagline')}</p>
-        </div>
+        {/* ── Now — current state of the vault ────────────────────── */}
+        <section className="dash-band dash-band--now animate-enter" aria-label={state.lang === 'zh' ? '当前状态' : 'Current state'}>
+          <div className="dash-band-header">
+            <h1 className="dash-band-title">
+              {t('dashboard.welcome')}{' '}
+              <span className="logo-wordmark" style={{ fontSize: 'inherit' }}>
+                <span className="logo-zettel">Zettel</span>
+                <span className="logo-lambda-wrap"><span className="logo-agent-lambda">Λ</span></span>
+                <span className="logo-agent-rest">gent</span>
+              </span>
+            </h1>
+            <p className="dash-band-subtitle">{t('app.tagline')}</p>
+          </div>
 
-        {/* Stat Tiles — vault overview (detail metrics live in pipeline / agent cards below) */}
-        <div className="animate-enter animate-enter-delay-1 dashboard-stat-grid">
-          <div className="stat-card">
-            <div className="stat-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent-primary)' }}>
-              <IconNote size={20} />
+          <div className="animate-enter animate-enter-delay-1 dashboard-stat-grid">
+            <div className="stat-card">
+              <div className="stat-card-icon" style={{ background: 'rgba(61, 106, 80, 0.1)', color: 'var(--moss)' }}>
+                <IconNote size={20} />
+              </div>
+              <div className="stat-card-value">{fileCount}</div>
+              <div className="stat-card-label">{t('dashboard.totalNotes')}</div>
             </div>
-            <div className="stat-card-value">{fileCount}</div>
-            <div className="stat-card-label">{t('dashboard.totalNotes')}</div>
+            <div className="stat-card">
+              <div className="stat-card-icon" style={{ background: state.vaultPath ? 'rgba(61, 106, 80, 0.1)' : 'rgba(120, 120, 128, 0.08)', color: state.vaultPath ? 'var(--moss)' : 'var(--text-tertiary)' }}>
+                <IconDatabase size={20} />
+              </div>
+              <div className="stat-card-value stat-card-value--compact">{state.vaultPath ? t('dashboard.connected') : t('dashboard.none')}</div>
+              <div className="stat-card-label">{t('dashboard.vault')}</div>
+            </div>
+            <div className="stat-card">
+              <div
+                className="stat-card-icon"
+                style={{
+                  background: graphLinkCount !== null ? 'rgba(53, 95, 158, 0.1)' : 'rgba(120, 120, 128, 0.08)',
+                  color: graphLinkCount !== null ? 'var(--cobalt)' : 'var(--text-tertiary)',
+                }}
+              >
+                <IconLink size={20} />
+              </div>
+              <div className="stat-card-value">
+                {graphLinkCount !== null ? graphLinkCount : '—'}
+              </div>
+              <div className="stat-card-label">{t('dashboard.graphLinks')}</div>
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card-icon" style={{ background: state.vaultPath ? 'rgba(16, 185, 129, 0.1)' : 'rgba(120, 120, 128, 0.08)', color: state.vaultPath ? 'var(--success)' : 'var(--text-tertiary)' }}>
-              <IconDatabase size={20} />
-            </div>
-            <div className="stat-card-value stat-card-value--compact">{state.vaultPath ? t('dashboard.connected') : t('dashboard.none')}</div>
-            <div className="stat-card-label">{t('dashboard.vault')}</div>
-          </div>
-          <div className="stat-card">
-            <div
-              className="stat-card-icon"
-              style={{
-                background: graphLinkCount !== null ? 'rgba(59, 130, 246, 0.1)' : 'rgba(120, 120, 128, 0.08)',
-                color: graphLinkCount !== null ? 'var(--accent-secondary)' : 'var(--text-tertiary)',
-              }}
-            >
-              <IconLink size={20} />
-            </div>
-            <div className="stat-card-value">
-              {graphLinkCount !== null ? graphLinkCount : '—'}
-            </div>
-            <div className="stat-card-label">{t('dashboard.graphLinks')}</div>
-          </div>
-        </div>
+        </section>
 
-        <div className="animate-enter animate-enter-delay-2" style={{ marginBottom: 'var(--space-6)' }}>
-          {/* ── Quick Actions ── */}
+        {/* ── Build — manual actions and the data pipeline ────────── */}
+        <section className="dash-band dash-band--build animate-enter animate-enter-delay-2" aria-label={state.lang === 'zh' ? '构建' : 'Build'}>
           <div className="dash-section-header">
-            <h2 className="dash-section-title">{t('dashboard.quickActions')}</h2>
+            <h2 className="dash-section-title">{state.lang === 'zh' ? '构建' : 'Build'}</h2>
             <button
               className="btn btn-ghost btn-icon-sm"
               onClick={() => setShowHelpModal(true)}
@@ -338,12 +339,14 @@ export function Dashboard() {
               ?
             </button>
           </div>
+
+          {/* Quick actions */}
           <div style={{
             display: 'flex',
             gap: 'var(--space-3)',
             alignItems: 'stretch',
+            marginBottom: 'var(--space-4)',
           }}>
-            {/* Tool 1: Export Knowledge Graph */}
             <div className="step-card step-card--export">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="step-badge step-badge--export">①</span>
@@ -375,7 +378,6 @@ export function Dashboard() {
               </button>
             </div>
 
-            {/* Tool 2: Health Check */}
             <div className="step-card step-card--health">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="step-badge step-badge--health">②</span>
@@ -408,7 +410,7 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* ── Pipeline ── */}
+          {/* Pipeline */}
           <div className="dash-section-header" style={{ marginTop: 'var(--space-5)' }}>
             <h2 className="dash-section-title">{state.lang === 'zh' ? '数据流水线' : 'Data Pipeline'}</h2>
           </div>
@@ -573,23 +575,23 @@ export function Dashboard() {
             </div>
           </div>
 
-        {/* Indexing Progress Panel */}
-        {embeddingBuilding && embeddingStats && (
-          <ProgressPanel
-            title={state.lang === 'zh' ? '构建语义向量索引' : 'Building Vector Index'}
-            current={embeddingStats.indexed_chunks}
-            total={embeddingStats.total_chunks}
-            stage={buildStage}
-            stageIcon={<IconDatabase size={11} />}
-            cancelLabel={state.lang === 'zh' ? '中止' : 'Cancel'}
-            variant="organize"
-            hasSpacing
-            onCancel={() => {
-              cancelRef.current = true;
-              setBuildStage(state.lang === 'zh' ? '正在中止任务...' : 'Cancelling task...');
-            }}
-          />
-        )}
+          {/* Indexing Progress Panel */}
+          {embeddingBuilding && embeddingStats && (
+            <ProgressPanel
+              title={state.lang === 'zh' ? '构建语义向量索引' : 'Building Vector Index'}
+              current={embeddingStats.indexed_chunks}
+              total={embeddingStats.total_chunks}
+              stage={buildStage}
+              stageIcon={<IconDatabase size={11} />}
+              cancelLabel={state.lang === 'zh' ? '中止' : 'Cancel'}
+              variant="organize"
+              hasSpacing
+              onCancel={() => {
+                cancelRef.current = true;
+                setBuildStage(state.lang === 'zh' ? '正在中止任务...' : 'Cancelling task...');
+              }}
+            />
+          )}
 
           {/* Smart Organize Progress Panel */}
           {schedulerProgressInfo && (
@@ -611,60 +613,63 @@ export function Dashboard() {
               }}
             />
           )}
-        </div>
+        </section>
 
         <hr className="dash-divider" />
 
-        <AgentAutoOrganizeCard
-          status={schedulerStatus}
-          starting={schedulerStarting}
-          vaultReady={!!state.vaultPath}
-          intervalSecs={getSmartOrganizeConfig().intervalSecs}
-          isZh={state.lang === 'zh'}
-          onStart={async () => {
-            if (!isLlmConfigured(state.llmConfig)) {
-              showToast(
-                state.lang === 'zh'
-                  ? '⚠️ 请先在「设置 → 模型配置」中配置 LLM API 地址和模型名称'
-                  : '⚠️ Please configure LLM API endpoint and model in Settings → Model Configuration first',
-                'error',
-              );
-              return;
-            }
-            setSchedulerStarting(true);
-            try {
-              await startBackgroundOrganize({
-                vaultPaths: resolveVaultPaths(),
-                llmConfig: state.llmConfig,
-                methodology: state.methodology,
-              });
-              await loadSchedulerStatus();
-              showToast(t('dashboard.startedToast'), 'success');
-            } catch (e) {
-              console.error('[Dashboard] Failed to start scheduler:', e);
-              showToast(t('common.error') + ': ' + e, 'error');
-            } finally {
-              setSchedulerStarting(false);
-            }
-          }}
-          onStop={async () => {
-            try {
-              await stopScheduler();
-              setBackgroundOrganizeEnabled(false);
-              await loadSchedulerStatus();
-              showToast(t('dashboard.stoppedBgToast'), 'info');
-            } catch (e) {
-              console.error('[Dashboard] Failed to stop scheduler:', e);
-              showToast(t('common.error') + ': ' + e, 'error');
-            }
-          }}
-        />
+        {/* ── Observe — background work, timeline, and gaps ──────── */}
+        <section className="dash-band dash-band--observe animate-enter animate-enter-delay-3" aria-label={state.lang === 'zh' ? '观察' : 'Observe'}>
+          <AgentAutoOrganizeCard
+            status={schedulerStatus}
+            starting={schedulerStarting}
+            vaultReady={!!state.vaultPath}
+            intervalSecs={getSmartOrganizeConfig().intervalSecs}
+            isZh={state.lang === 'zh'}
+            onStart={async () => {
+              if (!isLlmConfigured(state.llmConfig)) {
+                showToast(
+                  state.lang === 'zh'
+                    ? '⚠️ 请先在「设置 → 模型配置」中配置 LLM API 地址和模型名称'
+                    : '⚠️ Please configure LLM API endpoint and model in Settings → Model Configuration first',
+                  'error',
+                );
+                return;
+              }
+              setSchedulerStarting(true);
+              try {
+                await startBackgroundOrganize({
+                  vaultPaths: resolveVaultPaths(),
+                  llmConfig: state.llmConfig,
+                  methodology: state.methodology,
+                });
+                await loadSchedulerStatus();
+                showToast(t('dashboard.startedToast'), 'success');
+              } catch (e) {
+                console.error('[Dashboard] Failed to start scheduler:', e);
+                showToast(t('common.error') + ': ' + e, 'error');
+              } finally {
+                setSchedulerStarting(false);
+              }
+            }}
+            onStop={async () => {
+              try {
+                await stopScheduler();
+                setBackgroundOrganizeEnabled(false);
+                await loadSchedulerStatus();
+                showToast(t('dashboard.stoppedBgToast'), 'info');
+              } catch (e) {
+                console.error('[Dashboard] Failed to stop scheduler:', e);
+                showToast(t('common.error') + ': ' + e, 'error');
+              }
+            }}
+          />
 
-        {/* Knowledge Evolution Timeline */}
-        <GlobalTimeline />
+          {/* Knowledge Evolution Timeline */}
+          <GlobalTimeline />
 
-        {/* Knowledge Gap Analysis */}
-        <KnowledgeGapAnalysis />
+          {/* Knowledge Gap Analysis */}
+          <KnowledgeGapAnalysis />
+        </section>
       </div>
 
       {/* Canvas Export Modal */}
