@@ -1554,8 +1554,10 @@ export const en = {
     'knowledge.memory.emptyFiltered': 'No memory matches these filters.',
     'knowledge.memory.emptyFilteredHint': 'Clear the filters to see everything that is remembered.',
     'knowledge.memory.clearFilters': 'Clear filters',
+    // searchLabel is now the aria-label only (the visible label was a copy of the
+    // placeholder); the placeholder says what can actually be searched.
     'knowledge.memory.searchLabel': 'Search remembered claims',
-    'knowledge.memory.searchPlaceholder': 'Search what is remembered',
+    'knowledge.memory.searchPlaceholder': 'Search claims, names or keywords…',
     'knowledge.memory.filterState': 'State',
     'knowledge.memory.filterKind': 'Type',
     'knowledge.memory.allKinds': 'All types',

@@ -1550,8 +1550,10 @@ export const zh = {
     'knowledge.memory.emptyFiltered': '没有记忆符合当前筛选。',
     'knowledge.memory.emptyFilteredHint': '清掉筛选就能看到全部记住的内容。',
     'knowledge.memory.clearFilters': '清除筛选',
+    // searchLabel 现在只做 aria-label（可见 label 去掉了，它和 placeholder 是同一句话）；
+    // placeholder 换成能告诉用户"能搜什么"的提示。
     'knowledge.memory.searchLabel': '搜索记住的内容',
-    'knowledge.memory.searchPlaceholder': '搜索记住的内容',
+    'knowledge.memory.searchPlaceholder': '搜索记忆里的说法、人名或关键词…',
     'knowledge.memory.filterState': '状态',
     'knowledge.memory.filterKind': '类型',
     'knowledge.memory.allKinds': '全部类型',

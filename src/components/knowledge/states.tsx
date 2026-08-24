@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t, tf } from '../../lib/i18n';
 import type { TranslationKey } from '../../lib/i18n';
+import { IconEmpty } from '../icons';
 
 /**
  * 知识中心的四种状态 / the four states every knowledge surface has.
@@ -80,6 +81,11 @@ export function KcEmpty({
 }) {
   return (
     <div className="kc-empty">
+      {/* 一个中性的线稿图标，不是 emoji、也不套彩色圆盘：它只负责让这块空白看起来
+          是"设计过的空"，而不是"渲染失败"。aria-hidden 因为标题已经把话说完了。 */}
+      <span className="kc-empty-icon" aria-hidden="true">
+        <IconEmpty size={44} />
+      </span>
       <div className="kc-empty-title">{title}</div>
       {hint && <div className="kc-empty-hint">{hint}</div>}
       {action && (

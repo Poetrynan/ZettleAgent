@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ComponentType } from 'react';
 import { t } from '../../lib/i18n';
 import type { TranslationKey } from '../../lib/i18n';
 import { useApp } from '../../contexts/AppContext';
@@ -10,6 +11,14 @@ import { TaskCenter } from './TaskCenter';
 import { KnowledgeHealth } from './KnowledgeHealth';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
+import {
+  IconBrain,
+  IconChart,
+  IconCheck,
+  IconClipboard,
+  IconMerge,
+  IconTimeline,
+} from '../icons';
 import '../../styles/knowledge-center.css';
 
 /**
@@ -33,13 +42,23 @@ import '../../styles/knowledge-center.css';
 
 export type KnowledgePage = 'inbox' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity';
 
-const PAGES: { key: KnowledgePage; labelKey: TranslationKey; hintKey: TranslationKey }[] = [
-  { key: 'inbox', labelKey: 'knowledge.tab.inbox', hintKey: 'knowledge.tabHint.inbox' },
-  { key: 'memory', labelKey: 'knowledge.tab.memory', hintKey: 'knowledge.tabHint.memory' },
-  { key: 'changes', labelKey: 'knowledge.tab.changes', hintKey: 'knowledge.tabHint.changes' },
-  { key: 'tasks', labelKey: 'knowledge.tab.tasks', hintKey: 'knowledge.tabHint.tasks' },
-  { key: 'health', labelKey: 'knowledge.tab.health', hintKey: 'knowledge.tabHint.health' },
-  { key: 'activity', labelKey: 'knowledge.tab.activity', hintKey: 'knowledge.tabHint.activity' },
+/**
+ * 六页各配一个图标。全部取自 `components/icons.tsx`，不新画：一列裸文字没有视觉锚点，
+ * 用户每次都得从头读一遍标签才知道自己在哪。图标不套彩色圆盘，颜色跟着导航项的文字走
+ * （见 `.kc-nav-item svg`），所以它们在深浅两个主题下都不会自成一块色斑。
+ */
+const PAGES: {
+  key: KnowledgePage;
+  labelKey: TranslationKey;
+  hintKey: TranslationKey;
+  Icon: ComponentType<{ size?: number }>;
+}[] = [
+  { key: 'inbox', labelKey: 'knowledge.tab.inbox', hintKey: 'knowledge.tabHint.inbox', Icon: IconClipboard },
+  { key: 'memory', labelKey: 'knowledge.tab.memory', hintKey: 'knowledge.tabHint.memory', Icon: IconBrain },
+  { key: 'changes', labelKey: 'knowledge.tab.changes', hintKey: 'knowledge.tabHint.changes', Icon: IconMerge },
+  { key: 'tasks', labelKey: 'knowledge.tab.tasks', hintKey: 'knowledge.tabHint.tasks', Icon: IconCheck },
+  { key: 'health', labelKey: 'knowledge.tab.health', hintKey: 'knowledge.tabHint.health', Icon: IconChart },
+  { key: 'activity', labelKey: 'knowledge.tab.activity', hintKey: 'knowledge.tabHint.activity', Icon: IconTimeline },
 ];
 
 /**
@@ -106,6 +125,7 @@ export function KnowledgeCenter() {
   return (
     <div className="kc-root">
       <nav className="kc-nav" aria-label={t('knowledge.navTitle')}>
+        <div className="kc-nav-title">{t('knowledge.navTitle')}</div>
         {PAGES.map(item => (
           <button
             key={item.key}
@@ -114,6 +134,7 @@ export function KnowledgeCenter() {
             title={t(item.hintKey)}
             onClick={() => setPage(item.key)}
           >
+            <item.Icon size={15} />
             <span className="kc-nav-label">{t(item.labelKey)}</span>
             <KcCount count={badge(item.key)} />
           </button>

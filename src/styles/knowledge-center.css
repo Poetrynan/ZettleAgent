@@ -1,8 +1,8 @@
 /* ── Knowledge Center ────────────────────────────────────────────────
-   Agent 自己的工作台。三段式：左侧页面导航、中间列表、卡片内的折叠技术详情。
+   Agent 自己的工作台。设计语言：暖档案 × 技术精度。
 
-   这里不新增任何颜色、间距或圆角常量——全部走 theme-tokens.css 和 index.css 的
-   token，否则深色主题下会出现一块自成一派的浅色区域。
+   结构：左侧页面导航（180px）+ 右侧内容面。
+   所有颜色走 theme-tokens.css 语义 token。
    ------------------------------------------------------------------ */
 
 .kc-root {
@@ -18,88 +18,125 @@
 .kc-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  width: 212px;
+  gap: 1px;
+  width: 180px;
   flex-shrink: 0;
-  padding: var(--space-5) var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-4);
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
+}
+
+.kc-nav-title {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 2px 10px 10px;
+  letter-spacing: -0.01em;
 }
 
 .kc-nav-item {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  /* 40px：这是一级导航，不是密集列表。36px 排下来像一份下拉菜单。 */
-  min-height: 40px;
-  padding: 0 var(--space-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: var(--text-base);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
-  transition:
-    background var(--transition-fast, 160ms) ease,
-    color var(--transition-fast, 160ms) ease;
+  user-select: none;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
+.kc-nav-item svg {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: color var(--duration-fast) var(--ease-out);
+}
 
 .kc-nav-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 
-/*
-   选中态不只是"底色深一点"。
-   一排灰底里再来一格更深的灰，扫一眼分不出哪个是当前页；左侧那条实心竖标是形状差别，
-   缩放、灰度、色盲下都还在。
-*/
+.kc-nav-item:hover svg {
+  color: var(--text-secondary);
+}
+
+.kc-nav-item:active {
+  transform: none;
+}
+
 .kc-nav-item.active {
-  background: var(--bg-tertiary);
+  background: var(--bg-hover);
   color: var(--text-primary);
   font-weight: 600;
 }
 
-.kc-nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 3px;
-  height: 18px;
-  border-radius: 0 var(--radius-full) var(--radius-full) 0;
-  background: var(--accent-primary);
-  transform: translateY(-50%);
+.kc-nav-item.active svg {
+  color: var(--text-primary);
 }
 
-
-/*
-   键盘焦点。列在一起是为了以后加一个可聚焦元件时不会漏掉它：这一层里能按的东西
-   全在这个选择器里。`.kc-chip` 两条都写——按钮形态的 chip 自己获得焦点，筛选那组是
-   包着 checkbox 的 label，焦点落在里面的 input 上。
-*/
-.kc-nav-item:focus-visible,
-.kc-btn:focus-visible,
-.kc-btn-quiet:focus-visible,
-.kc-chip:focus-visible,
-.kc-details > summary:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 1px;
+.kc-nav-item:focus-visible {
+  outline: 1.5px solid var(--border-focus);
+  outline-offset: -1.5px;
 }
 
+.kc-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
+/* Knowledge badge in nav: compact pill */
+.kc-nav-item .kc-count {
+  flex-shrink: 0;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 1.4;
+  min-width: 16px;
+  text-align: center;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+/* Narrow: collapse to icon column */
+@container (max-width: 520px) {
+  .kc-nav {
+    width: 52px;
+    padding: var(--space-2) var(--space-1) var(--space-3);
+  }
+
+  .kc-nav-title {
+    display: none;
+  }
+
+  .kc-nav-item {
+    justify-content: center;
+    padding: 8px;
+    gap: 0;
+  }
+
+  .kc-nav-label {
+    display: none;
+  }
+}
 
 /* ── 页面 ─────────────────────────────────────────────────────────── */
 
-/*
-   `.kc-page` 是容器。
-   `@container` 查的是祖先容器的尺寸，元素查不到自己——所以宽屏下要改的变量必须落在
-   后代（`.kc-page-body`）上，写在 `.kc-page` 自己身上那条规则一次都不会命中。
-*/
 .kc-page {
   container-type: inline-size;
   display: flex;
@@ -109,49 +146,71 @@
   min-height: 0;
 }
 
-
-
-/*
-   页头 / the page header.
-   知识中心是一个顶层界面，不是一个设置面板的子页；标题给到 2xl，副标题给到正文号，
-   上下留白按 space-6 起。之前 xl + text-sm + space-5 在一块 1600px 宽的窗口里读起来
-   像一个被塞进角落的抽屉。
-*/
+/* 页头与页体共用 --bg-primary，层次只由一条 rule 承担。
+   理由：左侧导航已经是 --bg-secondary，页头再用一次 secondary 会在左上角拼出一个
+   L 形色块，读起来像画坏了的边框；而 primary 与 secondary 之间只差几个亮度点，
+   再叠一条 border-bottom 等于对同一条边界说了两遍。 */
 .kc-page-head {
   padding: var(--space-6) var(--space-6) var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
 }
 
 .kc-page-title {
-
   margin: 0;
+  font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   line-height: var(--leading-tight);
+  color: var(--text-primary);
 }
 
 .kc-page-hint {
   margin: var(--space-2) 0 0;
   max-width: 60ch;
-  color: var(--text-secondary);
-  font-size: var(--text-base);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
   line-height: var(--leading-normal);
 }
 
-/*
-   正文区 / the scroll area.
-
-   度量走 `--kc-measure`，默认落在这里、fallback 也写死：Chat 侧栏里这些 `kc-*` 类没有
-   `.kc-page` 祖先，变量拿不到值时整条声明会失效，写 fallback 才不会在 360px 的侧栏里
-   退化成无上限。
-*/
+/* 列方向的 flex 容器，为的是让空状态能在剩余高度里居中。
+   有内容时不破坏滚动：页面外壳用 `flex: 1 0 auto`（能长不能缩），
+   所以内容比容器高时 scrollHeight 仍然大于 clientHeight，滚动条照常出现。 */
 .kc-page-body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-6);
   --kc-measure: 760px;
+}
+
+/* 列 flex 的子项默认 `flex-shrink: 1`：内容比容器高时它们会被压回容器高度，
+   于是内容被裁掉而**不会**出现滚动条。所有直接子项一律禁止收缩，滚动交回 .kc-page-body。 */
+.kc-page-body > * {
+  flex-shrink: 0;
+}
+
+/* 各页外壳。撑满可用高度是给空状态用的；`flex-shrink: 0` 保证有内容时
+   外壳不会被压回容器高度（那样内容会被裁掉而不是触发滚动）。 */
+.kc-memory,
+.kc-tasks,
+.kc-health,
+.kc-change-review,
+.kc-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+@container (min-width: 1180px) {
+  .kc-page-body {
+    --kc-measure: 1240px;
+  }
 }
 
 /* ── 列表与卡片 ───────────────────────────────────────────────────── */
@@ -164,17 +223,13 @@
   max-width: var(--kc-measure, 760px);
 }
 
-/*
-   宽窗口下铺成两列，而不是把一条 760px 的窄柱钉在左边、右边空掉半个屏幕。
-   两列同时让每行更短——比把单张卡片拉到 1200px 宽更好读。
-   `align-items: start` 是必须的：默认拉伸会把同一行两张卡片撑成一样高，短的那张下面
-   多出一块空白。
-*/
-@container (min-width: 1180px) {
-  .kc-page-body {
-    --kc-measure: 1240px;
-  }
+/* 计数行是列表的说明，不是一张卡：两列布局下它必须横跨整行，
+   否则会占掉第一张卡的位置。 */
+.kc-list > .kc-muted {
+  grid-column: 1 / -1;
+}
 
+@container (min-width: 1180px) {
   .kc-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-4);
@@ -182,31 +237,20 @@
   }
 }
 
-
-
-
-/*
-   卡片是这个页面的主要节奏。
-   一点点阴影 + 比列表底色更亮一档的表面，让"一条待办"读起来是一个对象，而不是被两条
-   分割线夹住的一段文字。hover 只动阴影和边框——不动 transform，避免鼠标划过时整列跳动。
-*/
 .kc-card {
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
-  transition:
-    border-color var(--transition-fast, 160ms) ease,
-    box-shadow var(--transition-fast, 160ms) ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
-
+/* hover 只改颜色，不做位移：卡片列表里任何 translate 都会让整列跟着抖。 */
 .kc-card:hover {
-  border-color: var(--border);
+  border-color: var(--border-strong, var(--border));
   box-shadow: var(--shadow-md);
 }
-
 
 .kc-card-head {
   display: flex;
@@ -226,6 +270,17 @@
   font-size: var(--text-lg);
   font-weight: 600;
   line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+/* 变更列表和任务卡把标题放进了 .kc-card-head 里。head 是 align-items: center 的
+   flex 行，`margin-top` 在这里只会把标题往下顶，和状态标错开一截。 */
+.kc-card-head > .kc-card-title {
+  flex: 1 1 12ch;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
 }
 
 .kc-card-summary {
@@ -235,9 +290,8 @@
   line-height: var(--leading-normal);
 }
 
-
 .kc-card-summary-bad {
-  color: var(--danger);
+  color: var(--vermilion);
   word-break: break-word;
 }
 
@@ -288,394 +342,586 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  /* 32px 太矮，指针稍偏就点空；36px 和导航项对齐，视觉上也成一条线。 */
   min-height: 36px;
   padding: 0 var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
-  white-space: nowrap;
   cursor: pointer;
-  transition:
-    background var(--transition-fast, 160ms) ease,
-    border-color var(--transition-fast, 160ms) ease,
-    color var(--transition-fast, 160ms) ease;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 
-/*
-   hover 一定同时声明前景色。
-   只换背景、让文字继承的写法在两套主题里各有一半概率撞色——那正是"hover 之后字看不
-   清了"的来源。这一层所有 hover 都遵守：背景动，文字色跟着一起动。
-*/
-.kc-btn:hover:not(:disabled) {
-  border-color: var(--border);
+.kc-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong, var(--border));
+}
+
+.kc-btn:active {
+  transform: scale(0.98);
+}
+
+.kc-btn:focus-visible,
+.kc-btn-quiet:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.kc-btn:disabled,
+.kc-btn-quiet:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kc-btn:disabled:hover,
+.kc-btn-quiet:disabled:hover {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.kc-btn-primary {
+  background: var(--vermilion);
+  color: var(--text-inverse);
+  border-color: var(--vermilion);
+}
+
+.kc-btn-primary:hover {
+  background: var(--vermilion-strong);
+  border-color: var(--vermilion-strong);
+  color: var(--text-inverse);
+}
+
+.kc-btn-danger {
+  background: var(--vermilion-tint);
+  color: var(--vermilion);
+  border-color: var(--vermilion-line);
+}
+
+.kc-btn-danger:hover {
+  background: var(--stamp-pending-bg);
+  color: var(--vermilion-strong);
+  border-color: var(--vermilion-line);
+}
+
+.kc-btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.kc-btn-quiet:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 
-.kc-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
+.kc-btn-quiet:active {
+  transform: scale(0.96);
 }
 
-/*
-   每个区域只有一个 primary。
-   底色朝"文字色"的方向混一档：浅色主题下强调绿被压深、深色主题下被提亮，两边都是朝
-   着和字色拉开对比的方向走。`--accent-primary` 直接配 `--text-inverse` 在浅色下只有
-   3.3:1，不到 4.5:1 的正文门槛。
-*/
-.kc-btn-primary {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--accent-primary) 88%, var(--text-primary));
-  color: var(--text-inverse);
+/* ── 表单 ─────────────────────────────────────────────────────────── */
+
+.kc-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kc-field-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.kc-input {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.kc-input:focus,
+.kc-input:focus-visible {
+  border-color: var(--vermilion-line);
+  box-shadow: 0 0 0 3px var(--vermilion-tint);
+}
+
+/* 数字类输入（步进、日期时间）不能因为字宽变化跳动。 */
+.kc-input[type='number'],
+.kc-input[type='datetime-local'] {
+  font-variant-numeric: tabular-nums;
+}
+
+.kc-textarea {
+  min-height: 76px;
+  resize: vertical;
+  line-height: var(--leading-normal);
+  font-family: inherit;
+}
+
+/* 搜索框：图标在框内左侧，label 交给 aria-label，可见文案只留 placeholder。 */
+.kc-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 240px;
+  min-width: 220px;
+}
+
+.kc-search-icon {
+  position: absolute;
+  left: 10px;
+  display: flex;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.kc-search .kc-input {
+  width: 100%;
+  padding-left: 32px;
+}
+
+/* 原生 <select>：关掉系统外观，箭头由一个绝对定位的 svg 自己画。
+   用 svg 元素而不是 background-image 里的内联 svg，是为了让箭头能吃
+   currentColor —— data URI 里的颜色只能写死，那就得新造颜色值。 */
+.kc-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.kc-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
+.kc-select-arrow {
+  position: absolute;
+  right: 9px;
+  display: flex;
+  color: var(--text-tertiary);
+  pointer-events: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.kc-select-wrap:hover .kc-select-arrow {
+  color: var(--text-secondary);
+}
+
+.kc-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+/* 筛选条。搜索占主位（flex:1），状态与类型跟在后面；
+   align-items: center 而不是 flex-end —— fieldset 修好之后各块高度不再一致，
+   靠底对齐会把 chip 行压到搜索框下沿。 */
+.kc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
+}
+
+/* 仍带可见 label 的字段（任务页搜索、提醒规则那四个输入）：label 在上、控件在下，
+   所以要按底对齐，它的输入框才和旁边的按钮共一条底线。
+   带搜索框的那个占主位，和记忆页的 .kc-search 保持同一套主次关系。 */
+.kc-filters > .kc-field {
+  align-self: flex-end;
+  min-width: 0;
+}
+
+.kc-filters > .kc-field:has(input[type='search']) {
+  flex: 1 1 220px;
+}
+
+/* 状态筛选组：fieldset 的 UA 默认值必须全部清掉。
+   `min-width: 0` 尤其关键 —— fieldset 有个 `min-width: min-content` 的
+   UA 默认值，不清掉它在 flex 里就不肯收缩。
+   legend 不做 flex item（它被排在 fieldset 的匿名内容盒之外），
+   所以 chip 另装一层 .kc-chipset，标题老老实实待在上面一行。 */
+.kc-chipset-group {
+  display: block;
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.kc-chipset-legend {
+  display: block;
+  float: none;
+  width: auto;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* 提醒规则（任务页）里的总开关是一个裸的原生 checkbox。不重画它——重画会丢掉
+   键盘和读屏器的原生行为；只把选中色接到项目色板，并补一个可见焦点环。
+   `:not(.kc-chip-input)` 是必须的：chip 里的复选框要保持视觉隐藏，
+   而这条选择器比 .kc-chip-input 更具体，不排除就会把它显形。 */
+.kc-filters input[type='checkbox']:not(.kc-chip-input) {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--vermilion);
+  cursor: pointer;
+}
+
+.kc-filters input[type='checkbox']:not(.kc-chip-input):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.kc-details {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+}
+
+.kc-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.kc-details summary:hover {
+  color: var(--text-primary);
+}
+
+.kc-details summary:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.kc-nudges {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* ── 文本辅助 ─────────────────────────────────────────────────────── */
+
+.kc-muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+/* 中文没有真正的斜体字形，`font-style: italic` 会触发浏览器的伪斜体（强制倾斜），
+   一整段中文说明被压歪非常难看。降权改用字号 + 行高，颜色仍保持 --text-secondary：
+   --text-tertiary 在浅色纸面上只有约 3:1，做正文读不动。 */
+.kc-note {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.kc-warn {
+  color: var(--vermilion);
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
-/*
-   hover 继续往同一个方向深一档，不用 `filter: brightness()`。
-   filter 作用于整个元素，会把文字一起提亮——底和字同时变亮就是"字被糊进背景里"。
-*/
-.kc-btn-primary:hover:not(:disabled) {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--accent-primary) 76%, var(--text-primary));
-  color: var(--text-inverse);
+.kc-warn-line {
+  color: var(--vermilion);
+  font-weight: 600;
 }
 
-/* 破坏性动作用明确文字 + 危险色描边，不用一个孤立的 ×。 */
-.kc-btn-danger {
-  border-color: var(--danger-border);
-  background: var(--bg-secondary);
-  color: var(--danger);
+.kc-item-warning {
+  border-left: 3px solid var(--vermilion-line);
 }
 
-.kc-btn-danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  background: var(--danger-bg);
-  color: var(--danger);
+.kc-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
 }
 
+.kc-task-meta time {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 
-/* ── 状态标 ───────────────────────────────────────────────────────── */
+/* ── 芯片 ─────────────────────────────────────────────────────────── */
+
+/* chip 既当 <button>（tablist）用，也当 <label>（多选筛选）用。
+   position: relative 是给里面那个视觉隐藏的 checkbox 定位的。 */
+.kc-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.kc-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.kc-chip:active {
+  transform: scale(0.98);
+}
+
+.kc-chip.active {
+  background: var(--vermilion-tint);
+  color: var(--vermilion);
+  border-color: var(--vermilion-line);
+}
+
+/* chip 里的原生复选框：选中态由 .kc-chip.active 的 tint 表达，方框必须消失。
+   用 position + opacity 而不是 display: none —— 后者会让它从 tab 序里掉出去，
+   键盘用户就再也选不到这些筛选项了。 */
+.kc-chip-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+/* 焦点环挂在 chip 上，因为可见的是 chip 而不是那个透明的 input。 */
+.kc-chip:has(.kc-chip-input:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.kc-chip:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.kc-chipset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ── 空状态 ───────────────────────────────────────────────────────── */
+
+/* 空状态在剩余高度里居中。`flex: 1 0 auto` 只在它是列 flex 的子项时生效，
+   所以下面把三处真实的父级都列出来，而不是给 .kc-empty 一条会到处生效的规则
+   —— 抽屉里的空状态就不该撑满高度。 */
+.kc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.kc-page-body > .kc-empty,
+.kc-memory > .kc-empty,
+.kc-tasks > .kc-empty,
+.kc-change-review > .kc-empty {
+  flex: 1 0 auto;
+  min-height: 220px;
+}
+
+.kc-empty-icon {
+  display: flex;
+  color: var(--text-tertiary);
+}
+
+/* IconEmpty 自己带 opacity="0.3"，这里再叠一次 0.3 会把它压到 0.09（几乎看不见）。 */
+.kc-empty svg {
+  flex-shrink: 0;
+}
+
+.kc-empty-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.kc-empty-hint {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  max-width: 40ch;
+  line-height: 1.5;
+}
+
+/* ── 骨架屏 ───────────────────────────────────────────────────────── */
+
+.kc-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.kc-skeleton-row {
+  height: 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  animation: kc-shimmer 1.5s infinite;
+}
+
+@keyframes kc-shimmer {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+/* ── 状态徽章 ─────────────────────────────────────────────────────── */
 
 .kc-pill {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  /* 1px 的上下内距让状态标看起来像被压扁的标签。 */
-  min-height: 20px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
+  gap: 6px;
+  padding: 3px 10px;
   border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: 500;
-  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-
-/* 形状随语义变，所以色盲用户也能区分三个警示级别，而不是只能靠颜色。 */
 .kc-pill-mark {
   width: 6px;
   height: 6px;
   border-radius: var(--radius-full);
-  background: currentColor;
-}
-
-.kc-pill-info {
-  border-color: var(--info-border);
-  background: var(--info-bg);
-  color: var(--info);
-}
-
-.kc-pill-success {
-  border-color: var(--success-border);
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.kc-pill-warning {
-  border-color: var(--warning-border);
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-
-.kc-pill-warning .kc-pill-mark {
-  border-radius: 1px;
-}
-
-.kc-pill-danger {
-  border-color: var(--danger-border);
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.kc-pill-danger .kc-pill-mark {
-  border-radius: 0;
-  transform: rotate(45deg);
-}
-
-/* ── 计数角标 ─────────────────────────────────────────────────────── */
-
-.kc-count {
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  /* 10px 的字更吃对比度，所以底色和按钮一样朝字色方向压一档。 */
-  background: color-mix(in srgb, var(--accent-primary) 88%, var(--text-primary));
-  color: var(--text-inverse);
-  font-size: 10px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 18px;
-  text-align: center;
   flex-shrink: 0;
 }
 
-
-/*
-   顶栏窄容器下 `toolbar.css` 会把 `.toolbar-nav-btn span` 整体隐藏（只留图标）。
-   角标不能跟着消失——图标缩成一个图标恰恰是最需要"这里有 3 件事"这个信号的时候。
-   用更高的选择器权重把它留下，而不是 !important。
-*/
-.toolbar-nav-group .toolbar-nav-btn span.kc-count {
-  display: inline-block;
-}
-
-/* Chat 侧栏跳知识中心的入口。侧栏放得下摘要，放不下筛选、批量和历史。 */
-.knowledge-panel-open-center {
-  padding: 2px var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.knowledge-panel-open-center:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-
-/* ── 四种状态 ─────────────────────────────────────────────────────── */
-
-/*
-   骨架屏跟着列表的度量和列数走。
-   宽度不一致的话，加载完成的那一刻整块内容会横向跳一次——那一下比多等 200ms 更难受。
-*/
-.kc-skeleton {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-  width: 100%;
-  max-width: var(--kc-measure, 760px);
-}
-
-@container (min-width: 1180px) {
-  .kc-skeleton {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-4);
-  }
-}
-
-.kc-skeleton-row {
-  height: 96px;
-  border-radius: var(--radius-lg);
+.kc-pill-neutral {
   background: var(--bg-tertiary);
-  /* 动画只是"在读"的提示，不是装饰：减少动效偏好下直接静止。 */
-  animation: kc-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes kc-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.85; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .kc-skeleton-row {
-    animation: none;
-  }
-}
-
-/*
-   空状态给足留白。
-   "这里没有东西"是这一页最常见的正常状态（收件箱空掉才是目标），所以它该看起来是
-   一个从容的结论，而不是页面加载失败后剩下的一行小字。
-*/
-.kc-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  max-width: 56ch;
-  padding: var(--space-8) 0;
-}
-
-
-.kc-empty-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  line-height: var(--leading-tight);
-}
-
-.kc-empty-hint {
   color: var(--text-secondary);
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
+  border: 1px solid var(--border-subtle);
 }
+
+.kc-pill-neutral .kc-pill-mark {
+  background: var(--text-tertiary);
+}
+
+.kc-pill-info {
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
+  border: 1px solid var(--cobalt-line);
+}
+
+.kc-pill-info .kc-pill-mark {
+  background: var(--cobalt);
+}
+
+.kc-pill-success {
+  background: var(--moss-tint);
+  color: var(--moss);
+  border: 1px solid var(--moss-line);
+}
+
+.kc-pill-success .kc-pill-mark {
+  background: var(--moss);
+}
+
+.kc-pill-warning {
+  background: var(--ochre-tint);
+  color: var(--ochre);
+  border: 1px solid var(--ochre-line);
+}
+
+.kc-pill-warning .kc-pill-mark {
+  background: var(--ochre);
+}
+
+.kc-pill-danger {
+  background: var(--vermilion-tint);
+  color: var(--vermilion);
+  border: 1px solid var(--vermilion-line);
+}
+
+.kc-pill-danger .kc-pill-mark {
+  background: var(--vermilion);
+}
+
+/* ── 错误 / 失败 ──────────────────────────────────────────────────── */
 
 .kc-failed {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-  width: 100%;
-  max-width: var(--kc-measure, 760px);
-  padding: var(--space-4);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--radius-lg);
-  background: var(--danger-bg);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  text-align: center;
 }
 
 .kc-failed-text {
-  color: var(--danger);
-  font-size: var(--text-base);
-}
-
-.kc-note {
-  width: 100%;
-  max-width: var(--kc-measure, 760px);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--info-border);
-  border-radius: var(--radius-md);
-  background: var(--info-bg);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
-
-/* ── 技术详情折叠区 ───────────────────────────────────────────────── */
-
-.kc-details {
-  margin-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-2);
-}
-
-.kc-details > summary {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px var(--space-1);
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: color var(--transition-fast, 160ms) ease;
-}
-
-/* 折叠标题也是一个按钮。三级文字色本来就淡，hover 时提一档才看得出能点。 */
-.kc-details > summary:hover {
-  color: var(--text-secondary);
-}
-
-
-.kc-pre {
-  margin: var(--space-2) 0 0;
-  max-height: 160px;
-  overflow: auto;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.kc-kv {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-1) var(--space-3);
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-xs);
-}
-
-.kc-kv dt {
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-}
-
-.kc-kv dd {
-  margin: 0;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-}
-
-/* ── 活动页 ───────────────────────────────────────────────────────── */
-
-.kc-path-list {
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.kc-path {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  overflow-wrap: anywhere;
-}
-
-.kc-table {
-  width: 100%;
-  margin-top: var(--space-2);
-  border-collapse: collapse;
-  font-size: var(--text-xs);
-}
-
-.kc-table td {
-  padding: var(--space-1) var(--space-2) var(--space-1) 0;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  vertical-align: top;
-}
-
-/* 审计一行有四列，扫读时靠一层极淡的底色锁定当前行。 */
-.kc-table tr:hover td {
-  background: var(--bg-secondary);
-}
-
-.kc-table-event {
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-
-
-/*
-   成功不用绿色。
-   `--success` 在浅色主题下配白底只有 3.9:1，而这里是 12px 的小字；更重要的是一整列
-   绿色的"成功"会把真正需要被看见的失败淹掉。
-*/
-.kc-table-ok {
-  color: var(--text-secondary);
-}
-
-.kc-table-bad {
-  color: var(--danger);
+  color: var(--vermilion);
   font-weight: 600;
 }
 
-
-.kc-table-time {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.kc-failed pre {
+  text-align: left;
+  font-size: 11px;
+  line-height: 1.5;
 }
+
+/* ── 可访问性 ─────────────────────────────────────────────────────── */
 
 .kc-sr-only {
   position: absolute;
@@ -689,241 +935,112 @@
   border: 0;
 }
 
-/* ── 窄窗口 ───────────────────────────────────────────────────────── */
-/*
-   360px 下侧栏 176px 会把内容挤成一条。改成上方横向滚动的一排 tab：导航仍然完整
-   可见，内容拿回整个宽度。
-*/
-@media (max-width: 720px) {
-  .kc-root {
-    flex-direction: column;
-  }
+/* ── 行内动作组 ───────────────────────────────────────────────────── */
 
-  .kc-nav {
-    flex-direction: row;
-    width: auto;
-    overflow-x: auto;
-    padding: var(--space-2);
-    border-right: none;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .kc-nav-item {
-    white-space: nowrap;
-  }
-
-  .kc-page-head,
-  .kc-page-body {
-    padding-left: var(--space-3);
-    padding-right: var(--space-3);
-  }
-}
-
-/* ── Context Inspector ────────────────────────────────────────────── */
-/*
-   侧栏（约 360px）和知识中心（宽）用同一套类，所以这里不写固定宽度，只用
-   `--space-*` / `--text-*` 令牌，宽窗口下由父容器的 max-width 收敛行长。
-*/
-
-.kc-inspector {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.kc-inspector-summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-}
-
-.kc-inspector-count {
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.kc-inspector-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.kc-section-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: none;
-}
-
-.kc-section-n {
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-  font-weight: 400;
-}
-
-.kc-kv-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
-}
-
-.kc-kv-key {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-}
-
-.kc-kv-val {
-  flex: 1 1 60%;
-  min-width: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-
-/* 技术详情里放的是 id、路径、原始码。它们没有空格可断，360px 的侧栏里必须允许硬断。 */
-.kc-mono {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-}
-
-
-.kc-muted {
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
-
-/* 警示带文字，不靠颜色单独表意；左边框在灰度下也能看出来。 */
-.kc-warn {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--warning-border);
-  border-left-width: 3px;
-  border-radius: var(--radius-md);
-  background: var(--warning-bg);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.kc-warn-line {
-  overflow-wrap: anywhere;
-}
-
-.kc-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-}
-
-.kc-item-warning {
-  border-left: 3px solid var(--warning-border);
-}
-
-.kc-item-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.kc-item-title {
-  color: var(--text-primary);
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  overflow-wrap: anywhere;
-}
-
-
-.kc-why {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.kc-why-item::before {
-  content: '· ';
-}
-
-.kc-why-item:first-child::before {
-  content: '';
-}
-
-.kc-item-warnings,
 .kc-item-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
-/*
-   次要动作 / the quiet button.
-   之前写了 `border-color` 却没有 `border-style`，所以 hover 时那条边框根本画不出来，
-   唯一的变化是下划线消失——hover 之后看起来比 hover 之前更不像按钮。现在是加底色、
-   文字加深、下划线保留。
-*/
-.kc-btn-quiet {
-  min-height: 24px;
-  padding: 2px var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--accent-secondary);
+/* 已经在 .kc-edit / .kc-note 这类有自己内边距的盒子里时不再重复留白。 */
+.kc-edit > .kc-item-actions,
+.kc-note > .kc-item-actions {
+  margin-top: var(--space-1);
+}
+
+/* ── 键值对 ───────────────────────────────────────────────────────── */
+
+.kc-kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 3px 0;
+  font-size: var(--text-sm);
+}
+
+.kc-kv-key {
+  flex-shrink: 0;
+  min-width: 9ch;
+  color: var(--text-tertiary);
   font-size: var(--text-xs);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  transition:
-    background var(--transition-fast, 160ms) ease,
-    color var(--transition-fast, 160ms) ease;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
 }
 
-.kc-btn-quiet:hover:not(:disabled) {
-  border-color: var(--accent-secondary-border);
-  background: var(--accent-secondary-bg);
-  color: var(--accent-secondary);
-}
-
-.kc-gap {
-
-  padding: var(--space-1) 0;
+.kc-kv-val {
+  flex: 1 1 12ch;
+  min-width: 0;
   color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+/* <dl> 版本的键值表。dt/dd 各锁一列，所以连着好几个 <dd>
+   （AgentActivity 的路径列表）会各占一行而不是溢到 key 列去。 */
+.kc-kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
+}
+
+.kc-kv dt {
+  grid-column: 1;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.kc-kv dd {
+  grid-column: 2;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 等宽与原文 ───────────────────────────────────────────────────── */
+
+.kc-mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
-/* ── 证据抽屉 ─────────────────────────────────────────────────────── */
-/*
-   在侧栏里它是内嵌区块而不是浮层：360px 宽的浮层会把它下面的内容全挡住，
-   而用户往往需要一边看证据一边看那条结论。
-*/
+.kc-pre {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── 抽屉（证据 / 来历） ──────────────────────────────────────────── */
 
 .kc-drawer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
@@ -933,26 +1050,32 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .kc-drawer-title {
+  font-family: var(--font-serif);
+  font-size: var(--text-base);
+  font-weight: 700;
   color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: 600;
 }
 
 .kc-drawer-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
+
+/* ── 证据卡 ───────────────────────────────────────────────────────── */
 
 .kc-evidence {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--cobalt-line);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
 }
@@ -966,170 +1089,166 @@
 }
 
 .kc-evidence-source {
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
-/* 原文片段是引用，视觉上必须和 UI 文案区分开，否则会被读成产品在下判断。 */
 .kc-evidence-excerpt {
-  padding-left: var(--space-2);
+  padding-left: var(--space-3);
   border-left: 2px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+/* ── diff ─────────────────────────────────────────────────────────── */
+
+.kc-diff {
+  margin-top: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.kc-diff-summary {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.kc-diff-chunk + .kc-diff-chunk {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.kc-diff-skip {
+  padding: 3px var(--space-3);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 行号 / 符号 / 正文三列。行号列固定宽度，所以增删行不会让正文左右晃。 */
+.kc-diff-line {
+  display: grid;
+  grid-template-columns: 4ch 2ch minmax(0, 1fr);
+  align-items: start;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.kc-diff-gutter {
+  padding-right: var(--space-2);
+  color: var(--text-tertiary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.kc-diff-sign {
+  color: var(--text-tertiary);
+  text-align: center;
+  user-select: none;
+}
+
+.kc-diff-text {
+  padding-right: var(--space-3);
+  color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* ── Memory Center ────────────────────────────────────────────────── */
-
-.kc-memory {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+/* 增删各用一个单色 tint，不叠渐变；符号列同色，色盲下靠 +/- 也读得出来。 */
+.kc-diff-added {
+  background: var(--moss-tint);
 }
 
-.kc-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3);
+.kc-diff-added .kc-diff-sign {
+  color: var(--moss);
 }
 
-.kc-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 180px;
+.kc-diff-removed {
+  background: var(--vermilion-tint);
 }
 
-.kc-field-label {
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
+.kc-diff-removed .kc-diff-sign {
+  color: var(--vermilion);
 }
 
-.kc-input {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: var(--text-sm);
+.kc-diff-unchanged {
+  background: transparent;
 }
 
-.kc-input:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 1px;
+.kc-diff-move {
+  padding: var(--space-3);
 }
 
-.kc-textarea {
-  width: 100%;
-  resize: vertical;
-  line-height: 1.5;
+.kc-diff-move .kc-kv-row:first-child {
+  padding-top: 0;
 }
 
-.kc-edit {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.kc-chipset {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.kc-chipset > legend {
-  padding: 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
-
-/*
-   勾选状态不只靠颜色：选中的 chip 同时换边框、加粗字重，并且原生 checkbox 仍在
-   DOM 里（只是视觉上藏起来），所以键盘和读屏都照常工作。
-*/
-.kc-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  /* 22px 的高度点起来太细，尤其是这一排要当 tab 用。 */
-  min-height: 28px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition:
-    background var(--transition-fast, 160ms) ease,
-    border-color var(--transition-fast, 160ms) ease,
-    color var(--transition-fast, 160ms) ease;
-}
-
-/* 没有 hover 反馈的东西读起来不像能点。文字色一起给，不让它继承。 */
-.kc-chip:hover {
-  border-color: var(--text-tertiary);
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.kc-chip.active {
-  border-color: var(--accent-secondary-border);
-  background: var(--accent-secondary-bg);
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.kc-chip.active:hover {
-  border-color: var(--accent-secondary);
-  background: var(--accent-secondary-bg);
-  color: var(--text-primary);
-}
-
-
-.kc-chip-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.kc-chip:focus-within {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 1px;
-}
-
-/* ── 变更审阅 / Change Review ───────────────────────────────────────────── */
-
-.kc-change-review {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
+/* ── 变更审阅 ─────────────────────────────────────────────────────── */
 
 .kc-change-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border-subtle);
 }
 
-/* 时间线：当前那一步靠字重与实心记号区分，不只靠颜色。 */
+.kc-change-op {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.kc-change-op-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.kc-change-op-path {
+  flex: 1 1 12ch;
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kc-change-op-reason {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+/* ── 状态时间线 ───────────────────────────────────────────────────── */
+
 .kc-timeline {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1138,16 +1257,19 @@
 .kc-timeline-step {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
+  font-weight: 500;
 }
 
 .kc-timeline-mark {
-  width: 8px;
-  height: 8px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
 }
 
 .kc-timeline-done {
@@ -1155,204 +1277,287 @@
 }
 
 .kc-timeline-done .kc-timeline-mark {
-  background: currentColor;
+  border-color: var(--moss-line);
+  background: var(--moss);
 }
 
+/* 当前这一步用朱红 —— 这是全项目里"等你看"的那一个颜色。 */
 .kc-timeline-current {
-  color: var(--text-primary);
+  color: var(--vermilion);
   font-weight: 600;
 }
 
 .kc-timeline-current .kc-timeline-mark {
-  background: currentColor;
-  box-shadow: 0 0 0 3px var(--accent-secondary-bg);
+  border-color: var(--vermilion);
+  background: var(--vermilion);
 }
 
-.kc-change-op {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-}
+/* ── 知识健康 ─────────────────────────────────────────────────────── */
 
-.kc-change-op-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.kc-change-op-path {
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.kc-change-op-reason {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-/* diff：符号 + 行号 + 底色三重编码，灰度打印下也读得出增删。 */
-.kc-diff {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.kc-diff-summary {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.kc-diff-chunk {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.kc-diff-skip {
-  padding: 2px var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-tertiary);
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
-}
-
-.kc-diff-line {
-  display: grid;
-  grid-template-columns: 3.5em 1.5em 1fr;
-  gap: var(--space-1);
-  padding: 1px var(--space-1);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.kc-diff-gutter,
-.kc-diff-sign {
-  color: var(--text-tertiary);
-  text-align: right;
-  user-select: none;
-}
-
-.kc-diff-added {
-  background: var(--success-bg);
-  border-left: 3px solid var(--success);
-}
-
-.kc-diff-removed {
-  background: var(--danger-bg);
-  border-left: 3px solid var(--danger);
-  text-decoration: line-through;
-  text-decoration-color: var(--text-tertiary);
-}
-
-.kc-diff-unchanged {
-  border-left: 3px solid transparent;
-  color: var(--text-secondary);
-}
-
-.kc-diff-move {
-  gap: var(--space-1);
-}
-
-/* ── 任务台 / the task workbench ─────────────────────────────────────────── */
-
-.kc-tasks {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-/*
-   提醒区和列表之间有一条分隔线：上面回答"现在"，下面回答"整体"，它们是两件事。
-*/
-.kc-nudges {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.kc-task-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-/* ── 知识健康 / the health page ──────────────────────────────────────────── */
-
-/*
-   健康页是一整段要读完的话（一句结论 + 几节理由），不是一堆可以并排扫的卡片。
-   所以它不跟着宽屏的两列度量走，自己收在一个可读行长里——把一句解释拉到 1200px 宽，
-   眼睛回行时会丢行。
-*/
-.kc-health {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: 760px;
-}
-
-
-/* 结论卡片比下面的分节重一点：它是这一页唯一需要一眼看到的东西。 */
 .kc-health-verdict {
-  border-left: 3px solid var(--border);
-  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .kc-health-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+}
+
+/* 健康页的卡片是 .kc-health 的直接子项，没有 .kc-list 帮它们收宽度。 */
+.kc-health > .kc-card,
+.kc-health > .kc-health-section,
+.kc-health > .kc-details,
+.kc-health > p {
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
 }
 
 .kc-health-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin: 0;
   padding-left: var(--space-4);
   color: var(--text-secondary);
   font-size: var(--text-sm);
-  line-height: 1.6;
+  line-height: var(--leading-normal);
 }
 
-/* 一条断链是一个可操作的分组，所以整块给 hover 反馈，而不只是里面那个按钮。 */
 .kc-health-link {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--ochre-line);
   border-radius: var(--radius-sm);
-  transition:
-    background var(--transition-fast, 160ms) ease,
-    border-color var(--transition-fast, 160ms) ease;
+  background: var(--bg-elevated);
 }
 
-.kc-health-link:hover {
-  border-color: var(--border);
+.kc-health-link .kc-kv-val {
+  flex: 1 1 10ch;
+  color: var(--text-primary);
+}
+
+.kc-health-link .kc-card-actions {
+  margin-top: 0;
+}
+
+/* ── 分节标题 ─────────────────────────────────────────────────────── */
+
+.kc-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+.kc-section-n {
+  min-width: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ── 上下文检查器 ─────────────────────────────────────────────────── */
+
+.kc-inspector-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
 
+.kc-inspector-count {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
+.kc-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 
+.kc-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
 
+.kc-item-neutral {
+  border-left: 2px solid var(--border);
+}
 
+/* `.kc-item-warning` 定义在本文件前面（它也给逾期任务卡片用），单类选择器同权重，
+   后写的 `.kc-item` 会把它的 border-left 盖掉。这里用两个类提权把警示边找回来。 */
+.kc-item.kc-item-warning {
+  border-left: 3px solid var(--vermilion-line);
+}
 
+.kc-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
 
+.kc-item-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
 
+.kc-item-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kc-why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kc-why-item {
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.kc-gap {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ochre-line);
+  border-radius: var(--radius-sm);
+  background: var(--ochre-tint);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* ── 受影响的文件列表 ─────────────────────────────────────────────── */
+
+.kc-path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kc-path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ── 审计明细表 ───────────────────────────────────────────────────── */
+
+.kc-table {
+  width: 100%;
+  margin-top: var(--space-3);
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.kc-table td {
+  padding: 5px var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+
+.kc-table tr:first-child td {
+  border-top: none;
+}
+
+.kc-table-event {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.kc-table-ok {
+  color: var(--text-secondary);
+}
+
+/* 只有真失败才升到警示色；"被拒绝"不是错误。 */
+.kc-table-bad {
+  color: var(--vermilion);
+  font-weight: 600;
+}
+
+.kc-table-time {
+  color: var(--text-tertiary);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 数字一律等宽，计数变化时不许抖 ───────────────────────────────── */
+
+.kc-count,
+.kc-muted,
+.kc-note,
+.kc-warn,
+.kc-inspector-count,
+.kc-diff-summary,
+.kc-health-reasons,
+.kc-task-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 动效收敛 ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .kc-skeleton-row {
+    animation: none;
+  }
+
+  .kc-btn:active,
+  .kc-btn-quiet:active,
+  .kc-chip:active {
+    transform: none;
+  }
+}

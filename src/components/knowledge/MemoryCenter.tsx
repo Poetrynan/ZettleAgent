@@ -16,6 +16,7 @@ import {
 import { t, tf } from '../../lib/i18n';
 import { KcEmpty, KcFailed, KcLoading, KcPill, KcTone, translateCode, useAsync } from './states';
 import { EvidenceList } from './EvidenceDrawer';
+import { IconChevronDown, IconSearch } from '../icons';
 
 /**
  * Memory Center —— “你到底记住了我什么”。
@@ -104,40 +105,31 @@ export function MemoryCenter({
       <MemoryFileSyncRow vaultPath={vaultPath} onSynced={afterChange} />
 
       <div className="kc-filters">
-        <label className="kc-field">
-          <span className="kc-field-label">{t('knowledge.memory.searchLabel')}</span>
+        {/* label 与 placeholder 曾经是同一句话，说了两遍。可见 label 去掉，
+            可访问名交给 aria-label，placeholder 换成真正有信息量的提示。 */}
+        <div className="kc-search">
+          <span className="kc-search-icon" aria-hidden="true">
+            <IconSearch size={14} />
+          </span>
           <input
             className="kc-input"
             type="search"
             value={search}
+            aria-label={t('knowledge.memory.searchLabel')}
             placeholder={t('knowledge.memory.searchPlaceholder')}
             onChange={e => setSearch(e.target.value)}
           />
-        </label>
+        </div>
 
-        <fieldset className="kc-chipset">
-          <legend className="kc-field-label">{t('knowledge.memory.filterState')}</legend>
-          {LIFECYCLES.map(l => {
-            const on = lifecycles.includes(l);
-            return (
-              <label className={`kc-chip ${on ? 'active' : ''}`} key={l}>
-                <input
-                  type="checkbox"
-                  className="kc-chip-input"
-                  checked={on}
-                  onChange={() =>
-                    setLifecycles(prev => (on ? prev.filter(x => x !== l) : [...prev, l]))
-                  }
-                />
-                {translateCode('knowledge.lifecycle.', l)}
-              </label>
-            );
-          })}
-        </fieldset>
-
-        <label className="kc-field">
-          <span className="kc-field-label">{t('knowledge.memory.filterKind')}</span>
-          <select className="kc-input" value={kind} onChange={e => setKind(e.target.value as MemoryKind | '')}>
+        {/* 类型下拉：关掉系统外观，箭头自己画（见 .kc-select-arrow）。
+            第一项就是"全部类型"，所以不再另给一个可见 label。 */}
+        <div className="kc-select-wrap">
+          <select
+            className="kc-input kc-select"
+            value={kind}
+            aria-label={t('knowledge.memory.filterKind')}
+            onChange={e => setKind(e.target.value as MemoryKind | '')}
+          >
             <option value="">{t('knowledge.memory.allKinds')}</option>
             {KINDS.map(k => (
               <option value={k} key={k}>
@@ -145,7 +137,35 @@ export function MemoryCenter({
               </option>
             ))}
           </select>
-        </label>
+          <span className="kc-select-arrow" aria-hidden="true">
+            <IconChevronDown size={14} />
+          </span>
+        </div>
+
+        {/* fieldset 的默认 border + legend 定位会画出一个凹陷框，把"状态"两个字
+            压在框线上。CSS 里把 UA 默认值清干净了；chip 另装一层，因为 legend
+            不参与 fieldset 的 flex 内容盒。 */}
+        <fieldset className="kc-chipset-group">
+          <legend className="kc-chipset-legend">{t('knowledge.memory.filterState')}</legend>
+          <div className="kc-chipset">
+            {LIFECYCLES.map(l => {
+              const on = lifecycles.includes(l);
+              return (
+                <label className={`kc-chip ${on ? 'active' : ''}`} key={l}>
+                  <input
+                    type="checkbox"
+                    className="kc-chip-input"
+                    checked={on}
+                    onChange={() =>
+                      setLifecycles(prev => (on ? prev.filter(x => x !== l) : [...prev, l]))
+                    }
+                  />
+                  {translateCode('knowledge.lifecycle.', l)}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
       </div>
 
       {error ? (
