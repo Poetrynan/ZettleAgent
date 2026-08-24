@@ -19,9 +19,9 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 188px;
+  width: 212px;
   flex-shrink: 0;
-  padding: var(--space-4) var(--space-2);
+  padding: var(--space-5) var(--space-3);
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
 }
@@ -32,20 +32,21 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  /* 36px 的点击区：再矮就开始误触相邻项。 */
-  min-height: 36px;
+  /* 40px：这是一级导航，不是密集列表。36px 排下来像一份下拉菜单。 */
+  min-height: 40px;
   padding: 0 var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   text-align: left;
   cursor: pointer;
   transition:
     background var(--transition-fast, 160ms) ease,
     color var(--transition-fast, 160ms) ease;
 }
+
 
 .kc-nav-item:hover {
   background: var(--bg-hover);
@@ -94,7 +95,13 @@
 
 /* ── 页面 ─────────────────────────────────────────────────────────── */
 
+/*
+   `.kc-page` 是容器。
+   `@container` 查的是祖先容器的尺寸，元素查不到自己——所以宽屏下要改的变量必须落在
+   后代（`.kc-page-body`）上，写在 `.kc-page` 自己身上那条规则一次都不会命中。
+*/
 .kc-page {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -102,40 +109,81 @@
   min-height: 0;
 }
 
+
+
+/*
+   页头 / the page header.
+   知识中心是一个顶层界面，不是一个设置面板的子页；标题给到 2xl，副标题给到正文号，
+   上下留白按 space-6 起。之前 xl + text-sm + space-5 在一块 1600px 宽的窗口里读起来
+   像一个被塞进角落的抽屉。
+*/
 .kc-page-head {
-  padding: var(--space-5) var(--space-6) var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .kc-page-title {
+
   margin: 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-2xl);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   line-height: var(--leading-tight);
 }
 
 .kc-page-hint {
-  margin: var(--space-1) 0 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+  max-width: 60ch;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
 }
 
+/*
+   正文区 / the scroll area.
+
+   度量走 `--kc-measure`，默认落在这里、fallback 也写死：Chat 侧栏里这些 `kc-*` 类没有
+   `.kc-page` 祖先，变量拿不到值时整条声明会失效，写 fallback 才不会在 360px 的侧栏里
+   退化成无上限。
+*/
 .kc-page-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-5) var(--space-6) var(--space-6);
+  padding: var(--space-6);
+  --kc-measure: 760px;
 }
 
 /* ── 列表与卡片 ───────────────────────────────────────────────────── */
 
 .kc-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
-  max-width: 680px;
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
 }
+
+/*
+   宽窗口下铺成两列，而不是把一条 760px 的窄柱钉在左边、右边空掉半个屏幕。
+   两列同时让每行更短——比把单张卡片拉到 1200px 宽更好读。
+   `align-items: start` 是必须的：默认拉伸会把同一行两张卡片撑成一样高，短的那张下面
+   多出一块空白。
+*/
+@container (min-width: 1180px) {
+  .kc-page-body {
+    --kc-measure: 1240px;
+  }
+
+  .kc-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    align-items: start;
+  }
+}
+
+
+
 
 /*
    卡片是这个页面的主要节奏。
@@ -143,7 +191,7 @@
    分割线夹住的一段文字。hover 只动阴影和边框——不动 transform，避免鼠标划过时整列跳动。
 */
 .kc-card {
-  padding: var(--space-4);
+  padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
@@ -152,6 +200,7 @@
     border-color var(--transition-fast, 160ms) ease,
     box-shadow var(--transition-fast, 160ms) ease;
 }
+
 
 .kc-card:hover {
   border-color: var(--border);
@@ -173,17 +222,19 @@
 }
 
 .kc-card-title {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-base);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-lg);
   font-weight: 600;
   line-height: var(--leading-tight);
 }
 
 .kc-card-summary {
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
 }
+
 
 .kc-card-summary-bad {
   color: var(--danger);
@@ -414,15 +465,27 @@
 
 /* ── 四种状态 ─────────────────────────────────────────────────────── */
 
+/*
+   骨架屏跟着列表的度量和列数走。
+   宽度不一致的话，加载完成的那一刻整块内容会横向跳一次——那一下比多等 200ms 更难受。
+*/
 .kc-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 680px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
+}
+
+@container (min-width: 1180px) {
+  .kc-skeleton {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
 }
 
 .kc-skeleton-row {
-  height: 64px;
+  height: 96px;
   border-radius: var(--radius-lg);
   background: var(--bg-tertiary);
   /* 动画只是"在读"的提示，不是装饰：减少动效偏好下直接静止。 */
@@ -440,23 +503,30 @@
   }
 }
 
+/*
+   空状态给足留白。
+   "这里没有东西"是这一页最常见的正常状态（收件箱空掉才是目标），所以它该看起来是
+   一个从容的结论，而不是页面加载失败后剩下的一行小字。
+*/
 .kc-empty {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-2);
-  max-width: 520px;
-  padding: var(--space-6) 0;
+  gap: var(--space-3);
+  max-width: 56ch;
+  padding: var(--space-8) 0;
 }
 
+
 .kc-empty-title {
-  font-size: var(--text-base);
+  font-size: var(--text-lg);
   font-weight: 600;
+  line-height: var(--leading-tight);
 }
 
 .kc-empty-hint {
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
 }
 
@@ -465,8 +535,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-2);
-  max-width: 680px;
-  padding: var(--space-3) var(--space-4);
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
+  padding: var(--space-4);
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-lg);
   background: var(--danger-bg);
@@ -474,18 +545,20 @@
 
 .kc-failed-text {
   color: var(--danger);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 .kc-note {
-  max-width: 680px;
-  padding: var(--space-2) var(--space-3);
+  width: 100%;
+  max-width: var(--kc-measure, 760px);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--info-border);
   border-radius: var(--radius-md);
   background: var(--info-bg);
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }
+
 
 /* ── 技术详情折叠区 ───────────────────────────────────────────────── */
 
@@ -772,9 +845,11 @@
 
 .kc-item-title {
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
+
 
 .kc-why {
   display: flex;
@@ -1221,11 +1296,18 @@
 
 /* ── 知识健康 / the health page ──────────────────────────────────────────── */
 
+/*
+   健康页是一整段要读完的话（一句结论 + 几节理由），不是一堆可以并排扫的卡片。
+   所以它不跟着宽屏的两列度量走，自己收在一个可读行长里——把一句解释拉到 1200px 宽，
+   眼睛回行时会丢行。
+*/
 .kc-health {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  max-width: 760px;
 }
+
 
 /* 结论卡片比下面的分节重一点：它是这一页唯一需要一眼看到的东西。 */
 .kc-health-verdict {
