@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
+import type { View } from '../../contexts/AppContext';
 import { openOrCreateDailyNote, getDailyFolderPath, notifyDailyNotesChanged } from '../../lib/dailyNote';
 import { join, desktopDir } from '@tauri-apps/api/path';
 
@@ -1100,6 +1101,12 @@ export function Sidebar() {
 
         </div>
       </div>
+
+      {/* Mode navigation lives in the Activity Rail (App.tsx) — a 44px icon
+          column outside this panel. It used to be a stacked label list here,
+          which cost the file tree the top half of the sidebar. */}
+
+      {/* Filename Search Input — only filters file tree by name */}
 
       {/* Filename Search Input — only filters file tree by name */}
       <div style={{ padding: 'var(--space-2) var(--space-3) var(--space-1)' }}>

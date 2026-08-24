@@ -7,8 +7,11 @@
 
 :root {
   /* ── Typography ───────────────────────────────────────────────── */
-  --font-sans: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+  /* Offline-only stacks: system UI sans for body, local serifs for
+     editorial headings, local monos for paths/metrics/shortcuts. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Fira Sans', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
@@ -142,6 +145,39 @@ body {
   inset: 0;
 }
 
+/* ── Responsive desktop behaviour ───────────────────────────────── */
+/* Order of compression: Agent Desk becomes drawer → sidebar closes.
+   The Activity Rail is only 44px and is the only way to change views
+   without a hotkey, so it is the last thing to go. */
+
+@media (max-width: 900px) {
+  .app-shell {
+    /* Ensure workstage always has room to breathe */
+    min-width: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  /* Ultra-narrow: reclaim the rail's 44px. Views stay reachable via the
+     Quick Switcher and the view hotkeys. */
+  .activity-rail {
+    display: none;
+  }
+
+  /* The Context Strip drops the file breadcrumb; only the chat toggle survives. */
+  .context-strip-view {
+    font-size: 13px;
+  }
+
+  .context-strip-file {
+    display: none;
+  }
+
+  .context-strip-sep {
+    display: none;
+  }
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
@@ -165,7 +201,7 @@ body {
 /* ── Selection ──────────────────────────────────────────────────── */
 
 ::selection {
-  background: rgba(34, 197, 94, 0.25);
+  background: var(--moss-tint);
   color: var(--text-primary);
 }
 
@@ -185,7 +221,7 @@ a {
 }
 
 a:hover {
-  color: #4ADE80;
+  color: var(--link-hover);
 }
 
 /* ── Code ───────────────────────────────────────────────────────── */
@@ -267,8 +303,8 @@ pre code {
 }
 
 @keyframes glow {
-  0%, 100% { box-shadow: 0 0 5px rgba(34, 197, 94, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.4); }
+  0%, 100% { box-shadow: 0 0 5px rgba(61, 106, 80, 0.18); }
+  50% { box-shadow: 0 0 20px rgba(61, 106, 80, 0.36); }
 }
 
 @keyframes breathe {
@@ -341,10 +377,10 @@ pre code {
 }
 
 .logo-zettel {
-  font-family: 'Space Grotesk', 'Fira Sans', -apple-system, sans-serif;
-  font-weight: 800;
+  font-family: var(--font-serif);
+  font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
   line-height: 1.35;
   padding-block: 0.06em;
 }
@@ -367,7 +403,8 @@ pre code {
   font-size: 1.05em;
   line-height: 1;
   padding: 0.16em 0.04em 0.06em;
-  background: linear-gradient(145deg, #059669 0%, #06B6D4 48%, #0EA5E9 100%);
+  /* Archive vermilion — the index mark of the brand, nothing else */
+  background: linear-gradient(145deg, var(--vermilion) 0%, var(--vermilion-strong) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -383,7 +420,7 @@ pre code {
   font-weight: 600;
   line-height: 1.35;
   padding-block: 0.06em;
-  background: linear-gradient(135deg, #0891B2 0%, #2563EB 55%, #4F46E5 100%);
+  background: linear-gradient(135deg, var(--text-primary) 20%, var(--text-secondary) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -396,9 +433,9 @@ pre code {
 
 /* Legacy combined span — prefer split lambda + rest markup */
 .logo-agent {
-  font-family: 'Outfit', 'Fira Sans', -apple-system, sans-serif;
+  font-family: 'Outfit', var(--font-sans), sans-serif;
   font-weight: 600;
-  background: linear-gradient(135deg, #10B981 0%, #3B82F6 100%);
+  background: linear-gradient(135deg, var(--vermilion) 0%, var(--accent-secondary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -463,13 +500,13 @@ input[type="range"]::-webkit-slider-thumb {
 
 input[type="range"]::-webkit-slider-thumb:hover {
   transform: scale(1.15);
-  border-color: #38BDF8;
-  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.25), 0 0 0 2px rgba(56, 189, 248, 0.1);
+  border-color: var(--accent-secondary);
+  box-shadow: 0 2px 8px rgba(53, 95, 158, 0.25), 0 0 0 2px rgba(53, 95, 158, 0.1);
 }
 
 input[type="range"]:active::-webkit-slider-thumb {
-  border-color: #38BDF8;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 3px rgba(53, 95, 158, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 input[type="range"]::-moz-range-thumb {

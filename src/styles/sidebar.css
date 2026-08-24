@@ -4,8 +4,8 @@
   width: 100%;
   min-width: 0;
   height: 100%;
-  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -14,14 +14,138 @@
 }
 
 .sidebar::before {
+  content: none;
+}
+
+/* ── Activity Rail — mode navigation on its own axis ─────────────── */
+/* The rail answers "which room am I working in"; the sidebar beside it
+   answers "which document". Perpendicular axes, so neither steals the
+   other's space. 44px is the touch-target floor and the whole cost. */
+
+.activity-rail {
+  flex-shrink: 0;
+  width: 44px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  /* The hover flyout escapes the rail's 44px, so it must not be clipped. */
+  overflow: visible;
+  z-index: 20;
+}
+
+.activity-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 38px;
+  padding: 0;
+  border: none;
+  /* The active marker is a left bar, so no radius on that edge. */
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* A rail item is a destination, not a key: no press-scale. */
+.activity-rail-item:active {
+  transform: none;
+}
+
+.activity-rail-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.activity-rail-item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+/* The 3px bar is drawn as a pseudo-element so the icon never shifts by
+   3px when selection moves — a border would reflow the flex centring. */
+.activity-rail-item::before {
   content: '';
   position: absolute;
-  top: 0;
   left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
-  opacity: 0.3;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.activity-rail-item.active {
+  color: var(--text-primary);
+}
+
+.activity-rail-item.active::before {
+  background: var(--vermilion);
+}
+
+/* Unread inbox: a dot, not a number. At 44px a count would need a 6px
+   font; the rail only has to say "something is waiting" — the Knowledge
+   Center shows the real number. */
+.activity-rail-dot {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--vermilion);
+  box-shadow: 0 0 0 2px var(--bg-secondary);
+}
+
+/* Instant label. The documented failure mode of an icon rail is recall,
+   and a native title tooltip waits ~1s — too slow to scan a 9-item list. */
+.activity-rail-tip {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tooltip, var(--text-primary));
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  z-index: 40;
+}
+
+.activity-rail-item:hover .activity-rail-tip,
+.activity-rail-item:focus-visible .activity-rail-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-rail-tip {
+    transition: none;
+  }
 }
 
 .sidebar-header {
@@ -232,16 +356,8 @@
 }
 
 .tree-item:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+  background: var(--bg-hover);
   color: var(--text-primary);
-}
-
-:root[data-theme="dark"] .tree-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.tree-item:hover .tree-count-badge {
-  opacity: 1;
 }
 
 .tree-item:focus-visible {
@@ -249,27 +365,24 @@
   outline-offset: -1.5px;
 }
 
-/* Visual nesting guide line */
+/* Archive selection: a ruled left-edge, not a full-row highlight */
+.tree-item.active {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  font-weight: 500;
+  box-shadow: inset 3px 0 0 var(--vermilion);
+}
+
+/* Visual nesting guide line — graphite, never heavy */
 .tree-indent-guide {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
-  background-color: var(--border, rgba(0, 0, 0, 0.12)); /* More distinct outline color */
+  background-color: var(--rule);
   pointer-events: none;
   transition: background-color 150ms ease;
-}
-
-.tree-item:hover .tree-indent-guide {
-  background-color: rgba(0, 0, 0, 0.22);
-}
-
-:root[data-theme="dark"] .tree-indent-guide {
-  background-color: rgba(255, 255, 255, 0.12);
-}
-
-:root[data-theme="dark"] .tree-item:hover .tree-indent-guide {
-  background-color: rgba(255, 255, 255, 0.25);
+  opacity: 0.6;
 }
 
 .tree-item .tree-attach-btn {
@@ -336,15 +449,13 @@
 
 .tree-item.active,
 .tree-section-header.active {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.04)) !important;
+  background: transparent !important;
   color: var(--text-primary) !important;
   font-weight: 500;
-  /* Removed active left border indicator as requested */
 }
 
-:root[data-theme="dark"] .tree-item.active,
-:root[data-theme="dark"] .tree-section-header.active {
-  background: rgba(255, 255, 255, 0.06) !important;
+.tree-section-header.active {
+  box-shadow: inset 3px 0 0 var(--vermilion);
 }
 
 

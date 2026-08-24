@@ -2,11 +2,13 @@ import React, { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspens
 import { AppProvider, useApp } from './contexts/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { ResizablePanel } from './components/layout/ResizablePanel';
+import { ActivityRail } from './components/layout/ActivityRail';
 import { MarkdownViewer } from './components/editor/MarkdownViewer';
 import { SmartChat } from './components/chat/SmartChat';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Settings } from './components/settings/Settings';
-import { IconDashboard, IconSettings, IconChat, IconLink, IconFile, IconCanvas, IconCalendar, IconSidebar, IconNetwork, IconChart, IconStack, IconBrain, IconDatabase } from './components/icons';
+import { IconSidebar, IconChat } from './components/icons';
+import type { View } from './contexts/AppContext';
 import { openOrCreateDailyNote } from './lib/dailyNote';
 
 /**
@@ -39,8 +41,6 @@ import { ModelDownloadModal } from './components/common/ModelDownloadModal';
 import { SplashScreen } from './components/common/SplashScreen';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { useHotkeys, HotkeyDef } from './hooks/useHotkeys';
-import { useInboxCounts } from './components/knowledge/useInboxCounts';
-import { KcCount } from './components/knowledge/states';
 import { t } from './lib/i18n';
 import { loadOnboardingComplete } from './lib/storage';
 import './styles/index.css';
@@ -70,6 +70,20 @@ function AppLayout() {
   const { state, setView, toggleChat, setCurrentFile, toggleSidebar, showToast, closeSplit } = useApp();
   const { view } = state;
   const currentView = view;
+
+  // Command strip content: the view's name plus, when editing, the open file.
+  const viewTitles: Record<View, string> = {
+    dashboard: t('toolbar.dashboard'),
+    note: t('toolbar.note'),
+    graph: t('toolbar.graph'),
+    canvas: t('toolbar.canvas'),
+    bases: t('toolbar.bases'),
+    calendar: t('toolbar.calendar'),
+    review: t('review.navTitle'),
+    knowledge: t('knowledge.navTitle'),
+    settings: t('settings.title'),
+  };
+  const currentFileName = state.currentFile ? state.currentFile.split(/[\\/]/).pop() : null;
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
 
   // Which lazily-split views have ever been opened. A view drops into this set
@@ -176,9 +190,6 @@ function AppLayout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const toggleShortcuts = useCallback(() => setShortcutsOpen(p => !p), []);
 
-  // 顶栏的待处理角标。轮询的是一个只有四个 COUNT(*) 的命令，不刷新投影健康。
-  const { counts: inboxCounts } = useInboxCounts();
-
   // Global hotkeys
   const hotkeys = useMemo<HotkeyDef[]>(() => [
     { key: '1', ctrl: true, handler: () => setView('dashboard') },
@@ -270,6 +281,10 @@ function AppLayout() {
       />
 
       <div className="app-shell">
+      {/* Far left: mode navigation. Outside the resizable panel on purpose —
+          Ctrl+B hides the file tree, not the ability to change views. */}
+      <ActivityRail />
+
       {/* Left: Sidebar (resizable) */}
       <ResizablePanel
         defaultWidth={280}
@@ -284,7 +299,8 @@ function AppLayout() {
 
       {/* Center: Main content */}
       <div className="app-main">
-        {/* Toolbar */}
+        {/* Command strip — names where you are, not a flat pill tray.
+            Primary mode navigation lives in the Archive Rail (left panel). */}
         <div className="app-toolbar">
           <div className="app-toolbar-left">
             <button
@@ -294,72 +310,16 @@ function AppLayout() {
             >
               <IconSidebar size={16} />
             </button>
-            <div className="toolbar-nav-group">
-              <button
-                className={`toolbar-nav-btn ${currentView === 'dashboard' ? 'active' : ''}`}
-                onClick={() => setView('dashboard')}
-                title={t('toolbar.dashboard')}
-              >
-                <IconChart size={14} /> <span>{t('toolbar.dashboard')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'note' ? 'active' : ''}`}
-                onClick={() => setView('note')}
-                title={t('toolbar.note')}
-              >
-                <IconFile size={14} /> <span>{t('toolbar.note')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'graph' ? 'active' : ''}`}
-                onClick={() => setView('graph')}
-                title={t('toolbar.graph')}
-              >
-                <IconNetwork size={14} /> <span>{t('toolbar.graph')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'canvas' ? 'active' : ''}`}
-                onClick={() => setView('canvas')}
-                title={t('toolbar.canvas')}
-              >
-                <IconCanvas size={14} /> <span>{t('toolbar.canvas')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'bases' ? 'active' : ''}`}
-                onClick={() => setView('bases')}
-                title={t('toolbar.bases')}
-              >
-                <IconStack size={14} /> <span>{t('toolbar.bases')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'calendar' ? 'active' : ''}`}
-                onClick={() => setView('calendar')}
-                title={t('toolbar.calendar')}
-              >
-                <IconCalendar size={14} /> <span>{t('toolbar.calendar')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'review' ? 'active' : ''}`}
-                onClick={() => setView('review')}
-                title={t('review.navTitle')}
-              >
-                <IconBrain size={14} /> <span>{t('review.navTitle')}</span>
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}
-                onClick={() => setView('knowledge')}
-                title={t('knowledge.navHint')}
-              >
-                <IconDatabase size={14} /> <span>{t('knowledge.navTitle')}</span>
-                {/* 角标在 span 之外：窄屏容器查询会隐藏 span，待处理数量不该跟着消失。 */}
-                <KcCount count={inboxCounts?.total ?? 0} />
-              </button>
-              <button
-                className={`toolbar-nav-btn ${currentView === 'settings' ? 'active' : ''}`}
-                onClick={() => setView('settings')}
-                title={t('settings.title')}
-              >
-                <IconSettings size={14} /> <span>{t('settings.title')}</span>
-              </button>
+            <div className="context-strip">
+              <span className="context-strip-view">{viewTitles[currentView]}</span>
+              {currentView === 'note' && state.currentFile && (
+                <>
+                  <span className="context-strip-sep" aria-hidden="true">·</span>
+                  <span className="context-strip-file" title={state.currentFile}>
+                    {currentFileName}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <div className="app-toolbar-actions">
