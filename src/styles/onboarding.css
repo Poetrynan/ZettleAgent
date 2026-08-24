@@ -19,7 +19,7 @@
 .onboarding-grid-mesh {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-image: radial-gradient(var(--rule) 1px, transparent 1px);
   background-size: 24px 24px;
   mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, white 30%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, white 30%, transparent 100%);
@@ -28,7 +28,7 @@
 }
 
 [data-theme="dark"] .onboarding-grid-mesh {
-  background-image: radial-gradient(rgba(248, 250, 252, 0.04) 1px, transparent 1px);
+  background-image: radial-gradient(var(--rule) 1px, transparent 1px);
 }
 
 /* Soft gradient orbs */
@@ -50,7 +50,7 @@
 .onboarding-orb-1 {
   width: 480px;
   height: 480px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent-primary) 18%, transparent) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--vermilion-tint) 0%, transparent 70%);
   top: -12%;
   right: -8%;
   animation: onb-float 14s ease-in-out infinite;
@@ -59,7 +59,7 @@
 .onboarding-orb-2 {
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent-secondary) 14%, transparent) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--cobalt-tint) 0%, transparent 70%);
   bottom: -12%;
   left: -8%;
   animation: onb-float 18s ease-in-out infinite 4s;
@@ -68,7 +68,7 @@
 .onboarding-orb-3 {
   width: 260px;
   height: 260px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--info) 10%, transparent) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--moss-tint) 0%, transparent 70%);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);

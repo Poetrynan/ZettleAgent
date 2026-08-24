@@ -1,7 +1,7 @@
 /* ── Settings Redesign (Minimalist & Premium) ──────────────────── */
 .settings-layout {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   width: 100%;
   min-height: 0;
@@ -9,14 +9,152 @@
 }
 
 .settings-tabs-container {
+  display: none; /* replaced by Settings Atlas rail */
+}
+
+.settings-content-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* ── Settings Atlas — persistent left rail ───────────────────────── */
+/* Replaces the horizontal tab tray. Same tabs, same handlers, same
+   i18n keys — just a stable spine so context travels with you. */
+
+.settings-atlas-rail {
+  flex-shrink: 0;
+  width: 180px;
+  padding: var(--space-3) var(--space-2) var(--space-4);
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-atlas-rail-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 2px 10px 10px;
+  letter-spacing: -0.01em;
+}
+
+.settings-atlas-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-atlas-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-8);
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.settings-atlas-item svg {
   flex-shrink: 0;
-  overflow-x: auto;
+  color: var(--text-tertiary);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.settings-atlas-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-atlas-item:hover svg {
+  color: var(--text-secondary);
+}
+
+.settings-atlas-item:active {
+  transform: none;
+}
+
+/* Vermilion index mark: current section */
+.settings-atlas-item::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 2px;
+  background: var(--vermilion);
+  transition: height var(--duration-fast) var(--ease-out);
+}
+
+.settings-atlas-item.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.settings-atlas-item.active svg {
+  color: var(--vermilion);
+}
+
+.settings-atlas-item.active::before {
+  height: 14px;
+}
+
+.settings-atlas-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .settings-atlas-rail {
+    width: 52px;
+    padding: var(--space-2) var(--space-1) var(--space-3);
+  }
+
+  .settings-atlas-rail-title {
+    display: none;
+  }
+
+  .settings-atlas-item {
+    justify-content: center;
+    padding: 8px;
+    gap: 0;
+  }
+
+  .settings-atlas-item-label {
+    display: none;
+  }
+
+  .settings-atlas-item::before {
+    left: 1px;
+  }
+}
+
+.settings-tabs-container {
+  display: none; /* replaced by Settings Atlas rail */
 }
 
 .settings-tab-horizontal-btn {
@@ -45,9 +183,9 @@
 }
 
 .settings-tab-horizontal-btn.active {
-  background: var(--success-bg);
-  color: var(--success);
-  border-color: rgba(22, 163, 74, 0.15);
+  background: var(--vermilion-tint);
+  color: var(--vermilion);
+  border-color: var(--vermilion-line);
   font-weight: 600;
 }
 
@@ -102,8 +240,8 @@
 }
 
 .settings-number-input-wrapper:focus-within {
-  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle)) !important;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent) !important;
+  border-color: var(--vermilion-line) !important;
+  box-shadow: 0 0 0 3px var(--vermilion-tint) !important;
 }
 
 
@@ -165,8 +303,8 @@
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  background: rgba(59, 130, 246, 0.08);
-  color: #3B82F6;
+  background: var(--cobalt-tint);
+  color: var(--cobalt);
   flex-shrink: 0;
 }
 

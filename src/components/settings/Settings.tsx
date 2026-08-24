@@ -134,60 +134,36 @@ export function Settings() {
   };
   return (
     <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="settings-layout" style={{ flex: 1, minHeight: 0 }}>
-        <div className="settings-tabs-container">
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'general' ? 'active' : ''}`}
-            onClick={() => setActiveTab('general')}
-          >
-            <IconSettings size={16} />
-            <span>{t('settings.tabGeneral')}</span>
-          </button>
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'ai' ? 'active' : ''}`}
-            onClick={() => setActiveTab('ai')}
-          >
-            <IconBrain size={16} />
-            <span>{t('settings.tabAi')}</span>
-          </button>
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'ext' ? 'active' : ''}`}
-            onClick={() => setActiveTab('ext')}
-          >
-            <IconGlobe size={16} />
-            <span>{t('settings.tabExt')}</span>
-          </button>
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'memory' ? 'active' : ''}`}
-            onClick={() => setActiveTab('memory')}
-          >
-            <IconDatabase size={16} />
-            <span>{t('settings.tabMemory')}</span>
-          </button>
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'organize' ? 'active' : ''}`}
-            onClick={() => setActiveTab('organize')}
-          >
-            <IconSliders size={16} />
-            <span>{t('settings.tabOrganize')}</span>
-          </button>
-          <button
-            className={`settings-tab-horizontal-btn ${activeTab === 'shortcuts' ? 'active' : ''}`}
-            onClick={() => setActiveTab('shortcuts')}
-          >
-            <IconKeyboard size={16} />
-            <span>{isZh ? '快捷键' : 'Shortcuts'}</span>
-          </button>
-
-          <div className="settings-lang-switcher">
-            <span className="lang-icon-wrapper">
-              <IconGlobe size={13} />
-            </span>
-            <button className={`lang-btn ${state.lang === 'zh' ? 'active' : ''}`} onClick={() => setAppLang('zh')}>中</button>
-            <button className={`lang-btn ${state.lang === 'en' ? 'active' : ''}`} onClick={() => setAppLang('en')}>EN</button>
+      <div className="settings-layout" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        {/* Settings Atlas — persistent left rail */}
+        <nav className="settings-atlas-rail" aria-label={isZh ? '设置分类' : 'Settings categories'}>
+          <div className="settings-atlas-rail-title">
+            {isZh ? '设置' : 'Settings'}
           </div>
-        </div>
+          <div className="settings-atlas-items">
+            {([
+              { id: 'general', icon: <IconSettings size={15} />, label: t('settings.tabGeneral') },
+              { id: 'ai', icon: <IconBrain size={15} />, label: t('settings.tabAi') },
+              { id: 'ext', icon: <IconGlobe size={15} />, label: t('settings.tabExt') },
+              { id: 'memory', icon: <IconDatabase size={15} />, label: t('settings.tabMemory') },
+              { id: 'organize', icon: <IconSliders size={15} />, label: t('settings.tabOrganize') },
+              { id: 'shortcuts', icon: <IconKeyboard size={15} />, label: isZh ? '快捷键' : 'Shortcuts' },
+            ] as const).map(item => (
+              <button
+                key={item.id}
+                type="button"
+                className={`settings-atlas-item ${activeTab === item.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(item.id)}
+                aria-current={activeTab === item.id ? 'page' : undefined}
+              >
+                {item.icon}
+                <span className="settings-atlas-item-label">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
 
+        {/* Right: documented configuration surface */}
         <div className="settings-content-wrapper">
           {activeTab === 'general' && (
             <GeneralSettingsTab

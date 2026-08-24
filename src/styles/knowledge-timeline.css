@@ -36,7 +36,7 @@
 }
 
 .knowledge-timeline-tab.active {
-  background: var(--accent-primary);
+  background: var(--vermilion);
   color: var(--text-inverse);
 }
 
@@ -176,13 +176,13 @@
 }
 
 .knowledge-fact-card.active {
-  background: rgba(16, 185, 129, 0.06);
-  border-color: rgba(16, 185, 129, 0.2);
+  background: var(--moss-tint);
+  border-color: var(--moss-line);
 }
 
 .knowledge-fact-card.expired {
-  background: rgba(245, 158, 11, 0.06);
-  border-color: rgba(245, 158, 11, 0.2);
+  background: var(--ochre-tint);
+  border-color: var(--ochre-line);
 }
 
 .knowledge-fact-content {

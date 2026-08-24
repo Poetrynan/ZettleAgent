@@ -35,9 +35,9 @@
 
 .stat-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.08),
+  box-shadow: 0 8px 30px rgba(61, 106, 80, 0.08),
               0 2px 8px rgba(0, 0, 0, 0.04);
-  border-color: rgba(16, 185, 129, 0.2);
+  border-color: var(--moss-line);
 }
 
 .stat-card:active {
@@ -61,7 +61,7 @@
 /* Soft glow behind icon on hover */
 .stat-card:hover .stat-card-icon {
   transform: scale(1.08);
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);
+  box-shadow: 0 4px 14px rgba(61, 106, 80, 0.15);
 }
 
 .stat-card-value {
@@ -108,34 +108,34 @@
 
 .info-card {
   padding: var(--space-3) var(--space-4);
-  background: var(--info-bg);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: var(--cobalt-tint);
+  border: 1px solid var(--cobalt-line);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
 }
 
 .success-card {
   padding: var(--space-3) var(--space-4);
-  background: var(--success-bg);
-  border: 1px solid rgba(34, 197, 94, 0.2);
+  background: var(--moss-tint);
+  border: 1px solid var(--moss-line);
   border-radius: var(--radius-md);
-  color: var(--success);
+  color: var(--moss);
 }
 
 .warning-card {
   padding: var(--space-3) var(--space-4);
-  background: var(--warning-bg);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: var(--ochre-tint);
+  border: 1px solid var(--ochre-line);
   border-radius: var(--radius-md);
-  color: var(--warning);
+  color: var(--ochre);
 }
 
 .error-card {
   padding: var(--space-3) var(--space-4);
-  background: var(--danger-bg);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: var(--vermilion-tint);
+  border: 1px solid var(--vermilion-line);
   border-radius: var(--radius-md);
-  color: var(--danger);
+  color: var(--vermilion);
 }
 
 

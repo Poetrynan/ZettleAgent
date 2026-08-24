@@ -2,79 +2,93 @@
  * Theme tokens — single source of truth for colors & surface tints.
  * JS (theme.ts) only sets data-theme on <html>.
  *
+ * Design language: "Warm Archive × Technical Precision".
+ * Surfaces are archive paper (never pure white/black), text is ink,
+ * separators are graphite rules, and exactly four working hues carry
+ * meaning: vermilion (focus / pending / human decision), cobalt
+ * (knowledge, links, relations), moss (local, saved, confirmed) and
+ * ochre (caution, waiting).
+ *
+ * Compatibility: every legacy token name is kept and re-pointed at the
+ * new palette, so existing component CSS keeps working unchanged.
+ *
  * Cascade: use :root[data-theme="dark"] (higher specificity than bare :root)
  * so late :root rules in index.css cannot clobber dark mode.
  */
 
-/* ── Light palette (default) ─────────────────────────────────────── */
+/* ── Light: Reading Room (default) ──────────────────────────────── */
 :root,
 :root[data-theme="light"] {
-  --bg-primary: #FFFFFF;
-  --bg-secondary: #F8FAFC;
-  --bg-tertiary: #F1F5F9;
-  --bg-elevated: #FFFFFF;
-  --bg-glass: rgba(255, 255, 255, 0.85);
-  --bg-hover: #E2E8F0;
-  --bg-active: #CBD5E1;
+  /* Archive paper surfaces */
+  --bg-primary: #F6F0E3;
+  --bg-secondary: #FBF8F0;
+  --bg-tertiary: #EFE8D6;
+  --bg-elevated: #FFFDF7;
+  --bg-glass: rgba(251, 248, 240, 0.9);
+  --bg-hover: #EBE3D0;
+  --bg-active: #E1D8C2;
 
-  --text-primary: #0F172A;
-  --text-secondary: #475569;
-  --text-tertiary: #94A3B8;
-  --text-inverse: #F8FAFC;
+  /* Ink */
+  --text-primary: #1C211E;
+  --text-secondary: #4F574F;
+  --text-tertiary: #878D80;
+  --text-inverse: #FBF8F0;
 
-  --accent-primary: #16A34A;
-  --accent-secondary: #2563EB;
-  --accent-gradient: linear-gradient(135deg, #16A34A, #2563EB);
-  --accent-glow: 0 0 20px rgba(22, 163, 74, 0.2);
+  /* Working hues */
+  --accent-primary: #3D6A50;          /* local moss — saved / local / primary confirm */
+  --accent-secondary: #355F9E;        /* knowledge cobalt — links / relations */
+  --accent-gradient: linear-gradient(135deg, #3D6A50, #355F9E);
+  --accent-glow: 0 0 20px rgba(61, 106, 80, 0.16);
 
-  --success: #16A34A;
-  --success-bg: rgba(22, 163, 74, 0.1);
-  --success-border: rgba(22, 163, 74, 0.25);
-  --warning: #D97706;
-  --warning-bg: rgba(217, 119, 6, 0.1);
-  --warning-border: rgba(217, 119, 6, 0.25);
-  --danger: #DC2626;
-  --danger-bg: rgba(220, 38, 38, 0.1);
-  --danger-border: rgba(220, 38, 38, 0.3);
-  --info: #2563EB;
-  --info-bg: rgba(37, 99, 235, 0.1);
-  --info-border: rgba(37, 99, 235, 0.25);
+  --success: #3D6A50;
+  --success-bg: rgba(61, 106, 80, 0.1);
+  --success-border: rgba(61, 106, 80, 0.28);
+  --warning: #A56A1B;
+  --warning-bg: rgba(165, 106, 27, 0.1);
+  --warning-border: rgba(165, 106, 27, 0.28);
+  --danger: #C74632;                  /* archive vermilion — also focus/pending */
+  --danger-bg: rgba(199, 70, 50, 0.09);
+  --danger-border: rgba(199, 70, 50, 0.3);
+  --info: #355F9E;
+  --info-bg: rgba(53, 95, 158, 0.09);
+  --info-border: rgba(53, 95, 158, 0.26);
 
-  --canvas-accent: #A855F7;
-  --canvas-accent-bg: rgba(168, 85, 247, 0.12);
-  --canvas-accent-border: rgba(168, 85, 247, 0.25);
-  --canvas-accent-subtle: rgba(168, 85, 247, 0.08);
-  --canvas-accent-muted: rgba(168, 85, 247, 0.15);
+  --canvas-accent: #355F9E;
+  --canvas-accent-bg: rgba(53, 95, 158, 0.1);
+  --canvas-accent-border: rgba(53, 95, 158, 0.28);
+  --canvas-accent-subtle: rgba(53, 95, 158, 0.06);
+  --canvas-accent-muted: rgba(53, 95, 158, 0.14);
 
-  --accent-secondary-bg: rgba(59, 130, 246, 0.12);
-  --accent-secondary-border: rgba(59, 130, 246, 0.25);
+  --accent-secondary-bg: rgba(53, 95, 158, 0.1);
+  --accent-secondary-border: rgba(53, 95, 158, 0.26);
 
-  --overlay-bg: rgba(15, 23, 42, 0.45);
+  --overlay-bg: rgba(28, 33, 30, 0.42);
 
-  --border: #E2E8F0;
-  --border-subtle: #F1F5F9;
-  --border-focus: #16A34A;
+  /* Graphite rules */
+  --border: #D7CEBB;
+  --border-subtle: #E8E1CF;
+  --border-focus: #C74632;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
-  --shadow-glow: 0 0 20px rgba(22, 163, 74, 0.1);
+  --shadow-sm: 0 1px 2px rgba(58, 48, 30, 0.07);
+  --shadow-md: 0 4px 12px rgba(58, 48, 30, 0.1);
+  --shadow-lg: 0 10px 32px rgba(58, 48, 30, 0.14);
+  --shadow-glow: 0 0 20px rgba(61, 106, 80, 0.08);
 
-  --slider-thumb-bg: #FFFFFF;
-  --slider-thumb-border: rgba(203, 213, 225, 0.7);
-  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.8);
+  --slider-thumb-bg: #FFFDF7;
+  --slider-thumb-border: rgba(199, 189, 166, 0.85);
+  --slider-thumb-shadow: 0 1px 4px rgba(58, 48, 30, 0.14), 0 0 0 1px rgba(255, 253, 247, 0.8);
 
-  --dash-welcome-tint-start: rgba(16, 185, 129, 0.08);
-  --dash-welcome-tint-end: rgba(59, 130, 246, 0.04);
-  --dash-welcome-glow: rgba(16, 185, 129, 0.08);
-  --dash-welcome-border: rgba(16, 185, 129, 0.15);
+  --dash-welcome-tint-start: rgba(61, 106, 80, 0.07);
+  --dash-welcome-tint-end: rgba(53, 95, 158, 0.04);
+  --dash-welcome-glow: rgba(61, 106, 80, 0.06);
+  --dash-welcome-border: rgba(61, 106, 80, 0.18);
 
-  --dash-glass-tint-start: rgba(255, 255, 255, 0.06);
-  --dash-glass-tint-end: rgba(255, 255, 255, 0.02);
-  --dash-glass-border: rgba(255, 255, 255, 0.08);
-  --dash-glass-border-hover: rgba(255, 255, 255, 0.14);
+  --dash-glass-tint-start: rgba(255, 253, 247, 0.06);
+  --dash-glass-tint-end: rgba(255, 253, 247, 0.02);
+  --dash-glass-border: var(--border-subtle);
+  --dash-glass-border-hover: var(--border);
   --dash-glass-surface: color-mix(in srgb, var(--bg-secondary) 92%, var(--text-primary) 8%);
-  --dash-glass-surface-hover: color-mix(in srgb, var(--bg-secondary) 85%, var(--text-primary) 15%);
+  --dash-glass-surface-hover: color-mix(in srgb, var(--bg-secondary) 84%, var(--text-primary) 16%);
   --dash-glass-surface-border: var(--border-subtle);
   --dash-glass-surface-border-hover: var(--border);
   --dash-glass-tag-bg: var(--bg-tertiary);
@@ -86,187 +100,278 @@
   --dash-btn-hover: color-mix(in srgb, var(--bg-hover) 80%, transparent);
   --dash-btn-active: var(--bg-tertiary);
 
-  --dash-progress-track: color-mix(in srgb, var(--text-primary) 6%, transparent);
-  --dash-progress-inset: inset 0 1px 3px color-mix(in srgb, var(--text-primary) 10%, transparent);
-  --dash-scheduler-tint-a: rgba(16, 185, 129, 0.06);
-  --dash-scheduler-tint-b: rgba(59, 130, 246, 0.04);
-  --dash-icon-well: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  --dash-progress-track: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --dash-progress-inset: inset 0 1px 3px color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --dash-scheduler-tint-a: rgba(61, 106, 80, 0.06);
+  --dash-scheduler-tint-b: rgba(53, 95, 158, 0.04);
+  --dash-icon-well: color-mix(in srgb, var(--text-primary) 4%, transparent);
 
-  --step-sync-tint: rgba(6, 182, 212, 0.12);
-  --step-sync-border: rgba(6, 182, 212, 0.22);
-  --step-sync-accent: #06B6D4;
-  --step-sync-btn: #0891B2;
+  /* Pipeline steps: sync=moss(local disk), index=cobalt(compute),
+     organize=ochre(AI work awaiting review), export=graphite(neutral out),
+     health=ochre(caution). */
+  --step-sync-tint: rgba(61, 106, 80, 0.11);
+  --step-sync-border: rgba(61, 106, 80, 0.26);
+  --step-sync-accent: #3D6A50;
+  --step-sync-btn: #35614A;
 
-  --step-index-tint: rgba(59, 130, 246, 0.12);
-  --step-index-border: rgba(59, 130, 246, 0.22);
-  --step-index-accent: #3B82F6;
+  --step-index-tint: rgba(53, 95, 158, 0.11);
+  --step-index-border: rgba(53, 95, 158, 0.26);
+  --step-index-accent: #355F9E;
   --step-index-btn: var(--accent-secondary);
 
-  --step-organize-tint-a: rgba(16, 185, 129, 0.14);
-  --step-organize-tint-b: rgba(245, 158, 11, 0.06);
-  --step-organize-border: rgba(16, 185, 129, 0.24);
-  --step-organize-accent: #10B981;
-  --step-organize-btn: var(--accent-primary);
+  --step-organize-tint-a: rgba(165, 106, 27, 0.1);
+  --step-organize-tint-b: rgba(61, 106, 80, 0.05);
+  --step-organize-border: rgba(165, 106, 27, 0.28);
+  --step-organize-accent: #A56A1B;
+  --step-organize-btn: #8F5B17;
 
-  --step-export-tint: rgba(139, 92, 246, 0.12);
-  --step-export-border: rgba(139, 92, 246, 0.22);
-  --step-export-accent: #8B5CF6;
-  --step-export-btn: #7c3aed;
+  --step-export-tint: rgba(31, 37, 33, 0.07);
+  --step-export-border: rgba(31, 37, 33, 0.18);
+  --step-export-accent: #46503F;
+  --step-export-btn: #39422F;
 
-  --step-health-tint: rgba(245, 158, 11, 0.12);
-  --step-health-border: rgba(245, 158, 11, 0.22);
-  --step-health-accent: #F59E0B;
+  --step-health-tint: rgba(165, 106, 27, 0.11);
+  --step-health-border: rgba(165, 106, 27, 0.26);
+  --step-health-accent: #A56A1B;
   --step-health-btn: var(--warning);
 
-  --gap-tint-a: rgba(59, 130, 246, 0.06);
-  --gap-tint-b: rgba(139, 92, 246, 0.04);
+  --gap-tint-a: rgba(53, 95, 158, 0.05);
+  --gap-tint-b: rgba(199, 70, 50, 0.03);
 
   /* Vault insight severity (AgentPanel) */
-  --severity-critical: #DC2626;
-  --severity-critical-bg: rgba(220, 38, 38, 0.1);
-  --severity-critical-border: rgba(220, 38, 38, 0.24);
-  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 10%, var(--bg-elevated));
+  --severity-critical: #B23A28;
+  --severity-critical-bg: rgba(199, 70, 50, 0.09);
+  --severity-critical-border: rgba(199, 70, 50, 0.26);
+  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 9%, var(--bg-elevated));
 
-  --severity-warning: #D97706;
-  --severity-warning-bg: rgba(217, 119, 6, 0.1);
-  --severity-warning-border: rgba(217, 119, 6, 0.24);
-  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 11%, var(--bg-elevated));
+  --severity-warning: #A56A1B;
+  --severity-warning-bg: rgba(165, 106, 27, 0.1);
+  --severity-warning-border: rgba(165, 106, 27, 0.26);
+  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 10%, var(--bg-elevated));
 
-  --severity-info: #2563EB;
-  --severity-info-bg: rgba(37, 99, 235, 0.08);
-  --severity-info-border: rgba(37, 99, 235, 0.22);
-  --severity-info-surface: color-mix(in srgb, var(--severity-info) 10%, var(--bg-elevated));
+  --severity-info: #355F9E;
+  --severity-info-bg: rgba(53, 95, 158, 0.08);
+  --severity-info-border: rgba(53, 95, 158, 0.22);
+  --severity-info-surface: color-mix(in srgb, var(--severity-info) 9%, var(--bg-elevated));
 
   --insight-chip-bg: var(--bg-tertiary);
   --insight-chip-border: var(--border);
+
+  /* ── Warm Archive semantic layer (new names, free for new UI) ── */
+  --paper: var(--bg-primary);
+  --paper-raised: var(--bg-secondary);
+  --paper-inset: var(--bg-tertiary);
+  --paper-card: var(--bg-elevated);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-tertiary);
+  --rule: var(--border);
+  --rule-strong: #C4BA9F;
+  --rule-faint: var(--border-subtle);
+
+  --vermilion: #C74632;
+  --vermilion-strong: #A93A28;
+  --vermilion-tint: rgba(199, 70, 50, 0.08);
+  --vermilion-line: rgba(199, 70, 50, 0.34);
+  --cobalt: #355F9E;
+  --cobalt-tint: rgba(53, 95, 158, 0.08);
+  --cobalt-line: rgba(53, 95, 158, 0.32);
+  --moss: #3D6A50;
+  --moss-tint: rgba(61, 106, 80, 0.08);
+  --moss-line: rgba(61, 106, 80, 0.32);
+  --ochre: #A56A1B;
+  --ochre-tint: rgba(165, 106, 27, 0.09);
+  --ochre-line: rgba(165, 106, 27, 0.32);
+
+  /* Status stamps: visible state words beat colour-only signals */
+  --stamp-pending-fg: #A93A28;
+  --stamp-pending-bg: rgba(199, 70, 50, 0.07);
+  --stamp-pending-line: rgba(199, 70, 50, 0.38);
+  --stamp-approved-fg: #2E5440;
+  --stamp-approved-bg: rgba(61, 106, 80, 0.08);
+  --stamp-approved-line: rgba(61, 106, 80, 0.4);
+  --stamp-rejected-fg: #8C2F20;
+  --stamp-rejected-bg: rgba(140, 47, 32, 0.08);
+  --stamp-rejected-line: rgba(140, 47, 32, 0.42);
+  --stamp-local-fg: #2E5440;
+  --stamp-local-bg: transparent;
+  --stamp-local-line: rgba(61, 106, 80, 0.45);
+  --stamp-source-fg: #2C528C;
+  --stamp-source-bg: rgba(53, 95, 158, 0.07);
+  --stamp-source-line: rgba(53, 95, 158, 0.36);
+
+  --link-hover: #2E5440;
 }
 
-/* ── Dark: Zettel Midnight ─────────────────────────────────────── */
+/* ── Dark: Night Ledger ────────────────────────────────────────── */
 :root[data-theme="dark"],
 :root.dark-theme {
-  --bg-primary: #0F172A;
-  --bg-secondary: #1E293B;
-  --bg-tertiary: #273449;
-  --bg-elevated: #1E293B;
-  --bg-glass: rgba(15, 23, 42, 0.92);
-  --bg-hover: #334155;
-  --bg-active: #475569;
+  --bg-primary: #151A17;
+  --bg-secondary: #1C231E;
+  --bg-tertiary: #232C25;
+  --bg-elevated: #212922;
+  --bg-glass: rgba(21, 26, 23, 0.92);
+  --bg-hover: #2B362D;
+  --bg-active: #37453A;
 
-  --text-primary: #F1F5F9;
-  --text-secondary: #CBD5E1;
-  --text-tertiary: #94A3B8;
-  --text-inverse: #0F172A;
+  --text-primary: #ECE5D7;
+  --text-secondary: #BCB7A8;
+  --text-tertiary: #7F8579;
+  --text-inverse: #151A17;
 
-  --accent-primary: #22C55E;
-  --accent-secondary: #60A5FA;
-  --accent-gradient: linear-gradient(135deg, #22C55E, #60A5FA);
-  --accent-glow: 0 0 24px rgba(34, 197, 94, 0.25);
+  --accent-primary: #79B38A;
+  --accent-secondary: #79A6E2;
+  --accent-gradient: linear-gradient(135deg, #79B38A, #79A6E2);
+  --accent-glow: 0 0 22px rgba(121, 179, 138, 0.16);
 
-  --success: #4ADE80;
-  --success-bg: rgba(74, 222, 128, 0.12);
-  --success-border: rgba(74, 222, 128, 0.35);
-  --warning: #FBBF24;
-  --warning-bg: rgba(251, 191, 36, 0.12);
-  --warning-border: rgba(251, 191, 36, 0.35);
-  --danger: #F87171;
-  --danger-bg: rgba(248, 113, 113, 0.12);
-  --danger-border: rgba(248, 113, 113, 0.38);
-  --info: #60A5FA;
-  --info-bg: rgba(96, 165, 250, 0.12);
-  --info-border: rgba(96, 165, 250, 0.35);
+  --success: #79B38A;
+  --success-bg: rgba(121, 179, 138, 0.12);
+  --success-border: rgba(121, 179, 138, 0.34);
+  --warning: #D9A344;
+  --warning-bg: rgba(217, 163, 68, 0.12);
+  --warning-border: rgba(217, 163, 68, 0.34);
+  --danger: #E36852;
+  --danger-bg: rgba(227, 104, 82, 0.12);
+  --danger-border: rgba(227, 104, 82, 0.38);
+  --info: #79A6E2;
+  --info-bg: rgba(121, 166, 226, 0.12);
+  --info-border: rgba(121, 166, 226, 0.34);
 
-  --canvas-accent: #C084FC;
-  --canvas-accent-bg: rgba(192, 132, 252, 0.16);
-  --canvas-accent-border: rgba(192, 132, 252, 0.38);
-  --canvas-accent-subtle: rgba(192, 132, 252, 0.1);
-  --canvas-accent-muted: rgba(192, 132, 252, 0.2);
+  --canvas-accent: #79A6E2;
+  --canvas-accent-bg: rgba(121, 166, 226, 0.13);
+  --canvas-accent-border: rgba(121, 166, 226, 0.36);
+  --canvas-accent-subtle: rgba(121, 166, 226, 0.08);
+  --canvas-accent-muted: rgba(121, 166, 226, 0.17);
 
-  --accent-secondary-bg: rgba(96, 165, 250, 0.16);
-  --accent-secondary-border: rgba(96, 165, 250, 0.35);
+  --accent-secondary-bg: rgba(121, 166, 226, 0.13);
+  --accent-secondary-border: rgba(121, 166, 226, 0.34);
 
-  --overlay-bg: rgba(0, 0, 0, 0.65);
+  --overlay-bg: rgba(5, 8, 6, 0.62);
 
-  --border: #334155;
-  --border-subtle: #1E293B;
-  --border-focus: #22C55E;
+  --border: #3D473E;
+  --border-subtle: #29322B;
+  --border-focus: #E36852;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 24px rgba(34, 197, 94, 0.15);
+  --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 0 24px rgba(121, 179, 138, 0.12);
 
-  --slider-thumb-bg: #F1F5F9;
-  --slider-thumb-border: #475569;
-  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(51, 65, 85, 0.8);
+  --slider-thumb-bg: #ECE5D7;
+  --slider-thumb-border: #4A554B;
+  --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(61, 71, 62, 0.8);
 
-  --dash-welcome-tint-start: rgba(34, 197, 94, 0.16);
-  --dash-welcome-tint-end: rgba(96, 165, 250, 0.12);
-  --dash-welcome-glow: rgba(34, 197, 94, 0.12);
-  --dash-welcome-border: rgba(34, 197, 94, 0.28);
+  --dash-welcome-tint-start: rgba(121, 179, 138, 0.1);
+  --dash-welcome-tint-end: rgba(121, 166, 226, 0.07);
+  --dash-welcome-glow: rgba(121, 179, 138, 0.08);
+  --dash-welcome-border: rgba(121, 179, 138, 0.26);
 
-  --dash-glass-tint-start: rgba(30, 41, 59, 0.85);
-  --dash-glass-tint-end: rgba(15, 23, 42, 0.55);
-  --dash-glass-border: rgba(51, 65, 85, 0.85);
-  --dash-glass-border-hover: rgba(71, 85, 105, 0.95);
+  --dash-glass-tint-start: rgba(28, 35, 30, 0.85);
+  --dash-glass-tint-end: rgba(21, 26, 23, 0.55);
+  --dash-glass-border: rgba(61, 71, 62, 0.85);
+  --dash-glass-border-hover: rgba(90, 103, 89, 0.95);
   --dash-glass-surface: color-mix(in srgb, var(--bg-primary) 55%, transparent);
   --dash-glass-surface-hover: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
-  --dash-glass-surface-border: rgba(51, 65, 85, 0.65);
-  --dash-glass-surface-border-hover: rgba(71, 85, 105, 0.85);
+  --dash-glass-surface-border: rgba(61, 71, 62, 0.65);
+  --dash-glass-surface-border-hover: rgba(90, 103, 89, 0.85);
   --dash-glass-tag-bg: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
-  --dash-glass-tag-border: rgba(51, 65, 85, 0.75);
+  --dash-glass-tag-border: rgba(61, 71, 62, 0.75);
 
   --dash-btn-bg: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
-  --dash-btn-border: rgba(51, 65, 85, 0.9);
-  --dash-btn-inset: inset 0 1px 0 rgba(71, 85, 105, 0.45);
+  --dash-btn-border: rgba(61, 71, 62, 0.9);
+  --dash-btn-inset: inset 0 1px 0 rgba(90, 103, 89, 0.4);
   --dash-btn-hover: color-mix(in srgb, var(--bg-hover) 85%, transparent);
   --dash-btn-active: color-mix(in srgb, var(--bg-primary) 65%, transparent);
 
-  --dash-progress-track: color-mix(in srgb, var(--text-primary) 35%, transparent);
+  --dash-progress-track: color-mix(in srgb, var(--text-primary) 30%, transparent);
   --dash-progress-inset: inset 0 1px 3px rgba(0, 0, 0, 0.35);
-  --dash-scheduler-tint-a: rgba(16, 185, 129, 0.14);
-  --dash-scheduler-tint-b: rgba(59, 130, 246, 0.1);
-  --dash-icon-well: color-mix(in srgb, var(--text-primary) 25%, transparent);
+  --dash-scheduler-tint-a: rgba(121, 179, 138, 0.1);
+  --dash-scheduler-tint-b: rgba(121, 166, 226, 0.08);
+  --dash-icon-well: color-mix(in srgb, var(--text-primary) 22%, transparent);
 
-  --step-sync-tint: rgba(6, 182, 212, 0.22);
-  --step-sync-border: rgba(6, 182, 212, 0.38);
-  --step-sync-btn: #22D3EE;
+  --step-sync-tint: rgba(121, 179, 138, 0.15);
+  --step-sync-border: rgba(121, 179, 138, 0.34);
+  --step-sync-btn: #8CC29D;
 
-  --step-index-tint: rgba(59, 130, 246, 0.22);
-  --step-index-border: rgba(59, 130, 246, 0.38);
+  --step-index-tint: rgba(121, 166, 226, 0.15);
+  --step-index-border: rgba(121, 166, 226, 0.34);
   --step-index-btn: var(--accent-secondary);
 
-  --step-organize-tint-a: rgba(16, 185, 129, 0.24);
-  --step-organize-tint-b: rgba(139, 92, 246, 0.12);
-  --step-organize-border: rgba(16, 185, 129, 0.38);
-  --step-organize-btn: var(--accent-primary);
+  --step-organize-tint-a: rgba(217, 163, 68, 0.14);
+  --step-organize-tint-b: rgba(121, 179, 138, 0.08);
+  --step-organize-border: rgba(217, 163, 68, 0.36);
+  --step-organize-btn: #E0B055;
 
-  --step-export-tint: rgba(139, 92, 246, 0.22);
-  --step-export-border: rgba(139, 92, 246, 0.38);
-  --step-export-btn: #A78BFA;
+  --step-export-tint: rgba(236, 229, 215, 0.08);
+  --step-export-border: rgba(236, 229, 215, 0.2);
+  --step-export-btn: #CBC4B2;
 
-  --step-health-tint: rgba(245, 158, 11, 0.22);
-  --step-health-border: rgba(245, 158, 11, 0.38);
+  --step-health-tint: rgba(217, 163, 68, 0.15);
+  --step-health-border: rgba(217, 163, 68, 0.34);
   --step-health-btn: var(--warning);
 
-  --gap-tint-a: rgba(59, 130, 246, 0.12);
-  --gap-tint-b: rgba(139, 92, 246, 0.08);
+  --gap-tint-a: rgba(121, 166, 226, 0.09);
+  --gap-tint-b: rgba(227, 104, 82, 0.06);
 
-  /* Vault insight severity — higher contrast on dark surfaces */
-  --severity-critical: #F87171;
-  --severity-critical-bg: rgba(248, 113, 113, 0.18);
-  --severity-critical-border: rgba(248, 113, 113, 0.42);
-  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 14%, var(--bg-secondary));
+  --severity-critical: #E36852;
+  --severity-critical-bg: rgba(227, 104, 82, 0.16);
+  --severity-critical-border: rgba(227, 104, 82, 0.4);
+  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 13%, var(--bg-secondary));
 
-  --severity-warning: #FBBF24;
-  --severity-warning-bg: rgba(251, 191, 36, 0.16);
-  --severity-warning-border: rgba(251, 191, 36, 0.38);
-  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 14%, var(--bg-secondary));
+  --severity-warning: #D9A344;
+  --severity-warning-bg: rgba(217, 163, 68, 0.14);
+  --severity-warning-border: rgba(217, 163, 68, 0.36);
+  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 13%, var(--bg-secondary));
 
-  --severity-info: #60A5FA;
-  --severity-info-bg: rgba(96, 165, 250, 0.16);
-  --severity-info-border: rgba(96, 165, 250, 0.36);
-  --severity-info-surface: color-mix(in srgb, var(--severity-info) 14%, var(--bg-secondary));
+  --severity-info: #79A6E2;
+  --severity-info-bg: rgba(121, 166, 226, 0.14);
+  --severity-info-border: rgba(121, 166, 226, 0.34);
+  --severity-info-surface: color-mix(in srgb, var(--severity-info) 13%, var(--bg-secondary));
 
   --insight-chip-bg: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-primary) 4%);
   --insight-chip-border: var(--border);
+
+  /* ── Warm Archive semantic layer (dark) ── */
+  --paper: var(--bg-primary);
+  --paper-raised: var(--bg-secondary);
+  --paper-inset: var(--bg-tertiary);
+  --paper-card: var(--bg-elevated);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --ink-faint: var(--text-tertiary);
+  --rule: var(--border);
+  --rule-strong: #55604F;
+  --rule-faint: var(--border-subtle);
+
+  --vermilion: #E36852;
+  --vermilion-strong: #EC8471;
+  --vermilion-tint: rgba(227, 104, 82, 0.1);
+  --vermilion-line: rgba(227, 104, 82, 0.42);
+  --cobalt: #79A6E2;
+  --cobalt-tint: rgba(121, 166, 226, 0.1);
+  --cobalt-line: rgba(121, 166, 226, 0.4);
+  --moss: #79B38A;
+  --moss-tint: rgba(121, 179, 138, 0.1);
+  --moss-line: rgba(121, 179, 138, 0.4);
+  --ochre: #D9A344;
+  --ochre-tint: rgba(217, 163, 68, 0.11);
+  --ochre-line: rgba(217, 163, 68, 0.4);
+
+  --stamp-pending-fg: #EC8471;
+  --stamp-pending-bg: rgba(227, 104, 82, 0.09);
+  --stamp-pending-line: rgba(227, 104, 82, 0.46);
+  --stamp-approved-fg: #93C7A2;
+  --stamp-approved-bg: rgba(121, 179, 138, 0.1);
+  --stamp-approved-line: rgba(121, 179, 138, 0.48);
+  --stamp-rejected-fg: #EC8471;
+  --stamp-rejected-bg: rgba(227, 104, 82, 0.12);
+  --stamp-rejected-line: rgba(227, 104, 82, 0.52);
+  --stamp-local-fg: #93C7A2;
+  --stamp-local-bg: transparent;
+  --stamp-local-line: rgba(121, 179, 138, 0.52);
+  --stamp-source-fg: #93BCEC;
+  --stamp-source-bg: rgba(121, 166, 226, 0.09);
+  --stamp-source-line: rgba(121, 166, 226, 0.44);
+
+  --link-hover: #93C7A2;
 }

@@ -274,7 +274,7 @@
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror ::selection {
-  background: rgba(34, 197, 94, 0.25);
+  background: rgba(121, 179, 138, 0.25);
 }
 
 [data-theme="dark"] .milkdown-editor-container,
@@ -378,7 +378,7 @@
   color: var(--accent-primary) !important;
 }
 [data-theme="dark"] .markdown-content a.tag {
-  background: rgba(34, 197, 94, 0.12) !important;
+  background: rgba(121, 179, 138, 0.14) !important;
   color: var(--accent-primary) !important;
 }
 
@@ -394,10 +394,10 @@
 /* ── Wikilink embeds (embed-link styled spans) ─────────────────────── */
 [data-theme="dark"] .embed-link {
   color: var(--accent-primary) !important;
-  background: rgba(34, 197, 94, 0.08) !important;
+  background: rgba(121, 179, 138, 0.09) !important;
 }
 [data-theme="dark"] .embed-link:hover {
-  background: rgba(34, 197, 94, 0.15) !important;
+  background: rgba(121, 179, 138, 0.17) !important;
 }
 
 /* ── Task checkboxes ────────────────────────────────────────────────── */

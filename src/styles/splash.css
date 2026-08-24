@@ -51,7 +51,7 @@
 .splash-grid-mesh {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-image: radial-gradient(var(--rule) 1px, transparent 1px);
   background-size: 24px 24px;
   mask-image: radial-gradient(ellipse 70% 60% at 50% 46%, white 10%, transparent 72%);
   -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 46%, white 10%, transparent 72%);

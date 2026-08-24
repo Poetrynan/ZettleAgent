@@ -10,9 +10,6 @@
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-secondary);
   flex-shrink: 0;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  container-type: inline-size;
   min-width: 0;
 }
 
@@ -23,9 +20,13 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent);
+  background: linear-gradient(90deg, transparent, var(--vermilion-line), transparent);
   opacity: 0;
-  transition: opacity 300ms ease;
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.app-toolbar:hover::before {
+  opacity: 0.5;
 }
 
 .app-toolbar-left {
@@ -46,6 +47,64 @@
   gap: var(--space-1);
   flex-shrink: 0;
 }
+
+/* ── Context Strip — "where am I" instead of a flat nav tray ─── */
+
+.context-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 0;
+  padding: 4px 2px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+/* Show a faint ruled underline when there is breadcrumb / file context */
+.context-strip:has(.context-strip-file) {
+  border-bottom-color: var(--border-subtle);
+}
+
+.context-strip-view {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.context-strip-sep {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.context-strip-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  line-height: 1.3;
+}
+
+/* ── Legacy nav pill tray (kept for compatibility; not rendered in
+     current App.tsx but other screens or tests may still rely on the
+     class names existing) ─────────────────────────────────────── */
 
 .toolbar-nav-group {
   display: flex;
@@ -113,14 +172,14 @@
 
 .toolbar-nav-btn.active {
   background: var(--bg-elevated);
-  color: var(--accent-secondary);
+  color: var(--vermilion);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 .toolbar-nav-btn.active svg {
   opacity: 1;
-  color: var(--accent-secondary);
+  color: var(--vermilion);
 }
 
 /* Progressive compression as main area narrows */
