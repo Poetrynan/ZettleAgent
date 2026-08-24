@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom } from '../../lib/tauri';
 import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary, TaskCommitment } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
-import { IconSend, IconGlobe } from '../icons';
+import {
+  IconSend, IconGlobe, IconNetwork, IconLink, IconCanvas, IconSliders,
+  IconChart, IconSparkle, IconTimeline, IconContradicted, IconClipboard,
+  IconEdit, IconSearch, IconFile, IconX,
+} from '../icons';
 import { t } from '../../lib/i18n';
 
 import { listen } from '@tauri-apps/api/event';
@@ -56,7 +61,7 @@ function finalizeAgentTraceOnInterrupt(msg: Message): Message {
 
 const WORKFLOW_TEMPLATES: Record<string, {
   id: string;
-  icon: string;
+  icon: ReactNode;
   label: string;
   labelZh: string;
   prompt: string;
@@ -67,7 +72,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
   graph: [
     {
       id: 'explore-cluster',
-      icon: '🔬',
+      icon: <IconNetwork size={15} />,
       label: 'Analyze Cluster',
       labelZh: '分析这个簇',
       prompt: 'Analyze the main clusters in my knowledge graph: identify hub nodes, explain how the notes relate, and suggest how to strengthen or expand each cluster.',
@@ -77,7 +82,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'suggest-connections',
-      icon: '🔗',
+      icon: <IconLink size={15} />,
       label: 'Complete Links',
       labelZh: '补全缺失连接',
       prompt: 'Review my knowledge graph and find note pairs that are semantically related but not yet linked with wikilinks. List each pair with a clear reason to connect them.',
@@ -87,7 +92,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'canvas-from-topic',
-      icon: '🎨',
+      icon: <IconCanvas size={15} />,
       label: 'Board from Topic',
       labelZh: '以话题创建画布',
       prompt: 'Using “[enter a topic, e.g. deep learning]” as the center, pull all related notes from my vault and build a visual canvas with logical connections.',
@@ -99,7 +104,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
   canvas: [
     {
       id: 'arrange-layout',
-      icon: '🧠',
+      icon: <IconSliders size={15} />,
       label: 'Arrange Layout',
       labelZh: '整理画布布局',
       prompt: 'Auto-arrange and optimize the layout of all cards on my current canvas so the structure is clear and readable.',
@@ -109,7 +114,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'canvas-connections',
-      icon: '🔗',
+      icon: <IconLink size={15} />,
       label: 'Suggest Canvas Links',
       labelZh: '建议潜在连接',
       prompt: 'Scan every card on my current canvas, find hidden semantic relationships, and suggest links with relationship types.',
@@ -119,7 +124,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'canvas-health',
-      icon: '🏥',
+      icon: <IconChart size={15} />,
       label: 'Diagnose Canvas',
       labelZh: '诊断画布健康',
       prompt: 'Run a structural health check on my current canvas: orphan nodes, broken links, and cards with no relationships. Give concrete fix suggestions.',
@@ -131,7 +136,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
   note: [
     {
       id: 'recommend-links',
-      icon: '💡',
+      icon: <IconSparkle size={15} />,
       label: 'Recommend Links',
       labelZh: '关联内容推荐',
       prompt: 'Based on the note I have open, recommend 3–5 other notes in my vault that would connect well, and explain why each link makes sense.',
@@ -141,7 +146,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'note-history',
-      icon: '⏳',
+      icon: <IconTimeline size={15} />,
       label: 'Analyze Evolution',
       labelZh: '时态演进对比',
       prompt: 'Compare how the topic of my open note evolved across past versions and summarize how my thinking changed over time.',
@@ -151,7 +156,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'contradiction-check',
-      icon: '⚡',
+      icon: <IconContradicted size={15} />,
       label: 'Check Contradictions',
       labelZh: '知识矛盾检查',
       prompt: 'Check whether claims in my open note contradict other notes in my vault. Point out each conflict clearly.',
@@ -163,7 +168,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
   calendar: [
     {
       id: 'weekly-review',
-      icon: '📋',
+      icon: <IconClipboard size={15} />,
       label: 'Weekly Review',
       labelZh: '周度知识回顾',
       prompt: 'Scan all notes created or edited in the last 7 days, summarize my learning threads, and produce a structured weekly review.',
@@ -173,7 +178,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'note-trends',
-      icon: '📈',
+      icon: <IconChart size={15} />,
       label: 'Creation Trends',
       labelZh: '笔记创作趋势',
       prompt: 'Using my calendar history, analyze recent note frequency and themes. Summarize shifting focus areas and blind spots.',
@@ -185,7 +190,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
   generic: [
     {
       id: 'synthesize-topic',
-      icon: '📝',
+      icon: <IconEdit size={15} />,
       label: 'Topic Summary',
       labelZh: '主题综述生成',
       prompt: 'Search my vault for notes related to “[enter a topic, e.g. AI safety]” and synthesize a structured MOC-style topic overview.',
@@ -195,7 +200,7 @@ const WORKFLOW_TEMPLATES: Record<string, {
     },
     {
       id: 'vault-diagnose',
-      icon: '🔍',
+      icon: <IconSearch size={15} />,
       label: 'Vault Diagnosis',
       labelZh: '全库盲区诊断',
       prompt: 'Run a structural blind-spot scan of my entire vault: orphan cards, redundant topics, MOC consolidation opportunities, and an immediate action plan.',
@@ -1667,12 +1672,11 @@ export function SmartChat() {
         toggleChat={toggleChat}
       />
 
-      {/* This-turn inspector. 全局的记忆/变更/承诺/健康管理在知识中心，不在这条侧栏里。 */}
+      {/* This-turn inspector. 长期状态（记忆/变更/任务/健康）在知识中心，不在这条侧栏里。 */}
       {showKnowledgePanel && (
         <KnowledgePanel
           contextPackage={knowledgeContext}
           runId={knowledgeRunId}
-          vaultPath={state.vaultPath || null}
           onOpenCenter={() => setView('knowledge')}
           onOpenSource={openLocator}
           onClose={() => setShowKnowledgePanel(false)}
@@ -1745,38 +1749,33 @@ export function SmartChat() {
       />
 
       <div className="panel-footer">
-        {/* Attached notes chips */}
+        {/* Context row — which notes this turn will be able to read. In a
+            knowledge-base agent this is the most consequential thing about a
+            prompt, so it sits directly above the composer, not in a menu. */}
         {attachedNotes.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '0 0 6px 0' }}>
+          <div className="chat-context-row" aria-label={isZh ? '本轮附带的笔记' : 'Notes attached to this turn'}>
             {attachedNotes.map((note, idx) => (
               <span
                 key={`${note.path}-${idx}`}
                 className={`chat-attached-note-chip ${note.source === 'canvas' ? 'from-canvas' : ''}`}
+                title={note.path}
               >
-                {note.source === 'canvas' && (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <path d="M3 9h18M9 3v18" />
-                  </svg>
-                )}
-                {note.source !== 'canvas' && (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                )}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note.name}</span>
+                {note.source === 'canvas'
+                  ? <IconCanvas size={11} />
+                  : <IconFile size={11} />}
+                <span className="chat-attached-note-name">{note.name}</span>
                 {note.source === 'canvas' && (
                   <span className="chip-canvas-badge">
                     {isZh ? '画布' : 'Canvas'}
                   </span>
                 )}
                 <button
+                  className="chat-attached-note-remove"
                   onClick={() => setAttachedNotes(prev => prev.filter((_, i) => i !== idx))}
-                  style={{
-                    border: 'none', background: 'none', cursor: 'pointer', padding: '0 0 0 2px',
-                    color: 'var(--text-tertiary)', fontSize: '14px', lineHeight: 1, display: 'flex',
-                  }}
                   title={t('common.remove' as any) || 'Remove'}
+                  aria-label={t('common.remove' as any) || 'Remove'}
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  <IconX size={10} />
                 </button>
               </span>
             ))}
@@ -1808,18 +1807,8 @@ export function SmartChat() {
               </button>
               {input.trim().length > 0 && (
                 <span
-                  style={{
-                    fontSize: '11px',
-                    color: 'var(--text-tertiary)',
-                    padding: '2px 6px',
-                    background: 'var(--bg-tertiary)',
-                    borderRadius: '4px',
-                    fontFamily: 'monospace',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '3px',
-                  }}
-                  title={isZh ? '预计输入 Token 消耗' : 'Estimated Input Tokens'}
+                  className="chat-input-token-hint"
+                  title={isZh ? '预计输入 Token 消耗' : 'Estimated input tokens'}
                 >
                   ~{Math.ceil(Array.from(input).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0))} tok
                 </span>
@@ -1828,10 +1817,9 @@ export function SmartChat() {
             <div className="chat-input-bar-right">
               {isLoading ? (
                 <button
-                  className="chat-send-btn-v2"
+                  className="chat-send-btn-v2 is-stop"
                   onClick={handleStop}
                   title={t('chat.stopGeneration' as any)}
-                  style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger-border)' }}
                 >
                   <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12" rx="2" />

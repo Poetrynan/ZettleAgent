@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, RefObject } from 'react';
+import type { ReactNode } from 'react';
 import { Message } from './useChatSessions';
 import {
-  IconUser,
   IconRobot,
   IconCheck,
   IconClipboard,
   IconSearch,
+  IconWarning,
 } from '../icons';
 import { t } from '../../lib/i18n';
 import { MarkdownRenderer } from '../editor/MarkdownRenderer';
@@ -209,7 +210,7 @@ interface ChatMessageListProps {
   toggleToolCallExpand: (id: string) => void;
   activeTemplates?: {
     id: string;
-    icon: string;
+    icon: ReactNode;
     label: string;
     labelZh: string;
     prompt: string;
@@ -264,7 +265,7 @@ export function ChatMessageList({
       {messages.length === 0 ? (
         <div className="chat-empty-state">
           <div className="chat-empty-icon">
-            {mode === 'agent' ? <IconRobot size={28} /> : <IconSearch size={28} />}
+            {mode === 'agent' ? <IconRobot size={24} /> : <IconSearch size={24} />}
           </div>
           <div className="chat-empty-title">
             {t('chat.askAnything')}
@@ -273,7 +274,8 @@ export function ChatMessageList({
             {mode === 'agent' ? t('chat.agentDesc') : t('chat.ragDesc')}
           </div>
 
-          {/* Workflow Templates Grid */}
+          {/* Starting points, not decoration: each one is a real prompt that
+              gets loaded into the composer so the user can edit before sending. */}
           {activeTemplates && activeTemplates.length > 0 && (
             <div className="chat-empty-templates">
               {activeTemplates.map((tmpl) => {
@@ -283,10 +285,9 @@ export function ChatMessageList({
                   <button
                     key={tmpl.id}
                     onClick={() => onSelectTemplate?.(prompt)}
-                    title={desc}
                     className="chat-empty-template-card"
                   >
-                    <span className="chat-empty-template-icon">{tmpl.icon}</span>
+                    <span className="chat-empty-template-icon" aria-hidden="true">{tmpl.icon}</span>
                     <div className="chat-empty-template-body">
                       <span className="chat-empty-template-label">
                         {isZh ? tmpl.labelZh : tmpl.label}
@@ -302,32 +303,15 @@ export function ChatMessageList({
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className="chat-turn-list">
           {messages.map((msg, idx) => (
-            <div key={msg.id} className={`chat-message ${msg.role === 'user' ? 'chat-message-user' : ''}`}>
-              <div className={`chat-avatar ${msg.role === 'user' ? 'chat-avatar-user' : 'chat-avatar-ai'}`}>
-                {msg.role === 'user' ? <IconUser size={14} /> : <IconRobot size={14} />}
-              </div>
-              <div className={`chat-bubble-col ${msg.role === 'user' ? 'chat-bubble-col-user' : ''}`}>
-              <div className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'}`}>
-                {/* Multi-Agent Role Label */}
+            <div key={msg.id} className={`chat-turn ${msg.role === 'user' ? 'chat-turn-user' : 'chat-turn-agent'}`}>
+              <div className="chat-turn-col">
+              <div className={`chat-turn-body ${msg.role === 'user' ? 'chat-turn-body-user' : ''}`}>
+                {/* Which sub-agent answered. Only shown when there is one to name,
+                    so the common single-agent case carries no chrome at all. */}
                 {msg.role === 'assistant' && msg.agentName && (
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '2px 8px',
-                    marginBottom: '6px',
-                    borderRadius: '10px',
-                    background: 'var(--bg-surface-hover, rgba(99, 102, 241, 0.08))',
-                    fontSize: 'var(--text-xxs, 11px)',
-                    color: 'var(--text-secondary)',
-                    fontWeight: 500,
-                    letterSpacing: '0.02em',
-                  }}>
-                    <span>{msg.agentIcon || '🤖'}</span>
-                    <span>{msg.agentName}</span>
-                  </div>
+                  <div className="chat-turn-agent-label">{msg.agentName}</div>
                 )}
                 {/* Agent Work Stream — show from first frame when isAgentStep or timeline exists */}
                 {(msg.isAgentStep || (msg.agentTimeline && msg.agentTimeline.length > 0)) ? (
@@ -376,19 +360,8 @@ export function ChatMessageList({
                     }
                     if (msg.isError) {
                       return (
-                        <div style={{
-                          display: 'flex', alignItems: 'flex-start', gap: '8px',
-                          padding: '8px 12px',
-                          background: 'rgba(220, 38, 38, 0.06)',
-                          border: '1px solid rgba(220, 38, 38, 0.12)',
-                          borderRadius: '8px',
-                          fontSize: 'var(--text-xs)',
-                          color: 'var(--danger)',
-                          lineHeight: 1.5,
-                        }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '1px' }}>
-                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                          </svg>
+                        <div className="chat-turn-error" role="alert">
+                          <IconWarning size={14} />
                           <span>{parseErrorMessage(msg.content, isZh)}</span>
                         </div>
                       );
