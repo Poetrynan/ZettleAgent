@@ -84,7 +84,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
   const dupCount = report?.semantic_duplicates?.length ?? 0;
   const hiddenCount = report?.hidden_connections?.length ?? 0;
   const semanticCount = dupCount + hiddenCount;
-  const totalIssues = brokenCount + orphanCount + missingCount;
+  const totalIssues = brokenCount + orphanCount + missingCount + graphIssues + dupCount;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -297,26 +297,6 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-12)', gap: 'var(--space-3)' }}>
                 <span className="spinner" style={{ width: '32px', height: '32px', borderTopColor: 'var(--accent-primary)' }} />
                 <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{t('lint.running')}</p>
-              </div>
-            ) : totalIssues === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-12)', gap: 'var(--space-4)', textAlign: 'center' }}>
-                <div style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: '50%',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  color: 'var(--success)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  <IconCheck size={36} />
-                </div>
-                <div>
-                  <h3 style={{ margin: '0 0 var(--space-2) 0', fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-                    {t('lint.healthy')}
-                  </h3>
-                </div>
               </div>
             ) : (
               <>
@@ -834,7 +814,8 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                       </>
                     )}
                   </div>
-                )}              </>
+                )}
+              </>
             )}
           </div>
         </div>
