@@ -546,8 +546,11 @@ pub(super) fn execute_delete_relation(
     let target_key = relation_path_key(target, vault_path, all_vault_paths)
         .ok_or_else(|| anyhow::anyhow!("`{target}` is not inside any open vault"))?;
 
+    let changeset_id = args["changeset_id"].as_str();
+    let run_id = args["run_id"].as_str();
+
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
-    let outcome = relations::delete_relation(&conn, &source_key, &target_key, relation_type)
+    let outcome = relations::delete_relation_with_identity(&conn, &source_key, &target_key, relation_type, changeset_id, run_id)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(json!({

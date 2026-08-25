@@ -281,6 +281,8 @@ export interface ToolActionItem {
   label: string;
 }
 
+const ALLOWED_ACTION_TYPES = new Set(['open_canvas', 'open_knowledge_center', 'open_note']);
+
 export function parseToolActions(result?: string): ToolActionItem[] {
   if (!result) return [];
   try {
@@ -288,13 +290,13 @@ export function parseToolActions(result?: string): ToolActionItem[] {
     const actions: ToolActionItem[] = [];
     if (Array.isArray(data.actions)) {
       for (const a of data.actions) {
-        if (a && typeof a.type === 'string' && typeof a.label === 'string') {
+        if (a && typeof a.type === 'string' && ALLOWED_ACTION_TYPES.has(a.type) && typeof a.label === 'string') {
           actions.push({
-            type: a.type,
-            path: typeof a.path === 'string' ? a.path : undefined,
-            planId: typeof a.planId === 'string' ? a.planId : undefined,
-            tab: typeof a.tab === 'string' ? a.tab : undefined,
-            label: a.label,
+            type: a.type as ToolActionItem['type'],
+            path: typeof a.path === 'string' && a.path.trim().length > 0 ? a.path.trim() : undefined,
+            planId: typeof a.planId === 'string' && a.planId.trim().length > 0 ? a.planId.trim() : undefined,
+            tab: typeof a.tab === 'string' && a.tab.trim().length > 0 ? a.tab.trim() : undefined,
+            label: a.label.trim(),
           });
         }
       }
@@ -305,8 +307,8 @@ export function parseToolActions(result?: string): ToolActionItem[] {
       const params = new URLSearchParams(queryStr || '');
       const zh = isZh();
       if (name === 'open_canvas' || name === 'canvas') {
-        const path = params.get('path') || undefined;
-        const planId = params.get('planId') || undefined;
+        const path = params.get('path')?.trim() || undefined;
+        const planId = params.get('planId')?.trim() || undefined;
         actions.push({
           type: 'open_canvas',
           path,
@@ -314,8 +316,8 @@ export function parseToolActions(result?: string): ToolActionItem[] {
           label: zh ? '打开并审查 Canvas 计划' : 'Open & Review Canvas Plan',
         });
       } else if (name === 'open_knowledge_center' || name === 'knowledge_center' || name === 'open_knowledge') {
-        const tab = params.get('tab') || 'gap_analysis';
-        const planId = params.get('planId') || undefined;
+        const tab = params.get('tab')?.trim() || 'gap_analysis';
+        const planId = params.get('planId')?.trim() || undefined;
         actions.push({
           type: 'open_knowledge_center',
           tab,
@@ -323,7 +325,7 @@ export function parseToolActions(result?: string): ToolActionItem[] {
           label: zh ? '打开知识中心审查图谱计划' : 'Open Knowledge Center to Review Plan',
         });
       } else if (name === 'open_note' || name === 'note') {
-        const path = params.get('path') || undefined;
+        const path = params.get('path')?.trim() || undefined;
         actions.push({
           type: 'open_note',
           path,

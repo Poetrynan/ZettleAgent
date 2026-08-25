@@ -83,7 +83,11 @@ const LOG_META: Record<LogItem['type'], { icon: string; cls: string }> = {
  * V3: Overhauled UI/UX with computed health scoreboard, tabbed diagnostics,
  * interactive note tags with workspace editor navigation, and terminal log styles.
  */
-export function KnowledgeGapAnalysis() {
+export interface KnowledgeGapAnalysisProps {
+  initialPlanId?: string | null;
+}
+
+export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProps = {}) {
   const { state, showToast, setCurrentFile, setView } = useApp();
   const [insights, setInsights] = useState<GapInsight[]>([]);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
@@ -122,7 +126,27 @@ export function KnowledgeGapAnalysis() {
     }
   }, [agentLog, showLogs]);
 
-  // 监听从 Chat 或全局派发的直达图谱修复计划事件
+  // 1. 响应 prop 传入的 initialPlanId（从 KnowledgeCenter 或其他父级传入）
+  useEffect(() => {
+    if (initialPlanId) {
+      setActiveTab('fix');
+      knowledgeGraphGetPlan(initialPlanId)
+        .then((existingPlan) => {
+          if (existingPlan) {
+            setPlan(existingPlan);
+            // 默认只勾选高置信度 (>= 0.8) 的提议
+            const highConf = existingPlan.proposals
+              .filter((p) => p.confidence >= 0.8)
+              .map((p) => p.id);
+            setSelectedIds(highConf.length > 0 ? highConf : existingPlan.proposals.map((p) => p.id));
+            setFixPhase('preview_ready');
+          }
+        })
+        .catch((err) => setFixError(String(err)));
+    }
+  }, [initialPlanId]);
+
+  // 2. 监听从 Chat 或全局派发的直达图谱修复计划事件
   useEffect(() => {
     const handleOpenPlan = (e: Event) => {
       const detail = (e as CustomEvent<{ tab?: string; planId?: string }>).detail;

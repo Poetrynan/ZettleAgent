@@ -151,26 +151,41 @@ pub fn add_relation(
     Ok(RelationOutcome::Added)
 }
 
-/// 删除一条边 / remove one edge.
+/// 删除一条边（支持注入 ChangeSet ID 与 run ID 审计溯源）/ remove one edge with identity.
 ///
 /// `relation_type` 是必填参数而不是可选过滤条件。旧实现省掉它，于是"删除这条 AI 推断"
 /// 会连用户手连的 wikilink 边一起删。
-pub fn delete_relation(
+pub fn delete_relation_with_identity(
     conn: &Connection,
     source: &str,
     target: &str,
     relation_type: &str,
+    changeset_id: Option<&str>,
+    run_id: Option<&str>,
 ) -> ObjectResult<RelationOutcome> {
     let removed = conn.execute(
         "DELETE FROM note_relations
          WHERE source_path = ?1 AND target_path = ?2 AND relation_type = ?3",
         params![source, target, relation_type],
     )?;
-    Ok(if removed > 0 {
-        RelationOutcome::Deleted
+    if removed > 0 {
+        if changeset_id.is_some() || run_id.is_some() {
+            let _ = changeset::record_relation_decision(conn, source, target, relation_type, "deleted", run_id);
+        }
+        Ok(RelationOutcome::Deleted)
     } else {
-        RelationOutcome::Missing
-    })
+        Ok(RelationOutcome::Missing)
+    }
+}
+
+/// 删除一条边 / remove one edge.
+pub fn delete_relation(
+    conn: &Connection,
+    source: &str,
+    target: &str,
+    relation_type: &str,
+) -> ObjectResult<RelationOutcome> {
+    delete_relation_with_identity(conn, source, target, relation_type, None, None)
 }
 
 /// 把一条边标记成用户已确认 / the user vouched for this edge.

@@ -11,13 +11,13 @@ import {
 } from '../lib/storage';
 import { initLang, getLang } from '../lib/i18n';
 
-import { BaseProvider, useBase, DEFAULT_LLM_CONFIG, View, ToastInfo, SchedulerProgressInfo, LlmConfig } from './BaseContext';
+import { BaseProvider, useBase, DEFAULT_LLM_CONFIG, View, ToastInfo, SchedulerProgressInfo, LlmConfig, PendingDeepLink } from './BaseContext';
 import { VaultProvider, useVault } from './VaultContext';
 import { ChatProvider, useChat } from './ChatContext';
 import type { NoteAttachment } from './ChatContext';
 import { SearchMode } from '../lib/tauri';
 
-export type { View, ToastInfo, SchedulerProgressInfo, LlmConfig };
+export type { View, ToastInfo, SchedulerProgressInfo, LlmConfig, PendingDeepLink };
 
 export interface AppState {
   vaultPath: string | null;
@@ -43,6 +43,7 @@ export interface AppState {
   pendingChatPrompt: string | null;
   isSplitView: boolean;
   splitFile: string | null;
+  pendingDeepLink: PendingDeepLink | null;
 }
 
 function AppInitializer({ children }: { children: ReactNode }) {

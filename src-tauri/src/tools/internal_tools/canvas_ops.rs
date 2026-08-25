@@ -168,6 +168,7 @@ pub(super) fn execute_modify_canvas(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing 'canvas_path' parameter"))?;
     let changeset_id = args["changeset_id"].as_str();
+    let run_id = args["run_id"].as_str();
     let operations_val = args["operations"]
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'operations' parameter"))?;
@@ -272,7 +273,7 @@ pub(super) fn execute_modify_canvas(
                         !matches
                     });
 
-                    // Remove note relations from SQLite precisely by relation_type
+                    // Remove note relations from SQLite precisely by relation_type with ChangeSet identity
                     for (from_node_id, to_node_id, edge_label) in edges_to_remove {
                         let source_file = canvas.nodes.iter().find_map(|n| {
                             if let crate::canvas::Node::File { id: nid, file, .. } = n {
@@ -291,8 +292,8 @@ pub(super) fn execute_modify_canvas(
 
                         if let (Some(s_path), Some(t_path)) = (source_file, target_file) {
                             let rel_type = edge_label.unwrap_or_else(|| "wikilink".to_string());
-                            let _ = crate::knowledge::relations::delete_relation(
-                                &conn, &s_path, &t_path, &rel_type,
+                            let _ = crate::knowledge::relations::delete_relation_with_identity(
+                                &conn, &s_path, &t_path, &rel_type, changeset_id, run_id,
                             )?;
                         }
                     }
@@ -461,8 +462,8 @@ pub(super) fn execute_modify_canvas(
 
                     if let (Some(s_path), Some(t_path)) = (source_file, target_file) {
                         let rel_type = edge_label.unwrap_or_else(|| "wikilink".to_string());
-                        let _ = crate::knowledge::relations::delete_relation(
-                            &conn, &s_path, &t_path, &rel_type,
+                        let _ = crate::knowledge::relations::delete_relation_with_identity(
+                            &conn, &s_path, &t_path, &rel_type, changeset_id, run_id,
                         )?;
                     }
                 }

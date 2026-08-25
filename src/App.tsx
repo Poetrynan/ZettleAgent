@@ -68,7 +68,7 @@ function ViewLoading() {
 }
 
 function AppLayout() {
-  const { state, setView, toggleChat, setCurrentFile, toggleSidebar, showToast, closeSplit } = useApp();
+  const { state, setView, setPendingDeepLink, toggleChat, setCurrentFile, toggleSidebar, showToast, closeSplit } = useApp();
   const { view } = state;
   const currentView = view;
 
@@ -184,18 +184,22 @@ function AppLayout() {
     const handleOpenNote = (e: Event) => {
       const detail = (e as CustomEvent<{ path: string }>).detail;
       if (detail?.path) {
+        setPendingDeepLink({ target: 'note', path: detail.path });
         setCurrentFile(detail.path);
         setView('note');
       }
     };
     const handleOpenCanvas = (e: Event) => {
       const detail = (e as CustomEvent<{ path?: string; planId?: string }>).detail;
+      setPendingDeepLink({ target: 'canvas', path: detail?.path, planId: detail?.planId });
       if (detail?.path) {
         setCurrentFile(detail.path);
       }
       setView('canvas');
     };
     const handleOpenKnowledge = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab?: string; planId?: string }>).detail;
+      setPendingDeepLink({ target: 'knowledge', tab: detail?.tab, planId: detail?.planId });
       setView('knowledge');
     };
 
@@ -210,7 +214,7 @@ function AppLayout() {
       window.removeEventListener('open-canvas', handleOpenCanvas);
       window.removeEventListener('open-knowledge-center', handleOpenKnowledge);
     };
-  }, [setView, setCurrentFile]);
+  }, [setView, setCurrentFile, setPendingDeepLink]);
 
   // Minimum display: wordmark + tagline shimmer complete (~2.75s) + brief hold
   useEffect(() => {

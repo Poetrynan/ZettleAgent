@@ -9,6 +9,7 @@ import { MemoryCenter } from './MemoryCenter';
 import { ChangeReview } from './ChangeReview';
 import { TaskCenter } from './TaskCenter';
 import { KnowledgeHealth } from './KnowledgeHealth';
+import { KnowledgeGapAnalysis } from '../dashboard/KnowledgeGapAnalysis';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import {
@@ -34,18 +35,17 @@ import '../../styles/knowledge-center.css';
  * - 变更：Agent 想改什么？
  * - 任务：还有什么没结的事？
  * - 健康：Agent 现在能可靠地用我的知识库吗？
+ * - 图谱计划：图谱存在哪些盲区，Agent 提议了哪些结构性链接与重构？
  * - 活动：Agent 最近做了什么？
  *
  * 记忆/变更/任务/健康四页直接复用 Chat 侧栏那四块的真实实现（`KnowledgePanel` 导出），
  * 不复制一份。后续批次会把它们逐个升级成完整页面，那时两处一起变。
  */
 
-export type KnowledgePage = 'inbox' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity';
+export type KnowledgePage = 'inbox' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity' | 'gap_analysis';
 
 /**
- * 六页各配一个图标。全部取自 `components/icons.tsx`，不新画：一列裸文字没有视觉锚点，
- * 用户每次都得从头读一遍标签才知道自己在哪。图标不套彩色圆盘，颜色跟着导航项的文字走
- * （见 `.kc-nav-item svg`），所以它们在深浅两个主题下都不会自成一块色斑。
+ * 页面配对应图标与多语言词条。全部取自 `components/icons.tsx`，不新画。
  */
 const PAGES: {
   key: KnowledgePage;
@@ -58,6 +58,7 @@ const PAGES: {
   { key: 'changes', labelKey: 'knowledge.tab.changes', hintKey: 'knowledge.tabHint.changes', Icon: IconMerge },
   { key: 'tasks', labelKey: 'knowledge.tab.tasks', hintKey: 'knowledge.tabHint.tasks', Icon: IconCheck },
   { key: 'health', labelKey: 'knowledge.tab.health', hintKey: 'knowledge.tabHint.health', Icon: IconChart },
+  { key: 'gap_analysis', labelKey: 'knowledge.tab.gap_analysis', hintKey: 'knowledge.tabHint.gap_analysis', Icon: IconBrain },
   { key: 'activity', labelKey: 'knowledge.tab.activity', hintKey: 'knowledge.tabHint.activity', Icon: IconTimeline },
 ];
 
@@ -70,25 +71,51 @@ const PAGES: {
 export { useInboxCounts } from './useInboxCounts';
 
 export function KnowledgeCenter() {
-  const { state, toggleChat, setCurrentFile, setView } = useApp();
+  const { state, toggleChat, setCurrentFile, setView, consumePendingDeepLink } = useApp();
   const [page, setPage] = useState<KnowledgePage>('inbox');
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const { counts, refresh } = useInboxCounts();
   const vaultPath = state.vaultPath ?? null;
   const current = PAGES.find(p => p.key === page) ?? PAGES[0];
 
-  /**
-   * 命令面板点了某一页 / the palette asked for a page.
-   *
-   * 页面选择留在本地状态，只接一个事件，而不是把它提到全局 store——那会让两处都要
-   * 维护同一份"现在在哪一页"。事件名与 `zettel:open-search-panel` 是一套做法。
-   */
+  // 1. 消费全局 pendingDeepLink（彻底消除首次从 Chat / QuickSwitcher 跳转的时序丢失）
+  useEffect(() => {
+    if (state.pendingDeepLink && state.pendingDeepLink.target === 'knowledge') {
+      const link = consumePendingDeepLink('knowledge');
+      if (link?.tab) {
+        if (link.tab === 'gap_analysis' || PAGES.some(p => p.key === link.tab)) {
+          setPage(link.tab as KnowledgePage);
+        }
+      }
+      if (link?.planId) {
+        setActivePlanId(link.planId);
+      }
+    }
+  }, [state.pendingDeepLink, consumePendingDeepLink]);
+
+  // 2. 监听已打开状态下的 hot DOM events
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as KnowledgePage | undefined;
-      if (detail && PAGES.some(p => p.key === detail)) setPage(detail);
+      const detail = (e as CustomEvent<{ tab?: string; planId?: string } | KnowledgePage>).detail;
+      if (typeof detail === 'string') {
+        if (detail === 'gap_analysis' || PAGES.some(p => p.key === detail)) {
+          setPage(detail as KnowledgePage);
+        }
+      } else if (detail && typeof detail === 'object') {
+        if (detail.tab === 'gap_analysis' || (detail.tab && PAGES.some(p => p.key === detail.tab))) {
+          setPage(detail.tab as KnowledgePage);
+        }
+        if (detail.planId) {
+          setActivePlanId(detail.planId);
+        }
+      }
     };
+    window.addEventListener('open-knowledge-center', handler);
     window.addEventListener('zettel:knowledge-page', handler);
-    return () => window.removeEventListener('zettel:knowledge-page', handler);
+    return () => {
+      window.removeEventListener('open-knowledge-center', handler);
+      window.removeEventListener('zettel:knowledge-page', handler);
+    };
   }, []);
 
 
@@ -171,6 +198,9 @@ export function KnowledgeCenter() {
               onOpenFile={openFile}
               onOpenSettings={() => setView('settings')}
             />
+          )}
+          {page === 'gap_analysis' && (
+            <KnowledgeGapAnalysis initialPlanId={activePlanId} />
           )}
           {page === 'activity' && <AgentActivity onOpenFile={openFile} />}
         </div>

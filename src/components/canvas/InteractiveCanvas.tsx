@@ -122,7 +122,7 @@ const edgeTypes: any = {
 };
 
 function CanvasInner() {
-  const { state, showToast, setCurrentFile, setView, toggleChat, setPendingChatPrompt } = useApp();
+  const { state, showToast, setCurrentFile, setView, toggleChat, setPendingChatPrompt, consumePendingDeepLink } = useApp();
   const { palette: vizPalette } = useVizTheme();
   const reactFlowInstance = useReactFlow();
 
@@ -263,7 +263,18 @@ function CanvasInner() {
   const [canvasPlanOpen, setCanvasPlanOpen] = useState(false);
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
 
-  // 监听 Chat 或全局派发的打开白板与计划事件
+  // 1. 挂载或 pendingDeepLink 更新时消费全局状态（彻底消除首次从 Chat 跳转的时序竞争）
+  useEffect(() => {
+    if (state.pendingDeepLink && state.pendingDeepLink.target === 'canvas') {
+      const link = consumePendingDeepLink('canvas');
+      if (link?.planId) {
+        setActivePlanId(link.planId);
+        setCanvasPlanOpen(true);
+      }
+    }
+  }, [state.pendingDeepLink, consumePendingDeepLink]);
+
+  // 2. 监听已打开状态下的 hot DOM event
   useEffect(() => {
     const handleOpenCanvas = (e: Event) => {
       const detail = (e as CustomEvent<{ path?: string; planId?: string }>).detail;

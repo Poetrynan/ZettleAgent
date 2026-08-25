@@ -40,6 +40,13 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
   supportsThinking: false,
 };
 
+export interface PendingDeepLink {
+  target: 'canvas' | 'knowledge' | 'note';
+  path?: string;
+  planId?: string;
+  tab?: string;
+}
+
 export interface BaseState {
   currentFile: string | null;
   openFiles: string[];
@@ -56,6 +63,8 @@ export interface BaseState {
   /** Split editor state */
   isSplitView: boolean;
   splitFile: string | null;
+  /** 跨页面与懒加载组件深层链接暂存状态 */
+  pendingDeepLink: PendingDeepLink | null;
 }
 
 export interface BaseContextType {
@@ -65,6 +74,8 @@ export interface BaseContextType {
   setAppLang: (lang: Lang) => void;
   setLlmConfig: (config: Partial<LlmConfig>) => void;
   setView: (view: View) => void;
+  setPendingDeepLink: (link: PendingDeepLink | null) => void;
+  consumePendingDeepLink: (target: 'canvas' | 'knowledge' | 'note') => PendingDeepLink | null;
   setSchedulerLoading: (loading: boolean) => void;
   setSchedulerProgress: (progress: string | null) => void;
   setSchedulerProgressInfo: (info: SchedulerProgressInfo | null) => void;
@@ -120,6 +131,7 @@ export function BaseProvider({ children }: { children: ReactNode }) {
       isSidebarOpen,
       isSplitView: false,
       splitFile: null,
+      pendingDeepLink: null,
     };
   });
 
@@ -237,6 +249,22 @@ export function BaseProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, view }));
   }, []);
 
+  const setPendingDeepLink = useCallback((link: PendingDeepLink | null) => {
+    setState((s) => ({ ...s, pendingDeepLink: link }));
+  }, []);
+
+  const consumePendingDeepLink = useCallback((target: 'canvas' | 'knowledge' | 'note'): PendingDeepLink | null => {
+    let consumed: PendingDeepLink | null = null;
+    setState((s) => {
+      if (s.pendingDeepLink && s.pendingDeepLink.target === target) {
+        consumed = s.pendingDeepLink;
+        return { ...s, pendingDeepLink: null };
+      }
+      return s;
+    });
+    return consumed;
+  }, []);
+
   const setSchedulerLoading = useCallback((loading: boolean) => {
     setState((s) => ({ ...s, schedulerLoading: loading }));
   }, []);
@@ -318,6 +346,8 @@ export function BaseProvider({ children }: { children: ReactNode }) {
         setAppLang,
         setLlmConfig,
         setView,
+        setPendingDeepLink,
+        consumePendingDeepLink,
         setSchedulerLoading,
         setSchedulerProgress,
         setSchedulerProgressInfo,
