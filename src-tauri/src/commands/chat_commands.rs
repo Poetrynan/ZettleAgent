@@ -1377,7 +1377,24 @@ async fn run_agent_turn(
                     }
                 };
 
-                let result = crate::tools::execute_tool(name, args, &db, &vault, &all_vaults, &config, &skill_dirs_inner).await;
+                // 把 WriteGuard 生成的真实 ChangeSet ID 自动贯穿进工具参数，
+                // 确保 direct relation / canvas write 与计划路径具有完全一致的 ChangeSet identity
+                let effective_args = if let Some(ref r) = ready {
+                    if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(args) {
+                        if v.is_object() && v.get("changeset_id").is_none() {
+                            v["changeset_id"] = serde_json::Value::String(r.changeset_id.clone());
+                            v.to_string()
+                        } else {
+                            args.to_string()
+                        }
+                    } else {
+                        args.to_string()
+                    }
+                } else {
+                    args.to_string()
+                };
+
+                let result = crate::tools::execute_tool(name, &effective_args, &db, &vault, &all_vaults, &config, &skill_dirs_inner).await;
 
                 if let Some(ready) = ready {
                     let error = result.as_ref().err().map(|e| e.to_string());

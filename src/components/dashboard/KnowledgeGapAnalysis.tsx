@@ -5,6 +5,7 @@ import {
   chatWithLlm,
   agentChat,
   knowledgeGraphCreatePlan,
+  knowledgeGraphGetPlan,
   knowledgeGraphStagePlan,
   knowledgeGraphCommitPlan,
   knowledgeGraphRollbackPlan,
@@ -120,6 +121,35 @@ export function KnowledgeGapAnalysis() {
       logEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [agentLog, showLogs]);
+
+  // 监听从 Chat 或全局派发的直达图谱修复计划事件
+  useEffect(() => {
+    const handleOpenPlan = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab?: string; planId?: string }>).detail;
+      if (detail?.planId) {
+        setActiveTab('fix');
+        knowledgeGraphGetPlan(detail.planId)
+          .then((existingPlan) => {
+            if (existingPlan) {
+              setPlan(existingPlan);
+              // 默认只勾选高置信度 (>= 0.8) 的提议
+              const highConf = existingPlan.proposals
+                .filter((p) => p.confidence >= 0.8)
+                .map((p) => p.id);
+              setSelectedIds(highConf.length > 0 ? highConf : existingPlan.proposals.map((p) => p.id));
+              setFixPhase('preview_ready');
+            }
+          })
+          .catch((err) => setFixError(String(err)));
+      }
+    };
+    window.addEventListener('open-knowledge-center', handleOpenPlan);
+    window.addEventListener('open-knowledge-gap-analysis', handleOpenPlan);
+    return () => {
+      window.removeEventListener('open-knowledge-center', handleOpenPlan);
+      window.removeEventListener('open-knowledge-gap-analysis', handleOpenPlan);
+    };
+  }, []);
 
   // Click-to-navigate action
   const openNote = useCallback((filePath: string) => {

@@ -283,8 +283,13 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
                 const [actionName, queryStr] = rawAction.split('?');
                 const params = new URLSearchParams(queryStr || '');
                 if (actionName === 'open_knowledge_center' || actionName === 'knowledge_center' || actionName === 'open_knowledge') {
-                  setView('bases');
-                  window.dispatchEvent(new CustomEvent('open-knowledge-center', { detail: Object.fromEntries(params.entries()) }));
+                  setView('knowledge');
+                  const detail = Object.fromEntries(params.entries());
+                  window.dispatchEvent(new CustomEvent('open-knowledge-center', { detail }));
+                  const targetTab = params.get('tab');
+                  if (targetTab) {
+                    window.dispatchEvent(new CustomEvent('zettel:knowledge-page', { detail: targetTab }));
+                  }
                 } else if (actionName === 'open_canvas' || actionName === 'canvas') {
                   const targetCanvas = params.get('path');
                   if (targetCanvas) {
@@ -311,7 +316,11 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
                 className={isAction ? 'md-action-btn' : 'md-link'}
                 style={isExternal || isAction ? { cursor: 'pointer' } : { cursor: 'default', opacity: 0.6 }}
               >
-                {isAction && <span style={{ marginRight: 4 }}>⚡</span>}
+                {isAction && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4, flexShrink: 0 }}>
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                )}
                 {children}
               </a>
             );

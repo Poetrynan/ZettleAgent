@@ -12,7 +12,7 @@
  * - Keyboard accessible, reduced-motion aware
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { ToolCallInfo } from './useChatSessions';
 import { getLang } from '../../lib/i18n';
 
@@ -271,11 +271,152 @@ function GraphToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
   );
 }
 
+// ── Action Buttons for Structured Tool Results ────────────────────
+
+export interface ToolActionItem {
+  type: 'open_canvas' | 'open_knowledge_center' | 'open_note';
+  path?: string;
+  planId?: string;
+  tab?: string;
+  label: string;
+}
+
+export function parseToolActions(result?: string): ToolActionItem[] {
+  if (!result) return [];
+  try {
+    const data = JSON.parse(result);
+    const actions: ToolActionItem[] = [];
+    if (Array.isArray(data.actions)) {
+      for (const a of data.actions) {
+        if (a && typeof a.type === 'string' && typeof a.label === 'string') {
+          actions.push({
+            type: a.type,
+            path: typeof a.path === 'string' ? a.path : undefined,
+            planId: typeof a.planId === 'string' ? a.planId : undefined,
+            tab: typeof a.tab === 'string' ? a.tab : undefined,
+            label: a.label,
+          });
+        }
+      }
+    }
+    if (actions.length === 0 && typeof data.action_link === 'string') {
+      const raw = data.action_link.replace(/^(action:|zettel:\/\/|zettel:)/, '');
+      const [name, queryStr] = raw.split('?');
+      const params = new URLSearchParams(queryStr || '');
+      const zh = isZh();
+      if (name === 'open_canvas' || name === 'canvas') {
+        const path = params.get('path') || undefined;
+        const planId = params.get('planId') || undefined;
+        actions.push({
+          type: 'open_canvas',
+          path,
+          planId,
+          label: zh ? '打开并审查 Canvas 计划' : 'Open & Review Canvas Plan',
+        });
+      } else if (name === 'open_knowledge_center' || name === 'knowledge_center' || name === 'open_knowledge') {
+        const tab = params.get('tab') || 'gap_analysis';
+        const planId = params.get('planId') || undefined;
+        actions.push({
+          type: 'open_knowledge_center',
+          tab,
+          planId,
+          label: zh ? '打开知识中心审查图谱计划' : 'Open Knowledge Center to Review Plan',
+        });
+      } else if (name === 'open_note' || name === 'note') {
+        const path = params.get('path') || undefined;
+        actions.push({
+          type: 'open_note',
+          path,
+          label: zh ? '在编辑器中打开笔记' : 'Open Note in Editor',
+        });
+      }
+    }
+    return actions;
+  } catch {
+    return [];
+  }
+}
+
+export function ToolActionsBar({ actions }: { actions: ToolActionItem[] }) {
+  if (!actions || actions.length === 0) return null;
+
+  const handleAction = (action: ToolActionItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (action.type === 'open_canvas') {
+      if (action.path) {
+        window.dispatchEvent(new CustomEvent('open-canvas', { detail: { path: action.path, planId: action.planId } }));
+      }
+      window.dispatchEvent(new CustomEvent('zettel:open-view', { detail: 'canvas' }));
+    } else if (action.type === 'open_knowledge_center') {
+      window.dispatchEvent(new CustomEvent('open-knowledge-center', { detail: { tab: action.tab, planId: action.planId } }));
+      if (action.tab) {
+        window.dispatchEvent(new CustomEvent('zettel:knowledge-page', { detail: action.tab }));
+      }
+      window.dispatchEvent(new CustomEvent('zettel:open-view', { detail: 'knowledge' }));
+    } else if (action.type === 'open_note') {
+      if (action.path) {
+        window.dispatchEvent(new CustomEvent('open-note', { detail: { path: action.path } }));
+      }
+      window.dispatchEvent(new CustomEvent('zettel:open-view', { detail: 'note' }));
+    }
+  };
+
+  return (
+    <div className="chat-tool-actions-bar">
+      {actions.map((act, idx) => (
+        <button
+          key={idx}
+          className="chat-tool-action-btn"
+          onClick={(e) => handleAction(act, e)}
+          type="button"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <span>{act.label}</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ opacity: 0.7 }}>
+            <line x1="7" y1="17" x2="17" y2="7" />
+            <polyline points="7 7 17 7 17 17" />
+          </svg>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CanvasToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
+  const canvasPath = argOf(toolCall.arguments, 'canvas_path', 'path');
+  const zh = isZh();
+  const actions = useMemo(() => parseToolActions(toolCall.result), [toolCall.result]);
+
+  return (
+    <div className="tool-body tool-body-canvas">
+      {canvasPath && (
+        <div className="tool-body-canvas-path">
+          <span className="tool-body-chip">Canvas</span>
+          <code>{canvasPath}</code>
+        </div>
+      )}
+      <ToolActionsBar actions={actions} />
+      {toolCall.result && (
+        <div className="tool-body-section">
+          <div className="tool-body-label">
+            {zh ? '结果' : 'Result'}
+            <ToolCopyButton text={toolCall.result} />
+          </div>
+          <pre className="trace-detail-code">{toolCall.result.slice(0, 1000)}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RelationToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
   const source = argOf(toolCall.arguments, 'source_path', 'path');
   const target = argOf(toolCall.arguments, 'target_path', 'destination');
   const relType = argOf(toolCall.arguments, 'relation_type', 'type');
   const zh = isZh();
+  const actions = useMemo(() => parseToolActions(toolCall.result), [toolCall.result]);
 
   return (
     <div className="tool-body tool-body-relation">
@@ -291,6 +432,7 @@ function RelationToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
           {relType && <span className="tool-body-chip">{relType}</span>}
         </div>
       )}
+      <ToolActionsBar actions={actions} />
       {toolCall.result && (
         <div className="tool-body-section">
           <div className="tool-body-label">
@@ -306,11 +448,13 @@ function RelationToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
 
 function GenericToolBody({ toolCall }: { toolCall: ToolCallInfo }) {
   const zh = isZh();
+  const actions = useMemo(() => parseToolActions(toolCall.result), [toolCall.result]);
   if (!toolCall.result) return null;
   let text = toolCall.result;
   try { text = JSON.stringify(JSON.parse(toolCall.result), null, 2); } catch { /* plain text */ }
   return (
     <div className="tool-body tool-body-generic">
+      <ToolActionsBar actions={actions} />
       <div className="tool-body-label">
         {zh ? '结果' : 'Result'}
         <ToolCopyButton text={toolCall.result} />
@@ -333,6 +477,7 @@ export function ToolResultBody({ toolCall }: { toolCall: ToolCallInfo }) {
     case 'search':   return <SearchToolBody toolCall={toolCall} />;
     case 'graph':    return <GraphToolBody toolCall={toolCall} />;
     case 'relation': return <RelationToolBody toolCall={toolCall} />;
+    case 'canvas':   return <CanvasToolBody toolCall={toolCall} />;
     default:         return <GenericToolBody toolCall={toolCall} />;
   }
 }

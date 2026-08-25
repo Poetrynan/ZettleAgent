@@ -1828,6 +1828,14 @@ pub(super) fn execute_knowledge_graph_plan(
         "observations_count": observations_count,
         "proposals_count": proposals_count,
         "action_link": format!("action:open_knowledge_center?tab=gap_analysis&planId={}", plan_id),
+        "actions": [
+            {
+                "type": "open_knowledge_center",
+                "tab": "gap_analysis",
+                "planId": plan_id,
+                "label": "打开知识中心审查图谱计划"
+            }
+        ],
         "review_guidance": "知识图谱优化计划已生成并暂存。请在知识中心（Gap Analysis / 拓扑优化）审查并批准应用。",
         "plan": plan
     }).to_string())
@@ -1854,6 +1862,13 @@ pub(super) fn execute_knowledge_create_moc_draft(
         "title": title,
         "member_count": member_paths.len(),
         "action_link": format!("action:open_note?path={}.md", title),
+        "actions": [
+            {
+                "type": "open_note",
+                "path": format!("{}.md", title),
+                "label": "在编辑器中打开 MOC 笔记"
+            }
+        ],
         "review_guidance": "MOC 结构笔记草稿已生成。可在对话中确认保存或点击链接创建笔记。",
         "draft": draft
     }).to_string())

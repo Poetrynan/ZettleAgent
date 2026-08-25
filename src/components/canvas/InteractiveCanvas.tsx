@@ -261,6 +261,20 @@ function CanvasInner() {
 
   // ── Canvas Plan：目标→计划→预览→部分批准→提交→验证 ──
   const [canvasPlanOpen, setCanvasPlanOpen] = useState(false);
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+
+  // 监听 Chat 或全局派发的打开白板与计划事件
+  useEffect(() => {
+    const handleOpenCanvas = (e: Event) => {
+      const detail = (e as CustomEvent<{ path?: string; planId?: string }>).detail;
+      if (detail?.planId) {
+        setActivePlanId(detail.planId);
+        setCanvasPlanOpen(true);
+      }
+    };
+    window.addEventListener('open-canvas', handleOpenCanvas);
+    return () => window.removeEventListener('open-canvas', handleOpenCanvas);
+  }, []);
 
   // ── Agent 操作进度浮层 ──
   // `desc`/`descZh` are optional: the AI-layout flow only supplies labels, while the
@@ -1979,12 +1993,16 @@ Return ONLY a JSON array, no markdown, no explanation:
       {/* Canvas Plan Panel — 与 Smart Canvas 并列的另一个入口，不替换它 */}
       <CanvasPlanPanel
         isOpen={canvasPlanOpen}
-        onClose={() => setCanvasPlanOpen(false)}
+        onClose={() => {
+          setCanvasPlanOpen(false);
+          setActivePlanId(null);
+        }}
         lang={state.lang}
         canvasPath={canvasPath}
         vaultPath={state.vaultPath || ''}
         vaultPaths={state.vaultPaths || []}
         canvasNodePaths={nodes.filter(n => n.type === 'file').map(n => n.data.file as string)}
+        initialPlanId={activePlanId}
         onCommitted={() => {
           // 写入是后端做的，前端这里只重新读盘。自己在内存里"顺便"加一遍节点会让
           // 界面显示的内容与文件里的不是同一份。

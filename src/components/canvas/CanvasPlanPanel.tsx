@@ -10,7 +10,7 @@
  *
  * 视觉上完全复用画布已有的 `smart-canvas-*` / `canvas-smart-*` 类，不引入新样式。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CANVAS_PLAN_STAGES,
   type CanvasGoal,
@@ -22,6 +22,7 @@ import {
   commitCanvasPlan,
   createCanvasPlan,
   defaultSelection,
+  getCanvasPlan,
   outcomeHeadline,
   outcomeTone,
   rollbackCanvasPlan,
@@ -41,6 +42,8 @@ interface CanvasPlanPanelProps {
   canvasNodePaths: string[];
   /** 提交成功后让画布重新读盘。 */
   onCommitted: () => void;
+  /** 从 Chat 或其他入口传入的已生成计划 ID，直接载入而不重新计算。 */
+  initialPlanId?: string | null;
 }
 
 /**
@@ -96,6 +99,7 @@ export function CanvasPlanPanel({
   vaultPaths,
   canvasNodePaths,
   onCommitted,
+  initialPlanId,
 }: CanvasPlanPanelProps) {
   const isZh = lang === 'zh';
   const t = useCallback(
@@ -113,6 +117,24 @@ export function CanvasPlanPanel({
   const [verification, setVerification] = useState<CanvasPlanVerification | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 接收 Chat 或外部传入的 planId，直接载入已有计划而无需重复推演
+  useEffect(() => {
+    if (initialPlanId && isOpen) {
+      setBusy(true);
+      setError(null);
+      getCanvasPlan(initialPlanId)
+        .then((existingPlan) => {
+          if (existingPlan) {
+            setPlan(existingPlan);
+            setSelected(new Set(defaultSelection(existingPlan.proposals)));
+            setStage('preview_ready');
+          }
+        })
+        .catch((e) => setError(String(e)))
+        .finally(() => setBusy(false));
+    }
+  }, [initialPlanId, isOpen]);
 
   const fileName = (path: string) =>
     path.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/, '') || path;

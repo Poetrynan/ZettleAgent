@@ -167,6 +167,7 @@ pub(super) fn execute_modify_canvas(
     let canvas_path = args["canvas_path"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Missing 'canvas_path' parameter"))?;
+    let changeset_id = args["changeset_id"].as_str();
     let operations_val = args["operations"]
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'operations' parameter"))?;
@@ -266,13 +267,13 @@ pub(super) fn execute_modify_canvas(
                     canvas.edges.retain(|e| {
                         let matches = e.from_node == id || e.to_node == id;
                         if matches {
-                            edges_to_remove.push((e.from_node.clone(), e.to_node.clone()));
+                            edges_to_remove.push((e.from_node.clone(), e.to_node.clone(), e.label.clone()));
                         }
                         !matches
                     });
 
-                    // Remove note relations from SQLite if applicable
-                    for (from_node_id, to_node_id) in edges_to_remove {
+                    // Remove note relations from SQLite precisely by relation_type
+                    for (from_node_id, to_node_id, edge_label) in edges_to_remove {
                         let source_file = canvas.nodes.iter().find_map(|n| {
                             if let crate::canvas::Node::File { id: nid, file, .. } = n {
                                 if nid == &from_node_id { Some(file.clone()) } else { None }
@@ -289,9 +290,9 @@ pub(super) fn execute_modify_canvas(
                         });
 
                         if let (Some(s_path), Some(t_path)) = (source_file, target_file) {
-                            conn.execute(
-                                "DELETE FROM note_relations WHERE source_path = ?1 AND target_path = ?2",
-                                rusqlite::params![s_path, t_path],
+                            let rel_type = edge_label.unwrap_or_else(|| "wikilink".to_string());
+                            let _ = crate::knowledge::relations::delete_relation(
+                                &conn, &s_path, &t_path, &rel_type,
                             )?;
                         }
                     }
@@ -423,7 +424,7 @@ pub(super) fn execute_modify_canvas(
                     // so origin stays distinguishable from user wikilinks.
                     let run_id = crate::llm::tool_hooks::current_run_id();
                     let _ = crate::knowledge::relations::add_relation(
-                        &conn, &op, None, run_id.as_deref(),
+                        &conn, &op, changeset_id, run_id.as_deref(),
                     )?;
                 }
 
@@ -1329,6 +1330,14 @@ pub(super) fn execute_knowledge_canvas_plan(
         "observations_count": observations_count,
         "proposals_count": proposals_count,
         "action_link": format!("action:open_canvas?path={}&planId={}", raw_canvas_path, plan_id),
+        "actions": [
+            {
+                "type": "open_canvas",
+                "path": raw_canvas_path,
+                "planId": plan_id,
+                "label": "打开并审查 Canvas 计划"
+            }
+        ],
         "review_guidance": "画布推理计划已生成并暂存。请在无限白板中审查/应用节点与连线提议。",
         "plan": plan
     }).to_string())

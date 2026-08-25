@@ -3793,3 +3793,44 @@
   transform: translateY(0);
 }
 
+/* ── Tool Result Action Buttons Bar ── */
+.chat-tool-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px 0;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--accent, #6366f1) 6%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent, #6366f1) 30%, transparent);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.chat-tool-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-primary, #ffffff);
+  color: var(--accent, #6366f1);
+  border: 1px solid color-mix(in srgb, var(--accent, #6366f1) 40%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast, 150ms) ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.chat-tool-action-btn:hover {
+  background: var(--accent, #6366f1);
+  color: #ffffff;
+  border-color: var(--accent, #6366f1);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #6366f1) 30%, transparent);
+}
+
+.chat-tool-action-btn:active {
+  transform: translateY(0);
+}
+

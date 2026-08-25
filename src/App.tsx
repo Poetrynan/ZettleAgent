@@ -175,6 +175,43 @@ function AppLayout() {
     return () => window.removeEventListener('zettel:request-lint', handleLintRequest);
   }, [state.vaultPath]);
 
+  // Listen for global deep-link navigation events
+  useEffect(() => {
+    const handleOpenView = (e: Event) => {
+      const viewName = (e as CustomEvent<View>).detail;
+      if (viewName) setView(viewName);
+    };
+    const handleOpenNote = (e: Event) => {
+      const detail = (e as CustomEvent<{ path: string }>).detail;
+      if (detail?.path) {
+        setCurrentFile(detail.path);
+        setView('note');
+      }
+    };
+    const handleOpenCanvas = (e: Event) => {
+      const detail = (e as CustomEvent<{ path?: string; planId?: string }>).detail;
+      if (detail?.path) {
+        setCurrentFile(detail.path);
+      }
+      setView('canvas');
+    };
+    const handleOpenKnowledge = (e: Event) => {
+      setView('knowledge');
+    };
+
+    window.addEventListener('zettel:open-view', handleOpenView);
+    window.addEventListener('open-note', handleOpenNote);
+    window.addEventListener('open-canvas', handleOpenCanvas);
+    window.addEventListener('open-knowledge-center', handleOpenKnowledge);
+
+    return () => {
+      window.removeEventListener('zettel:open-view', handleOpenView);
+      window.removeEventListener('open-note', handleOpenNote);
+      window.removeEventListener('open-canvas', handleOpenCanvas);
+      window.removeEventListener('open-knowledge-center', handleOpenKnowledge);
+    };
+  }, [setView, setCurrentFile]);
+
   // Minimum display: wordmark + tagline shimmer complete (~2.75s) + brief hold
   useEffect(() => {
     const timer = setTimeout(() => setSplashMinTimeElapsed(true), 3000);
