@@ -79,14 +79,22 @@ export function ReviewSettingsSection() {
       <h2 style={sectionTitle}>
         <IconBrain size={18} /> {t('settings.review.title')}
       </h2>
-      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-3)', lineHeight: 1.6 }}>
+      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-4)', lineHeight: 1.6 }}>
         {t('settings.review.desc')}
       </div>
 
       {/* ── Desired retention ────────────────────────────────────────── */}
-      <div role="radiogroup" aria-label={t('settings.review.desiredRetention')} style={{ marginBottom: 'var(--space-3)' }}>
-        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{t('settings.review.desiredRetention')}</div>
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '2px 0 8px', lineHeight: 1.5 }}>
+      <div role="radiogroup" aria-label={t('settings.review.desiredRetention')} style={{
+        marginBottom: 'var(--space-4)',
+        padding: 'var(--space-3) var(--space-4)',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm, 2px)',
+      }}>
+        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>
+          {t('settings.review.desiredRetention')}
+        </div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', margin: '2px 0 10px', lineHeight: 1.5 }}>
           {t('settings.review.desiredRetentionDesc')}
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -103,8 +111,15 @@ export function ReviewSettingsSection() {
                 className="btn btn-sm"
                 style={{
                   fontFamily: 'var(--font-mono, monospace)',
-                  borderColor: active ? 'var(--accent-primary, #10b981)' : 'var(--border)',
-                  color: active ? 'var(--accent-primary, #10b981)' : 'var(--text-secondary)',
+                  fontWeight: active ? 700 : 500,
+                  borderRadius: 'var(--radius-sm, 2px)',
+                  border: '1px solid',
+                  borderColor: active ? 'var(--accent, #3B82F6)' : 'var(--border)',
+                  background: active ? 'var(--bg-elevated, #FFFFFF)' : 'transparent',
+                  color: active ? 'var(--accent, #3B82F6)' : 'var(--text-secondary)',
+                  boxShadow: active ? 'var(--shadow-sm)' : 'none',
+                  padding: '3px 12px',
+                  transition: 'all var(--duration-fast)',
                 }}
               >
                 {Math.round(value * 100)}%
@@ -145,28 +160,38 @@ export function ReviewSettingsSection() {
             void commit({ enableFuzz: !config.enableFuzz });
           }
         }}
-        style={{ marginTop: 'var(--space-3)', cursor: 'pointer' }}
+        style={{
+          marginTop: 'var(--space-3)',
+          padding: 'var(--space-3) var(--space-4)',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm, 2px)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
       >
         <span>
-          <span style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>
             <IconSliders size={14} /> {t('settings.review.enableFuzz')}
           </span>
-          <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>
+          <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>
             {t('settings.review.enableFuzzDesc')}
           </span>
         </span>
-        <div className={`settings-toggle-track ${config.enableFuzz ? 'active' : ''}`}>
+        <div className={`settings-toggle-track ${config.enableFuzz ? 'active' : ''}`} style={{ flexShrink: 0 }}>
           <div className="settings-toggle-thumb" />
         </div>
       </div>
 
       {savedFlash && (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--success, #22c55e)', marginTop: 'var(--space-2)' }}>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--success, #10B981)', fontWeight: 600, marginTop: 'var(--space-2)' }}>
           {t('settings.review.saved')}
         </div>
       )}
       {error && (
-        <div data-testid="fsrs-error" style={{ fontSize: 'var(--text-xs)', color: 'var(--danger)', marginTop: 'var(--space-2)' }}>
+        <div data-testid="fsrs-error" style={{ fontSize: 'var(--text-xs)', color: 'var(--danger, #EF4444)', fontWeight: 600, marginTop: 'var(--space-2)' }}>
           {error}
         </div>
       )}
@@ -209,17 +234,17 @@ function KnobRow({
     <div style={{
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
       gap: 'var(--space-4)',
-      padding: 'var(--space-3)',
-      background: 'var(--bg-primary)',
+      padding: 'var(--space-3) var(--space-4)',
+      background: 'var(--bg-secondary)',
       border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)',
+      borderRadius: 'var(--radius-sm, 2px)',
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <label htmlFor={testId} style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 600 }}>{label}</label>
-        <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>
+        <label htmlFor={testId} style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--text-primary)' }}>{label}</label>
+        <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>
           {description}
         </span>
-        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono, monospace)', marginTop: 4 }}>
+        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono, monospace)', marginTop: 4 }}>
           {min} – {max}
         </span>
       </div>
@@ -235,7 +260,18 @@ function KnobRow({
         onChange={e => setDraft(e.target.value)}
         onBlur={flush}
         onKeyDown={e => { if (e.key === 'Enter') { flush(); e.currentTarget.blur(); } }}
-        style={{ width: 110, flexShrink: 0, textAlign: 'right', fontFamily: 'var(--font-mono, monospace)' }}
+        style={{
+          width: 100,
+          flexShrink: 0,
+          textAlign: 'right',
+          fontFamily: 'var(--font-mono, monospace)',
+          fontSize: '13px',
+          fontWeight: 600,
+          borderRadius: 'var(--radius-sm, 2px)',
+          background: 'var(--bg-elevated, #FFFFFF)',
+          border: '1px solid var(--border)',
+          padding: '4px 8px',
+        }}
       />
     </div>
   );
@@ -257,66 +293,124 @@ function ReviewStatsCard({ stats }: { stats: ReviewStats }) {
   return (
     <div data-testid="review-stats" style={{
       marginTop: 'var(--space-4)',
-      padding: 'var(--space-3)',
-      background: 'var(--bg-primary)',
+      padding: 'var(--space-4)',
+      background: 'var(--bg-elevated, #FFFFFF)',
       border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)',
+      borderRadius: 'var(--radius-sm, 2px)',
+      boxShadow: 'var(--shadow-sm)',
     }}>
-      <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <IconChart size={14} /> {t('review.stats.title')}
+      <div style={{
+        fontSize: 'var(--text-sm)',
+        fontWeight: 700,
+        color: 'var(--text-primary)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 'var(--space-3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <IconChart size={15} /> {t('review.stats.title')}
+        </div>
+        <span style={{
+          fontSize: '11px',
+          fontFamily: 'var(--font-mono, monospace)',
+          color: 'var(--accent, #3B82F6)',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm, 2px)',
+          padding: '2px 8px',
+        }}>
+          {tf('review.stats.streak', stats.streakDays)} · {tf('review.stats.reviewsToday', stats.reviewsToday)}
+        </span>
       </div>
 
+      {/* 6-stat grid */}
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
-        gap: 'var(--space-2)', marginTop: 'var(--space-3)',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+        gap: 'var(--space-2)',
+        marginBottom: 'var(--space-4)',
       }}>
         {counters.map(([label, value]) => (
-          <div key={label}>
-            <div style={{ fontSize: 'var(--text-lg)', fontWeight: 600, fontFamily: 'var(--font-mono, monospace)' }}>{value}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{label}</div>
+          <div key={label} style={{
+            padding: '8px 10px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm, 2px)',
+          }}>
+            <div style={{ fontSize: '18px', fontWeight: 700, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>
+              {value}
+            </div>
+            <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)', marginTop: 2 }}>{label}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
-        <div data-testid="review-retention">
+      {/* Retention Rate banner */}
+      <div style={{
+        padding: '10px 12px',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm, 2px)',
+        marginBottom: 'var(--space-4)',
+      }}>
+        <div data-testid="review-retention" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
           {t('review.stats.retention')}:{' '}
-          {stats.retentionRate === null
-            ? t('review.stats.retentionNone')
-            : `${(stats.retentionRate * 100).toFixed(1)}%`}
+          <span style={{ color: stats.retentionRate !== null ? 'var(--accent, #3B82F6)' : 'inherit', fontFamily: 'var(--font-mono, monospace)' }}>
+            {stats.retentionRate === null
+              ? t('review.stats.retentionNone')
+              : `${(stats.retentionRate * 100).toFixed(1)}%`}
+          </span>
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2, lineHeight: 1.5 }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.45 }}>
           {t('review.stats.retentionDesc')}
-        </div>
-        <div style={{ marginTop: 'var(--space-2)' }}>
-          {tf('review.stats.streak', stats.streakDays)} · {tf('review.stats.reviewsToday', stats.reviewsToday)}
         </div>
       </div>
 
-      {/* Forecast as bars rather than a chart library: seven numbers do not
-          justify a dependency. */}
-      <div style={{ marginTop: 'var(--space-3)' }}>
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 6 }}>
+      {/* 7-day Workload Forecast Chart */}
+      <div style={{
+        padding: '12px',
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm, 2px)',
+      }}>
+        <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>
           {t('review.stats.forecast')}
         </div>
-        <div data-testid="review-forecast" style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 72 }}>
+        <div
+          data-testid="review-forecast"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: 8,
+            height: 90,
+            paddingBottom: 6,
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
           {stats.forecast.map(day => (
-            <div key={day.dayOffset} style={{ flex: 1, textAlign: 'center' }}>
+            <div key={day.dayOffset} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
+              <div style={{ fontSize: '10px', color: day.dayOffset === 0 ? 'var(--accent, #3B82F6)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600, marginBottom: 4 }}>
+                {day.count}
+              </div>
               <div
                 title={String(day.count)}
                 style={{
-                  height: `${Math.round((day.count / peak) * 52)}px`,
-                  minHeight: day.count > 0 ? 3 : 1,
-                  background: day.dayOffset === 0 ? 'var(--accent-primary, #10b981)' : 'var(--bg-tertiary)',
-                  borderRadius: 2,
+                  width: '100%',
+                  maxWidth: 32,
+                  height: `${Math.max(4, Math.round((day.count / peak) * 56))}px`,
+                  background: day.dayOffset === 0 ? 'var(--accent, #3B82F6)' : 'var(--border-strong, #cbd5e1)',
+                  borderRadius: 'var(--radius-sm, 2px)',
+                  transition: 'height var(--duration-fast)',
                 }}
               />
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--font-mono, monospace)' }}>
-                {day.count}
-              </div>
-              <div style={{ fontSize: 9, color: 'var(--text-tertiary)' }}>
-                {day.dayOffset === 0 ? t('review.stats.forecastToday') : tf('review.stats.forecastDay', day.dayOffset)}
-              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+          {stats.forecast.map(day => (
+            <div key={day.dayOffset} style={{ flex: 1, textAlign: 'center', fontSize: '10px', color: day.dayOffset === 0 ? 'var(--accent, #3B82F6)' : 'var(--text-tertiary)', fontWeight: day.dayOffset === 0 ? 700 : 500 }}>
+              {day.dayOffset === 0 ? t('review.stats.forecastToday') : tf('review.stats.forecastDay', day.dayOffset)}
             </div>
           ))}
         </div>

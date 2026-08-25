@@ -809,9 +809,10 @@ export const zh = {
     // Settings.tsx (P2-11)
     'settings.tabGeneral': '通用设置',
     'settings.tabAi': '模型配置',
+    'settings.tabReview': '间隔重复 (FSRS)',
     'settings.tabExt': '插件与扩展',
     'settings.tabMemory': '记忆与工具',
-    'settings.tabOrganize': '索引与整理',
+    'settings.tabOrganize': '索引与检索',
     'settings.modelSaved': '✅ 模型配置已保存',
     'settings.methodology': '知识管理方法论',
     'settings.methodologyDesc': '选择适合你知识管理风格的方法论，AI 会按相应结构组织笔记。',

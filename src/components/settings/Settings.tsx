@@ -40,7 +40,7 @@ export function Settings() {
   const [dbPath, setDbPath] = useState('');
   const [dailyNotePath, setDailyNotePath] = useState<string | null>(null);
   const [newFolderDefaultPath, setNewFolderDefaultPath] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'ext' | 'memory' | 'organize' | 'shortcuts'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'review' | 'ext' | 'memory' | 'organize' | 'shortcuts'>('general');
 
   const currentProvider = getProvider(llmConfig.providerId);
   const isZh = state.lang === 'zh';
@@ -144,6 +144,7 @@ export function Settings() {
             {([
               { id: 'general', icon: <IconSettings size={15} />, label: t('settings.tabGeneral') },
               { id: 'ai', icon: <IconBrain size={15} />, label: t('settings.tabAi') },
+              { id: 'review', icon: <IconSync size={15} />, label: t('settings.tabReview') },
               { id: 'ext', icon: <IconGlobe size={15} />, label: t('settings.tabExt') },
               { id: 'memory', icon: <IconDatabase size={15} />, label: t('settings.tabMemory') },
               { id: 'organize', icon: <IconSliders size={15} />, label: t('settings.tabOrganize') },
@@ -203,6 +204,12 @@ export function Settings() {
             />
           )}
 
+          {activeTab === 'review' && (
+            <div className="settings-tab-content">
+              <ReviewSettingsSection />
+            </div>
+          )}
+
           {activeTab === 'ext' && (
             <div className="settings-tab-content">
               {/* ── Agent Permissions + Recycle Bin ──────────────────────── */}
@@ -257,10 +264,6 @@ export function Settings() {
               {/* Retrieval / Rerank — the stage after retrieval, so it sits with
                   the embedding engine rather than under Extensions. */}
               <RerankSettingsSection />
-              {/* Spaced repetition — the other thing that decides which notes
-                  reach the user, so it belongs beside retrieval rather than
-                  hidden under Extensions. */}
-              <ReviewSettingsSection />
               {/* Smart Organize Section */}
               <OrganizeSettingsTab isZh={isZh} />
             </div>

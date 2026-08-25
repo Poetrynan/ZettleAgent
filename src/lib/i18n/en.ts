@@ -809,9 +809,10 @@ export const en = {
     // Settings.tsx (P2-11)
     'settings.tabGeneral': 'General',
     'settings.tabAi': 'AI Model',
+    'settings.tabReview': 'Spaced Repetition (FSRS)',
     'settings.tabExt': 'Extensions',
     'settings.tabMemory': 'Agent Memory',
-    'settings.tabOrganize': 'Index & Organize',
+    'settings.tabOrganize': 'Index & Retrieval',
     'settings.modelSaved': '✅ Model configuration saved',
     'settings.methodology': 'Methodology',
     'settings.methodologyDesc': 'Choose a methodology that fits your style; the AI will organize notes accordingly.',
