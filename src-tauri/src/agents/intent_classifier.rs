@@ -238,9 +238,11 @@ fn classify_l1(query: &str) -> IntentClassification {
 
     // ── Diagnose signals ──
     let diagnose_keywords = [
-        "扫描", "诊断", "盲区", "健康检查", "结构", "审计", "孤立", "冗余",
+        "扫描", "诊断", "盲区", "健康检查", "结构", "结构性", "审计", "审查",
+        "孤立", "冗余", "连接性", "断着", "断裂", "组织起来", "知识库",
         "scan", "diagnos", "audit", "blind spot", "health check",
-        "structural", "orphan", "fragment", "lint",
+        "structural", "structure review", "orphan", "fragment", "lint",
+        "connectivity", "redundant", "moc",
     ];
     let diagnose_hits = diagnose_keywords.iter().filter(|k| q.contains(*k)).count();
     if diagnose_hits > 0 {
@@ -250,9 +252,9 @@ fn classify_l1(query: &str) -> IntentClassification {
 
     // ── Analyze signals ──
     let analyze_keywords = [
-        "分析", "对比", "图谱", "关系", "联系", "比较", "区别",
+        "分析", "对比", "图谱", "关系", "联系", "比较", "区别", "连接", "组织",
         "analyze", "compare", "graph", "relationship", "difference",
-        "versus", "vs ",
+        "versus", "vs ", "organized", "connected",
     ];
     let analyze_hits = analyze_keywords.iter().filter(|k| q.contains(*k)).count();
     if analyze_hits > 0 {
@@ -524,6 +526,29 @@ mod tests {
     fn l1_detects_diagnose() {
         let result = classify_l1("扫描知识库盲区");
         assert_eq!(result.intent, TurnIntent::Diagnose);
+    }
+
+    #[test]
+    fn l1_structure_review_phrasing_is_diagnose() {
+        let result = classify_l1(
+            "对整个知识库进行结构性审查，识别孤立卡片，发现冗余话题，并找出潜在的 MOC 机会。",
+        );
+        assert_eq!(result.intent, TurnIntent::Diagnose);
+    }
+
+    #[test]
+    fn l1_organizational_phrasing_is_not_unknown() {
+        let result = classify_l1(
+            "帮我看看这些内容之间到底是怎么组织起来的，哪些地方还断着。",
+        );
+        assert!(
+            matches!(
+                result.intent,
+                TurnIntent::Diagnose | TurnIntent::Analyze
+            ),
+            "got {:?}",
+            result.intent
+        );
     }
 
     #[test]

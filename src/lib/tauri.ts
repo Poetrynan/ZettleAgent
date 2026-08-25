@@ -859,15 +859,16 @@ export async function addCanvasRelation(
   sourcePath: string,
   targetPath: string,
   relationType: string
-): Promise<void> {
+): Promise<string> {
   return invoke('add_canvas_relation', { sourcePath, targetPath, relationType });
 }
 
 export async function deleteCanvasRelation(
   sourcePath: string,
-  targetPath: string
-): Promise<void> {
-  return invoke('delete_canvas_relation', { sourcePath, targetPath });
+  targetPath: string,
+  relationType: string
+): Promise<boolean> {
+  return invoke('delete_canvas_relation', { sourcePath, targetPath, relationType });
 }
 
 
@@ -1231,6 +1232,22 @@ export async function agentChat(request: AgentChatRequest): Promise<string> {
 
 export async function cancelAgentTurn(): Promise<boolean> {
   return invoke('cancel_agent_turn');
+}
+
+/** Pre-send context estimate: messages + system prompt + default tool schemas. */
+export interface AgentContextEstimate {
+  total: number;
+  messages: number;
+  system: number;
+  tools: number;
+}
+
+export async function estimateAgentContextTokens(request: {
+  messages: { role: string; content: string }[];
+  methodology?: string;
+  vaultPath?: string;
+}): Promise<AgentContextEstimate> {
+  return invoke('estimate_agent_context_tokens', { request });
 }
 
 export async function emitRefreshEvent(filePath?: string): Promise<void> {

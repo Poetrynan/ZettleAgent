@@ -86,36 +86,77 @@ pub fn save_canvas_to_file(
     Ok(())
 }
 
-/// Add a note relation to the note_relations table from canvas connection.
+/// Add a note relation from a canvas connection.
+///
+/// Forwards to the shared `knowledge::relations` service — same path as the
+/// graph UI — so canvas edges carry origin/confirmed semantics and never use
+/// silent `INSERT OR IGNORE`.
 #[tauri::command]
 pub fn add_canvas_relation(
     state: State<'_, AppState>,
     source_path: String,
     target_path: String,
     relation_type: String,
-) -> Result<(), ZettelError> {
+) -> Result<String, ZettelError> {
+    use crate::knowledge::{changeset::RelationOp, relations};
+
     let conn = state.db.lock()?;
-    conn.execute(
-        "INSERT OR IGNORE INTO note_relations (source_path, target_path, relation_type, confidence, reason)
-         VALUES (?1, ?2, ?3, 1.0, 'Created manually on canvas')",
-        rusqlite::params![source_path, target_path, relation_type],
-    )?;
-    Ok(())
+    let op = RelationOp {
+        source_path,
+        target_path,
+        relation_type,
+        confidence: 1.0,
+        reason: Some("Created manually on canvas".to_string()),
+        origin: relations::ORIGIN_USER_LINK.to_string(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+    let _ = crate::knowledge::changeset::record_relation_decision(
+        &conn,
+        &op.source_path,
+        &op.target_path,
+        &op.relation_type,
+        "accepted",
+        None,
+    );
+    let outcome = relations::add_relation(&conn, &op, None, None)
+        .map_err(|e| ZettelError::System(e.to_string()))?;
+    if outcome == relations::RelationOutcome::Added {
+        let _ = relations::confirm_relation(
+            &conn,
+            &op.source_path,
+            &op.target_path,
+            &op.relation_type,
+        );
+    }
+    Ok(outcome.as_str().to_string())
 }
 
-/// Remove a note relation from the note_relations table from canvas disconnection.
+/// Remove a note relation from a canvas disconnection.
+///
+/// `relation_type` is required: deleting without it used to wipe every edge
+/// between the two notes, including unrelated AI / wikilink rows.
 #[tauri::command]
 pub fn delete_canvas_relation(
     state: State<'_, AppState>,
     source_path: String,
     target_path: String,
-) -> Result<(), ZettelError> {
+    relation_type: String,
+) -> Result<bool, ZettelError> {
+    use crate::knowledge::relations;
+
     let conn = state.db.lock()?;
-    conn.execute(
-        "DELETE FROM note_relations WHERE source_path = ?1 AND target_path = ?2",
-        rusqlite::params![source_path, target_path],
-    )?;
-    Ok(())
+    let outcome = relations::reject_relation(
+        &conn,
+        &source_path,
+        &target_path,
+        &relation_type,
+        Some("Removed by the user on canvas"),
+    )
+    .map_err(|e| ZettelError::System(e.to_string()))?;
+    Ok(outcome.changed_graph())
 }
 
 /// Get edges filtered by relation type from note_relations table.

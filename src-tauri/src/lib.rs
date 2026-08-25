@@ -260,6 +260,7 @@ pipeline_log::init(&app_data_dir);
             commands::save_image_to_vault,
             commands::agent_chat,
             commands::cancel_agent_turn,
+            commands::estimate_agent_context_tokens,
             // ── 批量 AI（体检台）──
             commands::run_batch_agent,
             commands::get_edges_by_relation,

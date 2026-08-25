@@ -37,10 +37,11 @@
   outline: none;
 }
 
-/* Button press feedback */
+/* Button press feedback — only real button chrome.
+   Do NOT apply to `[role="button"]`: accordion / trace / list-row toggles
+   use that role for a11y, and a press-scale reads as an unwanted rebound. */
 .btn:active,
-.button:active,
-[role="button"]:active {
+.button:active {
   transform: scale(0.97);
   transition-duration: 50ms;
 }

@@ -107,6 +107,12 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
   //  1. syncEdgeToDb — persist an edge add/delete to the database
   // ────────────────────────────────────────────────────────────────────────
 
+  const relationTypeOf = (edge?: Edge | null, fallback?: string) =>
+    (edge?.data?.relationType as string | undefined)
+    || (typeof edge?.label === 'string' ? edge.label : undefined)
+    || fallback
+    || 'wikilink';
+
   const syncEdgeToDb = useCallback(
     async (
       connection: { source: string; target: string },
@@ -118,11 +124,15 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
       if (sourceNode?.type === 'file' && targetNode?.type === 'file') {
         const sourcePath = sourceNode.data.file as string;
         const targetPath = targetNode.data.file as string;
+        const edge = reactFlowInstance
+          .getEdges()
+          .find((e: Edge) => e.source === connection.source && e.target === connection.target);
+        const rel = relationTypeOf(edge, relationType);
         try {
           if (action === 'add') {
-            await addCanvasRelation(sourcePath, targetPath, relationType || 'wikilink');
+            await addCanvasRelation(sourcePath, targetPath, rel);
           } else {
-            await deleteCanvasRelation(sourcePath, targetPath);
+            await deleteCanvasRelation(sourcePath, targetPath, rel);
           }
         } catch (err) {
           console.error('Failed to sync canvas connection to DB:', err);
@@ -614,7 +624,13 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
   const onEdgesDelete = useCallback(
     (deletedEdges: Edge[]) => {
       for (const edge of deletedEdges) {
-        syncEdgeToDb({ source: edge.source, target: edge.target }, 'delete');
+        syncEdgeToDb(
+          { source: edge.source, target: edge.target },
+          'delete',
+          (edge.data?.relationType as string | undefined)
+            || (typeof edge.label === 'string' ? edge.label : undefined)
+            || 'wikilink',
+        );
       }
     },
     [syncEdgeToDb],
@@ -803,7 +819,13 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
     (edgeId: string) => {
       const edge = edges.find((e) => e.id === edgeId);
       if (edge) {
-        syncEdgeToDb({ source: edge.source, target: edge.target }, 'delete');
+        syncEdgeToDb(
+          { source: edge.source, target: edge.target },
+          'delete',
+          (edge.data?.relationType as string | undefined)
+            || (typeof edge.label === 'string' ? edge.label : undefined)
+            || 'wikilink',
+        );
       }
       setEdges((eds) => eds.filter((e) => e.id !== edgeId));
       setEdgeContextMenu(null);

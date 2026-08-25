@@ -290,6 +290,7 @@ function TraceToolItem({
           </div>
         )}
         {isExpanded && (
+          <div className="trace-collapse">
           <div className="trace-detail">
             {tc.arguments && tc.arguments !== '{}' && (
               <div className="trace-detail-section">
@@ -326,6 +327,7 @@ function TraceToolItem({
               </div>
               );
             })()}
+          </div>
           </div>
         )}
       </div>
@@ -388,8 +390,14 @@ function TraceThoughtItem({
                 </span>
               )}
             </div>
-            <div className="trace-thought-text">
-              <MarkdownRenderer content={displayContent || content} className="chat-markdown" />
+            {/* 只让正文长出来，标题行原地不动。
+                展开态和折叠态是两个不同的元素（一行 `trace-row` 换成这张卡片），如果
+                整张卡片从 0 高度长起来，那一行会先消失、再被顶回来——上下内容跟着弹
+                一次。把动画收在正文上，标题行的高度就始终连续。 */}
+            <div className={isLive ? undefined : 'trace-collapse'}>
+              <div className="trace-thought-text">
+                <MarkdownRenderer content={displayContent || content} className="chat-markdown" />
+              </div>
             </div>
           </div>
         ) : (
@@ -573,55 +581,9 @@ export function AgentThoughtStream({
   }, [agentTimeline, steps, toolCalls, isStreaming]);
 
   // ── Header badges ─────────────────────────────────────────────────
-  // Surface the two turn-scoped diagnostics — tokens and wall-clock —
-  // in the header itself so the user doesn't have to expand the trace to
-  // see cache-hit rate or total time.
-  //
-  // NOTE: these three hooks MUST stay above the `chain.length === 0`
-  // early return below. Hooks are matched positionally across renders, so
-  // a hook after a conditional return makes the hook count vary with the
-  // data and React throws "Rendered fewer hooks than expected".
-  const tokenSummary = useMemo(() => {
-    if (!agentTimeline) return null;
-    for (let i = agentTimeline.length - 1; i >= 0; i--) {
-      const e = agentTimeline[i];
-      if (e.type !== 'system_note' || !e.content) continue;
-      if (!/^Tokens:\s*/i.test(e.content)) continue;
-      const body = e.content.replace(/^Tokens:\s*/i, '');
-      // Content shape:  "in 1,234 · out 88 · … · total 1,322 · hit 65%"
-      const totalMatch = body.match(/total\s+([\d,]+)/i);
-      const hitMatch = body.match(/hit\s+(\d+)%/i);
-      return {
-        total: totalMatch ? totalMatch[1] : null,
-        hit: hitMatch ? `${hitMatch[1]}%` : null,
-      };
-    }
-    return null;
-  }, [agentTimeline]);
-
-  // Bulk expand/collapse — one-shot commands, not a state toggle, so they
-  // stay in sync no matter what the user has clicked so far.
-  const expandAll = useCallback(() => {
-    const ids = new Set<string>();
-    chain.forEach(c => {
-      if (c.kind === 'thought') ids.add(c.id);
-    });
-    setExpandedThoughts(ids);
-    chain.forEach(c => {
-      if (c.kind === 'tool' && !expandedToolCalls.has(c.toolCall.id)) {
-        toggleToolCallExpand(c.toolCall.id);
-      }
-    });
-  }, [chain, expandedToolCalls, toggleToolCallExpand]);
-
-  const collapseAll = useCallback(() => {
-    setExpandedThoughts(new Set());
-    chain.forEach(c => {
-      if (c.kind === 'tool' && expandedToolCalls.has(c.toolCall.id)) {
-        toggleToolCallExpand(c.toolCall.id);
-      }
-    });
-  }, [chain, expandedToolCalls, toggleToolCallExpand]);
+  // Token 用量不在这里读。四路计数由 SmartChat 的 `token_usage` 事件渲染成
+  // 上下文容量指示器（输入框上方）+ 展开轨迹里的 `Tokens: …` 系统提示，标题栏
+  // 只留"多少步 / 什么状态"。
 
   if (chain.length === 0) return null;
 
@@ -658,9 +620,6 @@ export function AgentThoughtStream({
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTraceOpen(o => !o); }
   };
 
-  const anythingExpanded = expandedThoughts.size > 0
-    || chain.some(c => c.kind === 'tool' && expandedToolCalls.has(c.toolCall.id));
-
   return (
     <div className={`agent-trace ${isStreaming ? 'streaming' : 'finished'}`}>
       {/* Summary header — always visible, toggles the trace body */}
@@ -676,26 +635,9 @@ export function AgentThoughtStream({
           {isStreaming ? <StatusIndicator status="running" /> : hasError ? <StatusIndicator status="error" /> : <ThoughtIcon />}
         </span>
         <span className="agent-trace-header-label">{headerLabel}</span>
-        {tokenSummary && (tokenSummary.total || tokenSummary.hit) && (
-          <span className="agent-trace-token-badge" title={isZh ? 'Token 用量' : 'Token usage'}>
-            {tokenSummary.total && (
-              <span>{isZh ? `${tokenSummary.total} tokens` : `${tokenSummary.total} tok`}</span>
-            )}
-            {tokenSummary.hit && <span className="agent-trace-token-hit">↺ {tokenSummary.hit}</span>}
-          </span>
-        )}
-        {/* Bulk expand/collapse — only useful once the trace is open and has
-            more than a couple of items. Stops click from toggling the trace. */}
-        {traceOpen && chain.length > 2 && (
-          <button
-            className="agent-trace-expand-all"
-            onClick={(e) => { e.stopPropagation(); anythingExpanded ? collapseAll() : expandAll(); }}
-            title={anythingExpanded ? (isZh ? '全部折叠' : 'Collapse all') : (isZh ? '全部展开' : 'Expand all')}
-            aria-label={anythingExpanded ? (isZh ? '全部折叠' : 'Collapse all') : (isZh ? '全部展开' : 'Expand all')}
-          >
-            {anythingExpanded ? (isZh ? '折叠' : 'Collapse') : (isZh ? '展开' : 'Expand')}
-          </button>
-        )}
+        {/* Token 读数已挪到输入框上的上下文容量指示器：它是"还剩多少能说"的当前
+            状态，属于要说话的地方；挂在某一轮已经跑完的轨迹标题上，既没有分母
+            也没有标签，只能靠猜。 */}
         <span className={`trace-chevron ${traceOpen ? 'open' : ''}`} aria-hidden="true">
           <IconChevronDown size={13} />
         </span>
@@ -703,6 +645,7 @@ export function AgentThoughtStream({
 
       {/* Trace body — directly under the header when expanded */}
       {traceOpen && (
+        <div className="trace-collapse">
         <div className="agent-trace-body">
           {chain.map((item, idx) => {
             const isLast = idx === chain.length - 1;
@@ -751,6 +694,7 @@ export function AgentThoughtStream({
               />
             );
           })}
+        </div>
         </div>
       )}
 

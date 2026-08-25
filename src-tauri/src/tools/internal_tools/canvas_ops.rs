@@ -406,24 +406,42 @@ pub(super) fn execute_modify_canvas(
 
                 if let (Some(s_path), Some(t_path)) = (source_file, target_file) {
                     let rel_type = label.unwrap_or_else(|| "wikilink".to_string());
-                    conn.execute(
-                        "INSERT OR IGNORE INTO note_relations (source_path, target_path, relation_type, confidence, reason)
-                         VALUES (?1, ?2, ?3, 1.0, 'Created manually by AI Agent on canvas')",
-                        rusqlite::params![s_path, t_path, rel_type],
+                    let op = crate::knowledge::changeset::RelationOp {
+                        source_path: s_path,
+                        target_path: t_path,
+                        relation_type: rel_type,
+                        confidence: 0.6,
+                        reason: Some("Created by AI Agent on canvas".to_string()),
+                        origin: crate::knowledge::relations::ORIGIN_AGENT.to_string(),
+                        old_confidence: None,
+                        old_reason: None,
+                        expected_source_version: None,
+                        expected_target_version: None,
+                    };
+                    // Side-effect of canvas file write — go through the shared
+                    // relation service so we never silent-IGNORE conflicts and
+                    // so origin stays distinguishable from user wikilinks.
+                    let _ = crate::knowledge::relations::add_relation(
+                        &conn, &op, None, None,
                     )?;
                 }
 
                 ops_applied += 1;
             }
             CanvasOperation::RemoveEdge { id } => {
-                let mut edge_info = None;
+                let mut edge_info: Option<(String, String, Option<String>)> = None;
                 if let Some(pos) = canvas.edges.iter().position(|e| e.id == id) {
-                    edge_info = Some((canvas.edges[pos].from_node.clone(), canvas.edges[pos].to_node.clone()));
+                    let edge = &canvas.edges[pos];
+                    edge_info = Some((
+                        edge.from_node.clone(),
+                        edge.to_node.clone(),
+                        edge.label.clone(),
+                    ));
                     canvas.edges.remove(pos);
                     ops_applied += 1;
                 }
 
-                if let Some((from_node_id, to_node_id)) = edge_info {
+                if let Some((from_node_id, to_node_id, edge_label)) = edge_info {
                     let source_file = canvas.nodes.iter().find_map(|n| {
                         if let crate::canvas::Node::File { id: nid, file, .. } = n {
                             if nid == &from_node_id { Some(file.clone()) } else { None }
@@ -440,9 +458,9 @@ pub(super) fn execute_modify_canvas(
                     });
 
                     if let (Some(s_path), Some(t_path)) = (source_file, target_file) {
-                        conn.execute(
-                            "DELETE FROM note_relations WHERE source_path = ?1 AND target_path = ?2",
-                            rusqlite::params![s_path, t_path],
+                        let rel_type = edge_label.unwrap_or_else(|| "wikilink".to_string());
+                        let _ = crate::knowledge::relations::delete_relation(
+                            &conn, &s_path, &t_path, &rel_type,
                         )?;
                     }
                 }

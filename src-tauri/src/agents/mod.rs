@@ -4,6 +4,7 @@
 pub mod instance;
 pub mod intent;
 pub mod intent_classifier;
+pub mod capability_resolver;
 pub mod registry;
 pub mod router;
 pub mod orchestrator;

@@ -54,6 +54,12 @@ vi.mock('../../../lib/tauri', () => ({
   resolveRagSearchMode: vi.fn().mockResolvedValue('fts'),
   ragNeedsQueryEmbedding: vi.fn().mockReturnValue(false),
   deleteChatMessagesFrom: vi.fn().mockResolvedValue(undefined),
+  estimateAgentContextTokens: vi.fn().mockResolvedValue({
+    total: 4200,
+    messages: 200,
+    system: 2800,
+    tools: 1200,
+  }),
   listChatSessions: vi.fn().mockResolvedValue([]),
   getChatSession: vi.fn().mockResolvedValue([]),
   createChatSession: vi.fn().mockResolvedValue(undefined),
@@ -111,7 +117,8 @@ const appState = {
   currentFile: null,
   pendingAttachments: [],
   pendingChatPrompt: null,
-  llmConfig: { apiUrl: 'https://x/v1', apiKey: '', model: 'm', providerId: 'custom' },
+  llmConfig: { apiUrl: 'https://x/v1', apiKey: '', model: 'm', providerId: 'custom', contextWindow: 200000 },
+
 };
 
 // `showToast` 在生产里是 `useCallback(..., [])`，身份稳定；这里也给一个稳定的
@@ -297,6 +304,77 @@ describe('SmartChat agent-event generations', () => {
     });
 
     expect(container.querySelector('[data-testid="ctx-query"]')!.textContent).toBe('unstamped but real');
+  });
+});
+
+/**
+ * 上下文容量指示器 / the context-capacity readout on the composer.
+ *
+ * Token 读数的位置本身就是语义：它回答"我还能再说多少"，所以它属于输入框，而且
+ * 必须带分母和标签——一个孤零零的 `↺ 47%` 没人知道那是什么的百分比。
+ */
+describe('SmartChat context capacity meter', () => {
+  beforeEach(() => {
+    handlers.clear();
+    vi.clearAllMocks();
+    let tick = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => (tick += 1_000));
+  });
+
+  function usageEvent(input: number, cacheRead: number) {
+    return {
+      type: 'token_usage',
+      run_id: 'run-1',
+      input,
+      output: 500,
+      cache_read: cacheRead,
+      cache_write: 0,
+      total: input + cacheRead + 500,
+      cache_hit_rate: cacheRead / (cacheRead + input),
+    };
+  }
+
+  it('reports the last turn’s prompt against the model window', async () => {
+    const { container } = render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('agent-event')?.length).toBe(1));
+
+    // 结算之前也在场，但必须自报是估算：需要它的时刻是发送前，而不是某一轮跑完。
+    expect(container.querySelector('.chat-context-meter-chip')!.textContent).toContain('~');
+
+
+    await act(async () => {
+      emitEvent('agent-event', { type: 'run_started', run_id: 'run-1' });
+      emitEvent('agent-event', usageEvent(1000, 3000));
+    });
+
+    // prompt = 1000 + 3000 = 4000，占 200k 窗口的 2%。output 不算——它不占下一轮。
+    const chip = container.querySelector('.chat-context-meter-chip')!;
+    expect(chip.textContent).toContain('2%');
+
+    fireEvent.click(chip);
+    const values = Array.from(container.querySelectorAll('.chat-context-meter-value'))
+      .map(el => el.textContent);
+    expect(values[0]).toBe('4.0k/200.0k (2.0%)');
+    expect(values[1]).toBe('75%');
+  });
+
+  /** 命中率按会话 prompt 加权，不是把每轮的百分比再平均一次。 */
+  it('weights the cache hit rate by prompt tokens across the session', async () => {
+    const { container } = render(<SmartChat />);
+    await waitFor(() => expect(handlers.get('agent-event')?.length).toBe(1));
+
+    await act(async () => {
+      emitEvent('agent-event', { type: 'run_started', run_id: 'run-1' });
+      emitEvent('agent-event', usageEvent(1000, 3000));
+      emitEvent('agent-event', usageEvent(1000, 9000));
+    });
+
+    fireEvent.click(container.querySelector('.chat-context-meter-chip')!);
+    const values = Array.from(container.querySelectorAll('.chat-context-meter-value'))
+      .map(el => el.textContent);
+    // 容量只看最近一轮：10.0k。命中率 = 12000 / 14000 ≈ 86%。
+    expect(values[0]).toBe('10.0k/200.0k (5.0%)');
+    expect(values[1]).toBe('86%');
   });
 });
 

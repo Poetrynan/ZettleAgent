@@ -67,6 +67,11 @@
   /* Graphite rules */
   --border: #D7CEBB;
   --border-subtle: #E8E1CF;
+  /* 悬停时用的那一档描边 / the hover step of the rule scale.
+     必须定义：`var(--border-strong)` 没有 fallback，未定义时整条 border-color 声明
+     在计算值阶段失效，回落到 currentColor —— 也就是正文的近黑色。全库有 30 多处
+     hover 用它，缺这一行的表现就是"悬停边框突然变黑"。 */
+  --border-strong: #BCAF97;
   --border-focus: #355F9E;
 
   --shadow-sm: 0 1px 2px rgba(58, 48, 30, 0.07);
@@ -250,6 +255,8 @@
 
   --border: #3D473E;
   --border-subtle: #29322B;
+  /* 深色下"更强"是更亮，不是更黑。见浅色主题里那段说明。 */
+  --border-strong: #57624F;
   --border-focus: #79A6E2;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);

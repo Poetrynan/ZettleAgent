@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom } from '../../lib/tauri';
-import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary, TaskCommitment } from '../../lib/tauri';
+import { ragSearchAndStream, agentChat, cancelAgentTurn, saveChatMessage, readMarkdownFile, emitRefreshEvent, exportChatSession, resolveRagSearchMode, ragNeedsQueryEmbedding, deleteChatMessagesFrom, estimateAgentContextTokens } from '../../lib/tauri';
+import type { SearchMode, AgentEvent, SearchResult, PlanStep, ContextPackageSummary, TaskCommitment, AgentContextEstimate } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
 import {
   IconSend, IconGlobe, IconNetwork, IconLink, IconCanvas, IconSliders,
@@ -231,6 +231,16 @@ export function SmartChat() {
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
   const [attachedNotes, setAttachedNotes] = useState<{ name: string; path: string; source?: 'canvas' | 'manual' }[]>([]);
   const [ragProgress, setRagProgress] = useState<string | null>(null);
+  /** 上下文水位 + 缓存复用率，累计到当前会话。
+   *
+   *  `promptTokens` 只记最近一轮真正送进模型的 prompt（input + cache_read +
+   *  cache_write），因为"上下文占了多少"问的是窗口，而 output 不占下一轮的窗口。
+   *  命中率按整个会话的 prompt 加权：单轮数字会被一次冷启动整轮带偏，而用户想
+   *  知道的是"这个会话的缓存到底有没有在生效"。 */
+  const [usage, setUsage] = useState<{ promptTokens: number; cacheReadSum: number; promptSum: number } | null>(null);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [overheadEstimate, setOverheadEstimate] = useState<AgentContextEstimate | null>(null);
+  const usageRef = useRef<HTMLDivElement>(null);
 
   const [webSearch, setWebSearch] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -312,6 +322,87 @@ export function SmartChat() {
 
   // Session management (extracted hook)
   const sess = useChatSessions(state.vaultPath);
+
+  // 换会话就换一份上下文：水位和命中率跟着会话走，不能把上一条会话的读数留在
+  // 输入框上，那会让人以为新会话已经占了半个窗口。
+  useEffect(() => {
+    setUsage(null);
+    setUsageOpen(false);
+    setOverheadEstimate(null);
+  }, [sess.sessionId]);
+
+  // 点面板外面就收起来（面板浮在输入框上方，挡住内容时得能一键让它走）。
+  useEffect(() => {
+    if (!usageOpen) return;
+    const onDown = (ev: MouseEvent) => {
+      if (!usageRef.current?.contains(ev.target as Node)) setUsageOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [usageOpen]);
+
+  /** 粗估 token：CJK 按 1.8、其余按 0.25 折算，与输入框的预估提示同一把尺。 */
+  const estimateTokens = useCallback((text: string) => Math.ceil(
+    Array.from(text).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0)
+  ), []);
+
+  /**
+   * 后端粗算的固定开销（系统提示 + 默认工具 schema）。消息正文另算，二者相加才是
+   * 下一轮真正会送进模型的量级。失败时退回本地正文估算，面板上仍标 `~`。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const payload = {
+      messages: messages.map(m => ({ role: m.role, content: m.content || '' })),
+      methodology: state.methodology,
+      vaultPath: state.vaultPath || undefined,
+    };
+    estimateAgentContextTokens(payload)
+      .then((est) => {
+        if (!cancelled) setOverheadEstimate(est);
+      })
+      .catch(() => {
+        // 估算失败不挡聊天；chip 退回纯消息文本估算。
+        if (!cancelled) setOverheadEstimate(null);
+      });
+    return () => { cancelled = true; };
+  }, [messages, state.methodology, state.vaultPath]);
+
+  /**
+   * 上下文容量读数。
+   *
+   * 常驻显示，因为"还能再说多少"是发送前的决策信息——只有在某一轮结算完才出现的
+   * 指示器，恰好在你需要它的时候不在。所以分两种状态，而且**明确标出来是哪一种**：
+   *
+   * - `measured`：后端 `token_usage` 的真实计数（input + cache_read + cache_write）。
+   * - 估算：本会话还没结算过，就按「对话 + 系统提示 + 默认工具定义」粗估，前面带 `~`。
+   *
+   * 窗口未知（模型没配 contextWindow）时只报绝对用量，不编一个分母出来。
+   */
+  const contextMeter = useMemo(() => {
+    const limit = llmConfig.contextWindow || 0;
+    const measured = usage && usage.promptTokens > 0 ? usage.promptTokens : null;
+    const fallbackMessages = messages.reduce((acc, m) => acc + estimateTokens(m.content || ''), 0);
+    const used = measured ?? (overheadEstimate?.total ?? fallbackMessages);
+    return {
+      used,
+      measured: measured !== null,
+      window: limit,
+      ratio: limit > 0 ? Math.min(used / limit, 1) : null,
+      hit: usage && usage.promptSum > 0 ? usage.cacheReadSum / usage.promptSum : null,
+      system: overheadEstimate?.system ?? null,
+      tools: overheadEstimate?.tools ?? null,
+      messagesPart: overheadEstimate?.messages ?? fallbackMessages,
+    };
+  }, [usage, messages, llmConfig.contextWindow, estimateTokens, overheadEstimate]);
+
+
+  /** 万 / k 分级，长数字在 22px 的 chip 里读不出量级。 */
+  const formatTokens = useCallback((n: number) => (
+    isZh
+      ? (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
+      : (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
+  ), [isZh]);
 
   // Load sessions on mount
   useEffect(() => { sess.refreshSessions(); }, []);
@@ -869,6 +960,14 @@ export function SmartChat() {
           const totalT = e.total ?? (inputT + outputT + cacheR + cacheW);
           if (totalT === 0) break;
           const hit = e.cache_hit_rate ?? 0;
+          // 上下文水位与命中率进 composer 上的容量指示器：它是"现在还剩多少能
+          // 说"的实时状态，属于输入框，而不是某一轮已经结束的轨迹标题。
+          const promptT = inputT + cacheR + cacheW;
+          setUsage(prev => ({
+            promptTokens: promptT,
+            cacheReadSum: (prev?.cacheReadSum ?? 0) + cacheR,
+            promptSum: (prev?.promptSum ?? 0) + cacheR + inputT,
+          }));
           const parts = [
             `in ${inputT.toLocaleString()}`,
             `out ${outputT.toLocaleString()}`,
@@ -1859,12 +1958,79 @@ export function SmartChat() {
                     <IconGlobe size={12} />
                     <span>{isZh ? '联网' : 'Web'}</span>
                   </button>
+                  {/* 常驻，不等结算：需要它的时刻是发送前。 */}
+                  <div className="chat-context-meter" ref={usageRef}>
+                    <button
+                      className={`chat-context-meter-chip ${usageOpen ? 'is-open' : ''}`}
+                      onClick={() => setUsageOpen(v => !v)}
+                      aria-expanded={usageOpen}
+                      title={isZh ? '上下文容量与缓存复用' : 'Context capacity & cache reuse'}
+                    >
+                      {contextMeter.ratio !== null && (
+                        <span className="chat-context-meter-track" aria-hidden="true">
+                          <span
+                            className="chat-context-meter-fill"
+                            style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
+                          />
+                        </span>
+                      )}
+                      <span>
+                        {!contextMeter.measured && '~'}
+                        {contextMeter.ratio !== null
+                          ? `${(contextMeter.ratio * 100).toFixed(0)}%`
+                          : formatTokens(contextMeter.used)}
+                      </span>
+                    </button>
+                    {usageOpen && (
+                      <div className="chat-context-meter-panel" role="dialog">
+                        <div className="chat-context-meter-row">
+                          <span className="chat-context-meter-label">
+                            {isZh ? '上下文容量' : 'Context used'}
+                          </span>
+                          <span className="chat-context-meter-value">
+                            {!contextMeter.measured && '~'}
+                            {contextMeter.window > 0
+                              ? `${formatTokens(contextMeter.used)}/${formatTokens(contextMeter.window)} (${(contextMeter.ratio! * 100).toFixed(1)}%)`
+                              : `${formatTokens(contextMeter.used)} tokens`}
+                          </span>
+                        </div>
+                        {contextMeter.ratio !== null && (
+                          <div className="chat-context-meter-track is-wide" aria-hidden="true">
+                            <span
+                              className="chat-context-meter-fill"
+                              style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        {contextMeter.hit !== null && (
+                          <div className="chat-context-meter-row">
+                            <span className="chat-context-meter-label">
+                              {isZh ? '平均缓存命中率' : 'Avg. cache hit rate'}
+                            </span>
+                            <span className="chat-context-meter-value">
+                              {(contextMeter.hit * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
+                        <div className="chat-context-meter-note">
+                          {contextMeter.measured
+                            ? (isZh
+                              ? '容量按最近一轮送进模型的 prompt 计（含缓存复用部分），命中率按本会话 prompt 加权。'
+                              : 'Capacity is the last turn’s prompt (cached part included); hit rate is prompt-weighted across this session.')
+                            : (isZh
+                              ? `估算值（~）：对话约 ${formatTokens(contextMeter.messagesPart)}，系统提示约 ${formatTokens(contextMeter.system ?? 0)}，工具定义约 ${formatTokens(contextMeter.tools ?? 0)}。本轮结算后换成后端的真实计数。`
+                              : `Estimate (~): ~${formatTokens(contextMeter.messagesPart)} from messages, ~${formatTokens(contextMeter.system ?? 0)} system prompt, ~${formatTokens(contextMeter.tools ?? 0)} tool schemas. Replaced by the backend’s real count after this turn settles.`)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {input.trim().length > 0 && (
                     <span
                       className="chat-input-token-hint"
                       title={isZh ? '预计输入 Token 消耗' : 'Estimated input tokens'}
                     >
-                      ~{Math.ceil(Array.from(input).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0))} tok
+                      ~{estimateTokens(input)} tok
                     </span>
                   )}
                 </div>

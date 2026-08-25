@@ -1163,6 +1163,35 @@ async fn run_agent_turn(
             }
         }
     }
+    // Unknown + knowledge signals must not collapse to CORE_TOOLS alone —
+    // otherwise the model invents "I don't have get_graph" while the catalogue
+    // still has it. Expand only the read-focused KnowledgeBroad pack.
+    let expanded = crate::agents::capability_resolver::expand_visible_tools(
+        &mut filtered_tools,
+        &tools,
+        &classification.intent,
+        &user_query,
+    );
+    if !expanded.is_empty() {
+        let _ = app.emit(
+            "agent-event",
+            serde_json::json!({
+                "type": "capability_expanded",
+                "run_id": crate::llm::tool_hooks::current_run_id(),
+                "reason": "knowledge_broad",
+                "tools": expanded,
+                "message": if is_zh {
+                    "已为本次任务加载图谱与知识能力"
+                } else {
+                    "Loaded graph and knowledge capabilities for this turn"
+                },
+            }),
+        );
+        crate::chat_file_log::log_agent(&format!(
+            "capability_expanded knowledge_broad +{} tools",
+            expanded.len()
+        ));
+    }
     crate::chat_file_log::log_agent(&format!(
         "strategy tools={}/{} intent={:?}",
         filtered_tools.len(),
@@ -1659,6 +1688,103 @@ fn emit_batch_progress(
 pub fn cancel_agent_turn() -> Result<bool, String> {
     llm::cancel_agent_turn_global();
     Ok(true)
+}
+
+/// Rough pre-send context size for the composer capacity chip.
+///
+/// Counts the same three blocks every Agent turn actually ships:
+/// 1. conversation messages (user / assistant / tool),
+/// 2. the backend-built system prompt (role + methodology scaffolding),
+/// 3. the default tool-schema surface (`CORE_TOOLS`).
+///
+/// This is deliberately the *default* surface, not the post-routing one: the
+/// chip answers "how full is the window before I hit send", and routing has not
+/// run yet. KnowledgeBroad / Diagnose expansions can only add more tools, so
+/// under-counting here would be the dangerous direction — we accept a small
+/// overshoot when the turn stays on Search/Write instead.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentContextEstimate {
+    pub total: u64,
+    pub messages: u64,
+    pub system: u64,
+    pub tools: u64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EstimateAgentContextRequest {
+    pub messages: Vec<llm::ChatMessage>,
+    pub methodology: Option<String>,
+    pub vault_path: Option<String>,
+}
+
+#[tauri::command]
+pub fn estimate_agent_context_tokens(
+    state: State<'_, AppState>,
+    request: EstimateAgentContextRequest,
+) -> Result<AgentContextEstimate, ZettelError> {
+    let methodology = request.methodology.as_deref().unwrap_or("zettelkasten");
+    let vault_path = request.vault_path.unwrap_or_default();
+    let vault_info = {
+        let note_count: i64 = state
+            .db
+            .lock()
+            .ok()
+            .and_then(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
+                    .ok()
+            })
+            .unwrap_or(0);
+        let vault_name = std::path::Path::new(&vault_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                if vault_path.is_empty() {
+                    "vault".to_string()
+                } else {
+                    vault_path.clone()
+                }
+            });
+        format!("- Active vault: {} ({} notes)", vault_name, note_count)
+    };
+    let current_time = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M (%A)")
+        .to_string();
+
+    // Same scaffolding the live turn builds before memory/skills injection.
+    // Empty memory/skills keeps this cheap and stable for the chip; those
+    // layers are additive and only grow the real prompt.
+    let system = crate::llm::prompts::base_agent_prompt(
+        "knowledge",
+        "",
+        "",
+        methodology,
+        &current_time,
+        &vault_info,
+    );
+    let system_tokens = llm::estimate_tokens(&system) as u64;
+
+    let all_tools = crate::tools::get_all_tool_defs(&[], &[]);
+    let core_tools: Vec<_> = all_tools
+        .into_iter()
+        .filter(|t| crate::tools::CORE_TOOLS.contains(&t.function.name.as_str()))
+        .collect();
+    let tool_tokens = llm::estimate_tool_schema_tokens(&core_tools) as u64;
+
+    let chat_only: Vec<_> = request
+        .messages
+        .into_iter()
+        .filter(|m| m.role != "system")
+        .collect();
+    let message_tokens = llm::estimate_messages_tokens(&chat_only) as u64;
+
+    Ok(AgentContextEstimate {
+        total: message_tokens.saturating_add(system_tokens).saturating_add(tool_tokens),
+        messages: message_tokens,
+        system: system_tokens,
+        tools: tool_tokens,
+    })
 }
 
 /// Default MCP servers bundled with ZettelAgent (no API key required).

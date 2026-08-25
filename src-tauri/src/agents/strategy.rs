@@ -135,6 +135,13 @@ impl ExecutionStrategy {
                     "get_note_metadata",
                     "get_note_tags",
                     "find_similar_notes",
+                    "query_graph_communities",
+                    "generate_community_summaries",
+                    "explain_relationship",
+                    "generate_structure_note",
+                    "get_timeline",
+                    "todo_write",
+                    crate::tools::LIST_AVAILABLE_TOOLS,
                 ]),
                 plan_depth: PlanDepth::Full,
                 synthesis: SynthesisPolicy::Mandatory,
@@ -181,10 +188,21 @@ impl ExecutionStrategy {
                     "run_lint",
                     "get_vault_stats",
                     "get_graph",
+                    "get_local_graph",
                     "get_backlinks",
                     "query_relations",
                     "get_note_metadata",
                     "list_notes",
+                    "batch_read_notes",
+                    "search_notes",
+                    "read_note",
+                    "query_graph_communities",
+                    "generate_community_summaries",
+                    "generate_structure_note",
+                    "find_shortest_path",
+                    "compare_notes",
+                    "todo_write",
+                    crate::tools::LIST_AVAILABLE_TOOLS,
                 ]),
                 plan_depth: PlanDepth::Full,
                 synthesis: SynthesisPolicy::Mandatory,
@@ -486,5 +504,19 @@ mod tests {
             search.visible_tool_defs(&all).len(),
             search.filter_tool_defs(&all).len()
         );
+    }
+
+    #[test]
+    fn diagnose_scope_exposes_get_graph_and_run_lint() {
+        let strategy = ExecutionStrategy::from_intent(&TurnIntent::Diagnose);
+        assert!(strategy.allows_tool("get_graph"));
+        assert!(strategy.allows_tool("run_lint"));
+        assert!(strategy.allows_tool("query_graph_communities"));
+        assert!(strategy.allows_tool("generate_structure_note"));
+        let all = crate::tools::get_all_tool_defs(&[], &[]);
+        let visible = strategy.visible_tool_defs(&all);
+        let names: Vec<&str> = visible.iter().map(|t| t.function.name.as_str()).collect();
+        assert!(names.contains(&"get_graph"));
+        assert!(names.contains(&"run_lint"));
     }
 }
