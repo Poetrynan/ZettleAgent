@@ -1,10 +1,59 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { getKnowledgeGraph, chatWithLlm, agentChat, GraphData, AgentEvent } from '../../lib/tauri';
-import { t, getLang } from '../../lib/i18n';
+import {
+  getKnowledgeGraph,
+  chatWithLlm,
+  agentChat,
+  knowledgeGraphCreatePlan,
+  knowledgeGraphStagePlan,
+  knowledgeGraphCommitPlan,
+  knowledgeGraphRollbackPlan,
+  knowledgeGraphVerifyPlan,
+  GraphData,
+  AgentEvent,
+  type GraphObservation,
+  type GraphPlan,
+  type GraphProposal,
+  type PlanOutcome,
+  type PlanVerification,
+} from '../../lib/tauri';
+import { t, tf, getLang } from '../../lib/i18n';
+import type { TranslationKey } from '../../lib/i18n';
 import { IconBrain, IconRobot } from '../icons';
 import { MarkdownRenderer } from '../editor/MarkdownRenderer';
+import { GraphEvidenceCard } from '../knowledge/RelationEvidenceDrawer';
+import { KcPill } from '../knowledge/states';
 import { listen } from '@tauri-apps/api/event';
+
+/**
+ * 修复流程的当前位置 / where the fix loop currently is.
+ *
+ * 一部分是前端的过程步骤（读图谱、分析、生成计划），一部分直接来自后端返回的 `state`。
+ * 区别很重要：`preview_ready` / `conflict` / `rejected` 都意味着**还没有任何东西写进
+ * 图谱**，而 `partial_success` 意味着写了一部分——这三类绝不能长得一样。
+ */
+type FixPhase =
+  | 'idle'
+  | 'retrieving'
+  | 'analyzing'
+  | 'planning'
+  | 'awaiting_approval'
+  | 'preview_ready'
+  | 'applying'
+  | 'verifying'
+  | 'completed'
+  | 'partial_success'
+  | 'conflict'
+  | 'rejected'
+  | 'failed'
+  | 'rolled_back';
+
+/** 默认勾选的置信度门槛。低于它的提议一律要用户自己勾。 */
+const AUTO_SELECT_CONFIDENCE = 0.8;
+
+/** 观察分组的显示顺序，未知种类排在最后。 */
+const OBSERVATION_KIND_ORDER = ['orphan', 'hub_overload', 'duplicate', 'missing_link'];
+
 
 interface GapInsight {
   type: 'orphan' | 'island' | 'hub_risk' | 'suggestion';
@@ -51,7 +100,17 @@ export function KnowledgeGapAnalysis() {
   const [agentLog, setAgentLog] = useState<LogItem[]>([]);
   const [streamedResponse, setStreamedResponse] = useState('');
   const [showLogs, setShowLogs] = useState(true);
-  const [isAutoFixing, setIsAutoFixing] = useState(false);
+
+  // ── 修复：目标 → 诊断/计划 → 预览 → 部分批准 → 提交 → 验证 → 结果 ──
+  const [fixPhase, setFixPhase] = useState<FixPhase>('idle');
+  const [plan, setPlan] = useState<GraphPlan | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [stageOutcome, setStageOutcome] = useState<PlanOutcome | null>(null);
+  const [commitOutcome, setCommitOutcome] = useState<PlanOutcome | null>(null);
+  const [verification, setVerification] = useState<PlanVerification | null>(null);
+  const [rollbackOutcome, setRollbackOutcome] = useState<PlanOutcome | null>(null);
+  const [fixError, setFixError] = useState<string | null>(null);
+  /** Agent 修复报告只作为「执行详情」里的旁证，不再是主界面。 */
   const [fixResult, setFixResult] = useState<string>('');
 
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -294,120 +353,171 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
     }
   }, [state.llmConfig, state.vaultPath, state.vaultPaths, state.methodology, state.lang, showToast]);
 
-  const handleAutoFix = useCallback(async () => {
-    // Switch to the terminal logs view immediately
+  // ── 修复闭环：目标 → 计划 → 预览 → 部分批准 → 提交 → 验证 → 结果 ──
+  //
+  // 这里没有「一键修复完成」这条路。生成计划只读库；预览只做 dry-run；提交是唯一写入
+  // 的一步；提交后立刻回查。每一句话都对应后端返回的一个数字或状态串。
+
+  const resetFixRun = () => {
+    setStageOutcome(null);
+    setCommitOutcome(null);
+    setVerification(null);
+    setRollbackOutcome(null);
+    setFixError(null);
+  };
+
+  /** 目标 → 诊断/计划。只读数据库，什么都不写。 */
+  const handleBuildPlan = useCallback(async () => {
+    if (!state.vaultPath) {
+      showToast(t('gap.plan.needVault'), 'error');
+      return;
+    }
     setActiveTab('fix');
-    setIsAutoFixing(true);
+    resetFixRun();
+    setPlan(null);
+    setSelectedIds([]);
     setFixResult('');
-    setAgentLog([]);
-    setShowLogs(true);
-
-    const isZh = state.lang === 'zh';
-
-    const unlistenPromise = listen<AgentEvent>('agent-event', (event) => {
-      const e = event.payload;
-      switch (e.type) {
-        case 'thinking': {
-          const cleanMsg = (e.message || '').trim();
-          if (cleanMsg) {
-            setAgentLog(prev => [...prev, { type: 'thinking', text: cleanMsg }]);
-          }
-          break;
-        }
-        case 'tool_start': {
-          const displayName = e.name ? (t(`chat.tool.${e.name}` as any) !== `chat.tool.${e.name}` ? t(`chat.tool.${e.name}` as any) : e.name.replace(/_/g, ' ')) : 'tool';
-          const logText = isZh
-            ? `正在使用工具 [${displayName}]`
-            : `Invoking [${displayName}]`;
-          setAgentLog(prev => [...prev, { type: 'tool_start', text: logText }]);
-          break;
-        }
-        case 'tool_result': {
-          const displayName = e.name ? (t(`chat.tool.${e.name}` as any) !== `chat.tool.${e.name}` ? t(`chat.tool.${e.name}` as any) : e.name.replace(/_/g, ' ')) : 'tool';
-          const logText = isZh
-            ? `工具 [${displayName}] 执行成功`
-            : `Tool [${displayName}] executed successfully`;
-          setAgentLog(prev => [...prev, { type: 'tool_result', text: logText }]);
-          break;
-        }
-        case 'text_delta': {
-          setFixResult(prev => prev + (e.content || ''));
-          break;
-        }
-        case 'done': {
-          setAgentLog(prev => [...prev, { type: 'done', text: isZh ? '修复流程执行完毕' : 'Fix process completed' }]);
-          break;
-        }
-        default:
-          break;
-      }
-    });
-
+    setFixPhase('retrieving');
     try {
-      let fixPrompt = isZh
-        ? '请帮我一键自动修复以下检测到的知识图谱盲区与结构问题：\n\n'
-        : 'Please automatically fix the following detected knowledge graph gaps and structural issues:\n\n';
-
-      if (insights.length > 0) {
-        fixPrompt += isZh ? '发现的问题：\n' : 'Detected Gaps:\n';
-        insights.forEach(i => {
-          fixPrompt += `- ${i.title}: ${i.description}\n`;
-          if (i.notes?.length) {
-            fixPrompt += isZh ? `  涉及卡片: ${i.notes.join(', ')}\n` : `  Affected notes: ${i.notes.join(', ')}\n`;
-          }
-        });
-      }
-
-      if (aiSummary) {
-        fixPrompt += `\n${isZh ? '诊断详情报告：' : 'Detailed diagnosis:'}\n${aiSummary.substring(0, 1500)}\n`;
-      }
-
-      fixPrompt += isZh
-        ? '\n请直接调用内置工具执行修复，包括：'
-        : '\nPlease directly invoke tools to perform fixes, including:';
-      fixPrompt += isZh
-        ? '\n1. 对没有链接的孤立卡片，尝试使用 `batch_link_notes` 建立概念连线；'
-        : '\n1. For unlinked orphan notes, use `batch_link_notes` to build connections;';
-      fixPrompt += isZh
-        ? '\n2. 创建聚合节点来汇总和梳理结构孤岛或群落；'
-        : '\n2. Create structure/MOC notes to bridge isolated clusters;';
-      fixPrompt += isZh
-        ? '\n3. 对极高重叠的笔记建议合并或重组；'
-        : '\n3. Suggest note mergers or reorganizations.';
-      fixPrompt += isZh
-        ? '\n请直接执行修复。执行完毕后，总结你具体执行了哪些修复（如：建立了哪些链接，创建了什么笔记）。回答请使用中文。'
-        : '\nPlease auto-fix these for me and summarize actions when completed. Answer in English.';
-
-      const result = await agentChat({
-        messages: [{ role: 'user', content: fixPrompt }],
-        apiUrl: state.llmConfig.apiUrl,
-        apiKey: state.llmConfig.apiKey || undefined,
-        model: state.llmConfig.model,
-        providerId: state.llmConfig.providerId,
-        vaultPath: state.vaultPath || undefined,
-        vaultPaths: state.vaultPaths?.length ? state.vaultPaths : undefined,
-        methodology: state.methodology,
+      const next = await knowledgeGraphCreatePlan({
+        goalType: 'diagnose',
+        scope: { paths: [], cluster: null },
+        anchorPaths: [],
+        question: t('gap.plan.goalDiagnose'),
+        constraints: [],
+        maxProposals: null,
       });
+      setFixPhase('analyzing');
+      setPlan(next);
+      // 默认只勾置信度达标的那些。其余一律不选，由用户逐条 opt-in——
+      // 「全选」等于把审查责任偷偷推回给用户，同时又让他以为自己审过了。
+      setSelectedIds(
+        next.proposals.filter(p => p.confidence >= AUTO_SELECT_CONFIDENCE).map(p => p.id),
+      );
+      setFixPhase('awaiting_approval');
+    } catch (e) {
+      setFixError(String(e));
+      setFixPhase('failed');
+    }
+  }, [state.vaultPath, showToast]);
 
-      setFixResult(result);
-      showToast(isZh ? '知识盲区修复完成！' : 'Gaps auto-fixed successfully!', 'success');
-      
-      // Trigger a workspace graph refresh automatically
+  const toggleProposal = useCallback((id: string) => {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+    // 改了选择，之前那份预览就不再对应现在勾的东西了。
+    setStageOutcome(null);
+    setCommitOutcome(null);
+    setVerification(null);
+    setFixPhase('awaiting_approval');
+  }, []);
+
+  /** 预览：生成 ChangeSet，图谱写入零条。 */
+  const handlePreview = useCallback(async () => {
+    if (!plan || selectedIds.length === 0) return;
+    setFixPhase('planning');
+    setFixError(null);
+    setCommitOutcome(null);
+    setVerification(null);
+    setRollbackOutcome(null);
+    try {
+      const outcome = await knowledgeGraphStagePlan(
+        plan.id,
+        selectedIds,
+        state.vaultPath || '',
+        state.vaultPaths?.length ? state.vaultPaths : undefined,
+      );
+      setStageOutcome(outcome);
+      // refusal 非空 = 门禁拒绝，一律按「未执行」处理，且后面不给「应用」。
+      if (outcome.refusal) {
+        setFixPhase('rejected');
+      } else if (outcome.state === 'conflict') {
+        setFixPhase('conflict');
+      } else if (outcome.state === 'rejected') {
+        setFixPhase('rejected');
+      } else {
+        setFixPhase('preview_ready');
+      }
+    } catch (e) {
+      setFixError(String(e));
+      setFixPhase('failed');
+    }
+  }, [plan, selectedIds, state.vaultPath, state.vaultPaths]);
+
+  /** 提交，然后立刻回查。成功与否由 `applied` 决定，不由「调用没报错」决定。 */
+  const handleApply = useCallback(async () => {
+    if (!plan) return;
+    setFixPhase('applying');
+    setFixError(null);
+    try {
+      const outcome = await knowledgeGraphCommitPlan(plan.id);
+      setCommitOutcome(outcome);
+      setFixPhase('verifying');
+      try {
+        setVerification(await knowledgeGraphVerifyPlan(plan.id));
+      } catch (e) {
+        // 回查挂了不代表提交没发生，也不代表提交成功——两件事分开记。
+        setFixError(String(e));
+      }
+      setFixPhase(phaseOfOutcome(outcome));
+      if (outcome.applied > 0) {
+        try {
+          const { emitRefreshEvent } = await import('../../lib/tauri');
+          await emitRefreshEvent();
+        } catch (err) {
+          console.warn('Failed to emit graph refresh:', err);
+        }
+      }
+    } catch (e) {
+      setFixError(String(e));
+      setFixPhase('failed');
+    }
+  }, [plan]);
+
+  const handleRollback = useCallback(async () => {
+    if (!plan) return;
+    setFixError(null);
+    try {
+      const outcome = await knowledgeGraphRollbackPlan(plan.id);
+      setRollbackOutcome(outcome);
+      setFixPhase(outcome.state === 'rolled_back' ? 'rolled_back' : phaseOfOutcome(outcome));
       try {
         const { emitRefreshEvent } = await import('../../lib/tauri');
         await emitRefreshEvent();
       } catch (err) {
         console.warn('Failed to emit graph refresh:', err);
       }
-    } catch (e: any) {
-      console.error('Agent auto-fix failed:', e);
-      setFixResult(isZh ? `修复失败: ${e?.message || e}` : `Auto-fix failed: ${e?.message || e}`);
-      showToast(isZh ? '修复启动失败' : 'Failed to start fix', 'error');
-    } finally {
-      setIsAutoFixing(false);
-      unlistenPromise.then(fn => fn());
+    } catch (e) {
+      setFixError(String(e));
+      setFixPhase('failed');
     }
-  }, [insights, aiSummary, state.llmConfig, state.vaultPath, state.vaultPaths, state.methodology, state.lang, showToast]);
+  }, [plan]);
+
+  /** 观察按种类分组，顺序固定，未知种类归到最后。 */
+  const groupedObservations = useMemo(() => {
+    const groups = new Map<string, GraphObservation[]>();
+    for (const obs of plan?.observations ?? []) {
+      const list = groups.get(obs.kind);
+      if (list) list.push(obs);
+      else groups.set(obs.kind, [obs]);
+    }
+    return [...groups.entries()].sort((a, b) => kindRank(a[0]) - kindRank(b[0]));
+  }, [plan]);
+
+  const fixBusy =
+    fixPhase === 'retrieving' ||
+    fixPhase === 'analyzing' ||
+    fixPhase === 'planning' ||
+    fixPhase === 'applying' ||
+    fixPhase === 'verifying';
+
+  // 「应用」只在预览真的生成了、门禁没拒绝、且还没提交过的时候出现。
+  const canApply =
+    !!stageOutcome &&
+    !stageOutcome.refusal &&
+    stageOutcome.state === 'awaiting_approval' &&
+    !commitOutcome;
+  // 撤销只在真的写进去了东西之后才有意义。
+  const canRollback = !!commitOutcome && commitOutcome.applied > 0 && !rollbackOutcome;
+
 
   if (!state.vaultPath) return null;
 
@@ -628,7 +738,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                   aria-selected={activeTab === 'fix'}
                 >
                   <IconTools size={14} />
-                  <span>{state.lang === 'zh' ? '智能修复' : 'Auto-Fix'}</span>
+                  <span>{t('gap.plan.sectionFix')}</span>
                 </button>
               </div>
 
@@ -840,94 +950,255 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                   </div>
                 )}
 
-                {/* 4. AUTO-FIX TAB */}
+                {/* 4. FIX TAB — 目标 / 发现 / 计划 / 结果，全部用后端的数字说话 */}
                 {activeTab === 'fix' && (
                   <div className="gap-fix-tab animated-fade-in">
                     <div className="gap-fix-controls">
                       <div className="gap-fix-info">
-                        <h4>{state.lang === 'zh' ? '一键图谱盲区修复' : 'One-Click Auto-Fix Gaps'}</h4>
-                        <p>
-                          {state.lang === 'zh'
-                            ? 'AI Agent 将自主调用链接与整合工具，为孤立笔记建立关联、聚合知识孤岛。'
-                            : 'Let the AI Agent auto-link orphan notes and group isolated clusters into structural maps.'}
-                        </p>
+                        <h4>{t('gap.plan.sectionFix')} · {t('gap.plan.goalTitle')}</h4>
+                        <p>{t('gap.plan.goalDiagnose')}</p>
+                        <p className="gap-plan-note">{t('gap.plan.goalNote')}</p>
                       </div>
                       <button
                         className="gap-fix-btn gap-btn-primary"
-                        disabled={isAutoFixing || (!insights.length && !aiSummary)}
-                        onClick={handleAutoFix}
+                        disabled={fixBusy}
+                        onClick={handleBuildPlan}
                       >
-                        <svg className={isAutoFixing ? 'spin-icon' : ''} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className={fixBusy ? 'spin-icon' : ''} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                         </svg>
-                        <span>
-                          {isAutoFixing
-                            ? (state.lang === 'zh' ? '修复执行中...' : 'Fixing Vault...')
-                            : (state.lang === 'zh' ? '一键自动修复' : 'Auto-Fix Gaps')
-                          }
-                        </span>
+                        <span>{plan ? t('gap.plan.regenerate') : t('gap.plan.start')}</span>
                       </button>
                     </div>
 
-                    {/* Developer Terminal Box */}
-                    {(isAutoFixing || agentLog.length > 0) && (
-                      <div className="gap-terminal-wrapper">
-                        <div className="gap-terminal-header">
-                          <div className="terminal-dots">
-                            <span className="dot dot-red" />
-                            <span className="dot dot-yellow" />
-                            <span className="dot dot-green" />
-                          </div>
-                          <span className="terminal-title">
-                            {state.lang === 'zh' ? 'Agent 执行终端' : 'Agent Action Console'}
-                          </span>
-                        </div>
-                        <div className="gap-terminal-body">
-                          {agentLog.map((log, i) => {
-                            const meta = LOG_META[log.type];
-                            return (
-                              <div key={i} className={`gap-terminal-line ${meta.cls}`}>
-                                <span className="terminal-prompt">$</span>
-                                <span className="terminal-text">{log.text}</span>
-                              </div>
-                            );
-                          })}
-                          {isAutoFixing && (
-                            <div className="gap-terminal-line log-thinking">
-                              <span className="terminal-prompt">$</span>
-                              <span className="terminal-text terminal-cursor">
-                                {state.lang === 'zh' ? '正在连接笔记库，检索拓扑问题并应用工具修复...' : 'Connecting to database, analyzing gaps and applying edits...'}
-                              </span>
-                            </div>
-                          )}
-                          <div ref={logEndRef} />
-                        </div>
+                    {fixPhase !== 'idle' && (
+                      <div className="gap-plan-status" role="status" aria-live="polite">
+                        <KcPill
+                          tone={phaseTone(fixPhase)}
+                          label={t(`gap.plan.status.${fixPhase}` as TranslationKey)}
+                        />
                       </div>
                     )}
 
-                    {/* Fix execution executive report */}
-                    {fixResult && (
-                      <div className="gap-analysis-ai gap-fix-result">
-                        <div className="gap-analysis-ai-header">
-                          <IconCheck size={14} style={{ color: 'var(--success)' }} />
-                          <span>{state.lang === 'zh' ? '一键修复执行报告' : 'Auto-Fix Actions Report'}</span>
-                        </div>
-                        <div className="gap-analysis-ai-content" style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                          <MarkdownRenderer content={fixResult} className="gap-ai-markdown" />
-                        </div>
+                    {fixError && (
+                      <div className="gap-plan-warn" role="alert">{tf('gap.plan.error', fixError)}</div>
+                    )}
+
+                    {plan && (
+                      <div className="gap-plan-block">
+                        <h5 className="gap-plan-heading">{t('gap.plan.observations')}</h5>
+                        {groupedObservations.length === 0 ? (
+                          <p className="gap-plan-note">{t('gap.plan.noObservations')}</p>
+                        ) : (
+                          groupedObservations.map(([kind, list]) => (
+                            <div className="gap-plan-group" key={kind}>
+                              <div className="gap-plan-group-title">{observationKindLabel(kind)}</div>
+                              {list.map(obs => (
+                                <div className="gap-plan-observation" key={obs.id}>
+                                  <strong className="gap-plan-observation-title">{obs.title}</strong>
+                                  <p className="gap-plan-observation-summary">{obs.summary}</p>
+                                  {obs.warnings.map((w, i) => (
+                                    <div className="gap-plan-warn" key={i}>{w}</div>
+                                  ))}
+                                  {obs.evidence.length > 0 && (
+                                    <>
+                                      <div className="gap-plan-label">{t('gap.plan.evidence')}</div>
+                                      {obs.evidence.map((ev, i) => (
+                                        <GraphEvidenceCard key={`${obs.id}-${i}`} ev={ev} />
+                                      ))}
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ))
+                        )}
                       </div>
+                    )}
+
+                    {plan && (
+                      <div className="gap-plan-block">
+                        <h5 className="gap-plan-heading">{t('gap.plan.proposals')}</h5>
+                        {plan.proposals.length === 0 ? (
+                          <p className="gap-plan-note">{t('gap.plan.noProposals')}</p>
+                        ) : (
+                          <>
+                            <p className="gap-plan-note">{t('gap.plan.proposalsHint')}</p>
+                            <div className="gap-plan-count">
+                              {tf('gap.plan.selectedCount', selectedIds.length, plan.proposals.length)}
+                            </div>
+                            {plan.proposals.map(p => (
+                              <ProposalRow
+                                key={p.id}
+                                proposal={p}
+                                checked={selectedIds.includes(p.id)}
+                                onToggle={() => toggleProposal(p.id)}
+                              />
+                            ))}
+                            {selectedIds.length === 0 && (
+                              <p className="gap-plan-note">{t('gap.plan.nothingSelected')}</p>
+                            )}
+                          </>
+                        )}
+
+                        {plan.validationSteps.length > 0 && (
+                          <>
+                            <div className="gap-plan-label">{t('gap.plan.validationSteps')}</div>
+                            <ul className="gap-plan-list">
+                              {plan.validationSteps.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
+                          </>
+                        )}
+                        {plan.unresolvedQuestions.length > 0 && (
+                          <>
+                            <div className="gap-plan-label">{t('gap.plan.unresolved')}</div>
+                            <ul className="gap-plan-list">
+                              {plan.unresolvedQuestions.map((q, i) => <li key={i}>{q}</li>)}
+                            </ul>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {plan && plan.proposals.length > 0 && (
+                      <div className="gap-plan-actions">
+                        <button
+                          className="gap-btn gap-btn-secondary gap-btn-sm"
+                          disabled={fixBusy || selectedIds.length === 0}
+                          onClick={handlePreview}
+                        >
+                          <span>{t('gap.plan.preview')}</span>
+                        </button>
+                        {/* 只有预览确实生成了、且门禁没拒绝，才给「应用」。 */}
+                        {canApply && (
+                          <button
+                            className="gap-btn gap-btn-primary gap-btn-sm"
+                            disabled={fixBusy}
+                            onClick={handleApply}
+                          >
+                            <span>{t('gap.plan.apply')}</span>
+                          </button>
+                        )}
+                        {canRollback && (
+                          <button
+                            className="gap-btn gap-btn-secondary gap-btn-sm"
+                            disabled={fixBusy}
+                            onClick={handleRollback}
+                          >
+                            <span>{t('gap.plan.rollback')}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {stageOutcome && (
+                      <OutcomeBlock
+                        title={t('gap.plan.previewTitle')}
+                        outcome={stageOutcome}
+                        applied={false}
+                      />
+                    )}
+
+                    {commitOutcome && (
+                      <OutcomeBlock
+                        title={t('gap.plan.resultTitle')}
+                        outcome={commitOutcome}
+                        applied={commitOutcome.applied > 0}
+                      />
+                    )}
+
+                    {verification && (
+                      <div className="gap-plan-block">
+                        <h5 className="gap-plan-heading">{t('gap.plan.verifyTitle')}</h5>
+                        <p className="gap-plan-note">
+                          {tf(
+                            'gap.plan.verifyCounts',
+                            verification.relationTotal,
+                            verification.proposalsPresent,
+                            verification.proposalsAbsent,
+                          )}
+                        </p>
+                        {verification.danglingEndpoints.length > 0 && (
+                          <>
+                            <div className="gap-plan-label">{t('gap.plan.dangling')}</div>
+                            <ul className="gap-plan-list">
+                              {verification.danglingEndpoints.map((d, i) => <li key={i}>{d}</li>)}
+                            </ul>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {rollbackOutcome && (
+                      <OutcomeBlock
+                        title={t('gap.plan.status.rolled_back')}
+                        outcome={rollbackOutcome}
+                        applied={false}
+                      />
+                    )}
+
+                    {/* 执行详情：终端日志与逐条结果。次要披露，不是主界面。 */}
+                    {(agentLog.length > 0 || fixResult || commitOutcome || stageOutcome) && (
+                      <details className="gap-plan-details">
+                        <summary>{t('gap.plan.execDetails')}</summary>
+
+                        {(commitOutcome ?? stageOutcome) && (
+                          <ul className="gap-plan-list">
+                            {(commitOutcome ?? stageOutcome)!.details.map((d, i) => (
+                              <li key={i}>
+                                <span className="gap-plan-mono">
+                                  {shortLabel(d.source)} → {shortLabel(d.target)} · {d.relationType}
+                                </span>
+                                {' — '}
+                                {t(`gap.plan.itemOutcome.${d.outcome}` as TranslationKey)}
+                                {d.message ? ` · ${d.message}` : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {agentLog.length > 0 && (
+                          <div className="gap-terminal-wrapper">
+                            <div className="gap-terminal-header">
+                              <div className="terminal-dots">
+                                <span className="dot dot-red" />
+                                <span className="dot dot-yellow" />
+                                <span className="dot dot-green" />
+                              </div>
+                              <span className="terminal-title">{t('gap.agentLogTitle')}</span>
+                            </div>
+                            <div className="gap-terminal-body">
+                              {agentLog.map((log, i) => {
+                                const meta = LOG_META[log.type];
+                                return (
+                                  <div key={i} className={`gap-terminal-line ${meta.cls}`}>
+                                    <span className="terminal-prompt">$</span>
+                                    <span className="terminal-text">{log.text}</span>
+                                  </div>
+                                );
+                              })}
+                              <div ref={logEndRef} />
+                            </div>
+                          </div>
+                        )}
+
+                        {fixResult && (
+                          <MarkdownRenderer content={fixResult} className="gap-ai-markdown" />
+                        )}
+                      </details>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Action / Re-run row */}
+              {/* 重新诊断。诊断与修复是两件事，这一行只属于诊断。 */}
               <div className="gap-rerun-section">
-                <button className="gap-btn gap-btn-secondary gap-btn-sm" onClick={() => analyze('quick')} disabled={isAnalyzing || isAutoFixing}>
+                <span className="gap-plan-label">{t('gap.plan.sectionDiagnose')}</span>
+                <button className="gap-btn gap-btn-secondary gap-btn-sm" onClick={() => analyze('quick')} disabled={isAnalyzing || fixBusy}>
                   <IconTarget size={13} />
                   <span>{state.lang === 'zh' ? '重新快速诊断' : 'Run Quick Scan'}</span>
                 </button>
-                <button className="gap-btn gap-btn-primary gap-btn-sm" onClick={() => analyze('agent')} disabled={isAnalyzing || isAutoFixing}>
+                <button className="gap-btn gap-btn-primary gap-btn-sm" onClick={() => analyze('agent')} disabled={isAnalyzing || fixBusy}>
                   <IconRobot size={13} />
                   <span>{state.lang === 'zh' ? '重新 Agent 深度诊断' : 'Run Deep Agent Scan'}</span>
                 </button>
@@ -940,7 +1211,210 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
   );
 }
 
-// ── Local SVG Icons ──────────────────────────────────────────────────
+// ── 修复闭环的展示部件与词表 ─────────────────────────────────────────
+
+/**
+ * 一条提议 / one proposal, one checkbox.
+ *
+ * 每行必须同时给出理由、置信度、风险与依据。少了任何一项，用户就只能凭「AI 说的」
+ * 来勾选，那这个复选框就是装饰。
+ */
+function ProposalRow({
+  proposal,
+  checked,
+  onToggle,
+}: {
+  proposal: GraphProposal;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="gap-plan-proposal">
+      <label className="gap-plan-proposal-head">
+        <input type="checkbox" checked={checked} onChange={onToggle} />
+        <span className="gap-plan-mono">
+          {shortLabel(proposal.sourcePath)}
+          {proposal.targetPath ? ` → ${shortLabel(proposal.targetPath)}` : ''}
+        </span>
+        {proposal.relationType && (
+          <span className="gap-plan-mono">
+            {t('gap.plan.relationType')}: {proposal.relationType}
+          </span>
+        )}
+      </label>
+
+      <div className="gap-plan-proposal-meta">
+        <span>{t('gap.plan.confidence')}: {proposal.confidence.toFixed(2)}</span>
+        <span>{t('gap.plan.risk')}: {riskLabel(proposal.risk)}</span>
+      </div>
+
+      <p className="gap-plan-proposal-reason">
+        {t('gap.plan.reason')}: {proposal.reason}
+      </p>
+
+      {/* 已存在不是成功，勾了也只会换来一句「已存在」，所以先说清楚。 */}
+      {proposal.alreadyExists && (
+        <div className="gap-plan-warn">{t('gap.plan.alreadyExists')}</div>
+      )}
+
+      {proposal.evidence.length > 0 && (
+        <>
+          <div className="gap-plan-label">{t('gap.plan.evidence')}</div>
+          {proposal.evidence.map((ev, i) => (
+            <GraphEvidenceCard key={`${proposal.id}-${i}`} ev={ev} />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 一次 stage / commit / rollback 的结果 / the numbers, and nothing but the numbers.
+ *
+ * 成功样式只在 `applied > 0` 时出现。`refusal` 非空一律显示「未执行」，
+ * 而 `state === 'partial_success'` 要读起来像「部分」，不能像「完成」。
+ */
+function OutcomeBlock({
+  title,
+  outcome,
+  applied,
+}: {
+  title: string;
+  outcome: PlanOutcome;
+  /** 是否用成功样式。调用方必须传 `outcome.applied > 0`，不许为了好看传 true。 */
+  applied: boolean;
+}) {
+  const refused = outcome.refusal !== null && outcome.refusal !== undefined;
+  return (
+    <div className={`gap-plan-block ${applied ? 'gap-plan-block-ok' : ''}`}>
+      <h5 className="gap-plan-heading">{title}</h5>
+
+      {refused ? (
+        <>
+          <div className="gap-plan-warn" role="alert">
+            {t('gap.plan.notExecuted')} — {t('gap.plan.refusalTitle')}
+          </div>
+          <p className="gap-plan-note">{outcome.refusal}</p>
+          <p className="gap-plan-note">{t('gap.plan.refusalHint')}</p>
+        </>
+      ) : (
+        <div className="gap-plan-status">
+          <KcPill
+            tone={applied ? 'success' : outcome.state === 'partial_success' ? 'warning' : 'neutral'}
+            label={t(`gap.plan.status.${outcome.state}` as TranslationKey)}
+          />
+        </div>
+      )}
+
+      <ul className="gap-plan-list">
+        <li>{tf('gap.plan.resultApplied', outcome.applied)}</li>
+        <li>{tf('gap.plan.resultAlready', outcome.alreadyExisted)}</li>
+        <li>{tf('gap.plan.resultRejected', outcome.rejectedByUser)}</li>
+        <li>{tf('gap.plan.resultFailed', outcome.failed)}</li>
+        {outcome.missing > 0 && <li>{tf('gap.plan.resultMissing', outcome.missing)}</li>}
+      </ul>
+
+      {/* 一条都没写进去必须明说，否则一排 0 会被读成「本来就没什么可做」。 */}
+      {!refused && outcome.applied === 0 && (
+        <p className="gap-plan-note">{t('gap.plan.resultNothingApplied')}</p>
+      )}
+
+      {outcome.selected > 0 && (
+        <p className="gap-plan-note">
+          {tf(
+            'gap.plan.previewCounts',
+            outcome.selected,
+            outcome.alreadyExisted,
+            outcome.rejectedByUser,
+          )}
+        </p>
+      )}
+
+      {/* 冲突串原样列出：概括它等于把最重要的那句话丢掉。 */}
+      {outcome.conflicts.length > 0 && (
+        <>
+          <div className="gap-plan-label">{t('gap.plan.conflictsTitle')}</div>
+          <ul className="gap-plan-list">
+            {outcome.conflicts.map((c, i) => (
+              <li key={i} className="gap-plan-warn-line">{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {outcome.message && <p className="gap-plan-note">{outcome.message}</p>}
+    </div>
+  );
+}
+
+/** 后端 state → 前端阶段。未知串一律当失败，不当成功。 */
+function phaseOfOutcome(outcome: PlanOutcome): FixPhase {
+  switch (outcome.state) {
+    case 'completed':
+      return 'completed';
+    case 'partial_success':
+      return 'partial_success';
+    case 'conflict':
+      return 'conflict';
+    case 'rejected':
+      return 'rejected';
+    case 'rolled_back':
+      return 'rolled_back';
+    case 'awaiting_approval':
+      return 'preview_ready';
+    default:
+      return 'failed';
+  }
+}
+
+/** 阶段 → pill 色调。只有真的全写进去了才用 success。 */
+function phaseTone(phase: FixPhase): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+  switch (phase) {
+    case 'completed':
+      return 'success';
+    case 'partial_success':
+    case 'conflict':
+      return 'warning';
+    case 'failed':
+    case 'rejected':
+      return 'danger';
+    case 'retrieving':
+    case 'analyzing':
+    case 'planning':
+    case 'applying':
+    case 'verifying':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+}
+
+/** 观察种类的人话标签，未知种类归到「其他发现」。 */
+function observationKindLabel(kind: string): string {
+  const key = `gap.plan.obsKind.${kind}` as TranslationKey;
+  const text = t(key);
+  return text === key ? t('gap.plan.obsKind.other') : text;
+}
+
+function kindRank(kind: string): number {
+  const i = OBSERVATION_KIND_ORDER.indexOf(kind);
+  return i === -1 ? OBSERVATION_KIND_ORDER.length : i;
+}
+
+/** 风险等级的人话标签，未知等级原样显示而不是编一个。 */
+function riskLabel(risk: string): string {
+  const key = `gap.plan.risk.${risk}` as TranslationKey;
+  const text = t(key);
+  return text === key ? risk : text;
+}
+
+/** 绝对路径不进主文案，只留文件名。 */
+function shortLabel(path: string): string {
+  const name = path.split(/[/\\]/).filter(Boolean).pop();
+  return name || path;
+}
+
 
 function IconTarget({ size = 16 }: { size?: number }) {
   return (
@@ -978,14 +1452,6 @@ function IconCheckCircle({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--success, #10B981)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-    </svg>
-  );
-}
-
-function IconCheck({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={style}>
-      <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }

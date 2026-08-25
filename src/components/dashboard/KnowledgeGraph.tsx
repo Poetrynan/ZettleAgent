@@ -756,6 +756,10 @@ export function KnowledgeGraph() {
           handleDeleteNode={handleDeleteNode}
           handleFilterSwitch={handleFilterSwitch}
           isZh={isZh}
+          selectedNodes={selectedNodes}
+          llmConfig={state.llmConfig}
+          onRelationChanged={loadGraph}
+          showToast={showToast}
         />
       )}
 

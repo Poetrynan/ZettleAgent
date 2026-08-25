@@ -547,22 +547,36 @@ export async function getLocalGraph(filePath: string): Promise<GraphData> {
 
 // ── Graph Relation Operations ─────────────────────────────────────
 
+/**
+ * 一次关系写入真正做了什么 / what one edge write actually did.
+ *
+ * `already_exists` 与 `rejected_by_user` 都**不是**成功：前者没有新增，后者是用户
+ * 以前明确否决过的边。调用方必须分开报告，不能一律当成「已添加」。
+ */
+export type AddRelationOutcome = 'added' | 'already_exists' | 'rejected_by_user';
+
 /** Add a note relation from the knowledge graph view */
 export async function addNoteRelation(
   sourcePath: string,
   targetPath: string,
   relationType: string,
   reason?: string,
-): Promise<void> {
+): Promise<AddRelationOutcome> {
   return invoke('add_note_relation', { sourcePath, targetPath, relationType, reason });
 }
 
-/** Remove a note relation from the knowledge graph view */
+/**
+ * Remove a note relation from the knowledge graph view.
+ *
+ * `relationType` 必填：两篇笔记之间可以同时存在 supports 与 depends_on，不指定类型
+ * 等于让后端猜该删哪一条。返回 false 表示这条边本来就不存在。
+ */
 export async function deleteNoteRelation(
   sourcePath: string,
   targetPath: string,
+  relationType: string,
 ): Promise<boolean> {
-  return invoke('delete_note_relation', { sourcePath, targetPath });
+  return invoke('delete_note_relation', { sourcePath, targetPath, relationType });
 }
 
 /** AI-powered explanation of the conceptual relationship between two notes */
@@ -577,6 +591,244 @@ export async function explainRelationship(
   return invoke('explain_relationship', {
     noteA, noteB, apiUrl, apiKey, model, providerId,
   });
+}
+
+
+// ── Graph Plan: 目标 → 观察 → 提议 → 已验证的结果 ────────────────────
+//
+// 后端把「它看到了什么」「它推断了什么」「它想改什么」拆成三层，前端必须照着报，
+// 不能把三者压成一句「修复完成」。这里的类型直接对应
+// `src-tauri/src/knowledge/graph_plan.rs`（serde camelCase）。
+
+/** 计划要解决哪一类问题。 */
+export type GraphGoalType = 'diagnose' | 'bridge' | 'consolidate';
+
+/** 计划的作用范围。`cluster` 为 null 表示不限簇。 */
+export interface KnowledgeScope {
+  paths: string[];
+  cluster: number | null;
+}
+
+export interface GraphGoal {
+  goalType: GraphGoalType;
+  scope: KnowledgeScope;
+  anchorPaths: string[];
+  question: string;
+  constraints: string[];
+  maxProposals: number | null;
+}
+
+/**
+ * 一条证据。
+ *
+ * `kind === 'file_level'` 或 `chunkId === null` 表示这条依据只到文件级，指不回具体
+ * 段落——界面必须写明，否则用户会以为有原文出处。
+ */
+export interface GraphEvidence {
+  path: string;
+  chunkId: number | null;
+  excerpt: string | null;
+  kind: string;
+}
+
+/** 观察的种类，全部来自真实查询而非模型自述。 */
+export type GraphObservationKind = 'orphan' | 'hub_overload' | 'duplicate' | 'missing_link';
+
+export interface GraphObservation {
+  id: string;
+  kind: GraphObservationKind | string;
+  title: string;
+  summary: string;
+  paths: string[];
+  evidence: GraphEvidence[];
+  confidence: number | null;
+  warnings: string[];
+}
+
+export interface GraphProposal {
+  id: string;
+  operation: string;
+  sourcePath: string;
+  targetPath: string | null;
+  relationType: string | null;
+  reason: string;
+  evidence: GraphEvidence[];
+  confidence: number;
+  risk: string;
+  affectedPaths: string[];
+  alreadyExists: boolean;
+}
+
+export interface GraphPlan {
+  id: string;
+  goal: GraphGoal;
+  observations: GraphObservation[];
+  proposals: GraphProposal[];
+  validationSteps: string[];
+  unresolvedQuestions: string[];
+  generatedBy: string;
+  generatedAtMs: number;
+  changesetId: string | null;
+  state: string;
+}
+
+/**
+ * 计划的后端状态。
+ *
+ * 前三个（`awaiting_approval` / `conflict` / `rejected`）都意味着**还没有任何东西
+ * 落库**；`partial_success` 意味着一部分落库了、一部分没有，不能当成完成。
+ */
+export type PlanState =
+  | 'awaiting_approval'
+  | 'conflict'
+  | 'rejected'
+  | 'completed'
+  | 'partial_success'
+  | 'failed'
+  | 'rolled_back';
+
+export type RelationItemOutcome =
+  | 'added'
+  | 'already_exists'
+  | 'deleted'
+  | 'missing'
+  | 'rejected_by_user';
+
+export interface RelationItemResult {
+  source: string;
+  target: string;
+  relationType: string;
+  outcome: RelationItemOutcome;
+  message: string;
+}
+
+/** 一次 stage / commit / rollback 的真实结果，全部是计数而不是形容词。 */
+export interface PlanOutcome {
+  planId: string;
+  changesetId: string | null;
+  state: PlanState | string;
+  selected: number;
+  applied: number;
+  alreadyExisted: number;
+  rejectedByUser: number;
+  missing: number;
+  failed: number;
+  conflicts: string[];
+  /** 非 null 表示门禁拒绝执行，界面必须说「未执行」并解释，且不得再提供「提交」。 */
+  refusal: string | null;
+  message: string;
+  details: RelationItemResult[];
+}
+
+/** 提交之后回查库里到底有没有这些边。 */
+export interface PlanVerification {
+  planId: string;
+  relationTotal: number;
+  proposalsPresent: number;
+  proposalsAbsent: number;
+  danglingEndpoints: string[];
+  steps: string[];
+  message: string;
+}
+
+export interface MocDraft {
+  suggestedPath: string;
+  title: string;
+  content: string;
+  memberPaths: string[];
+  evidence: GraphEvidence[];
+  warnings: string[];
+}
+
+/** 一条边的来历。`origin` 为 `user_link` 或 `agent_proposed`。 */
+export interface RelationDetail {
+  sourcePath: string;
+  targetPath: string;
+  relationType: string;
+  confidence: number;
+  reason: string | null;
+  origin: string;
+  confirmed: boolean;
+  changesetId: string | null;
+  createdAt: string | null;
+  /** 用户下过的判断：`accepted` / `rejected`，没判断过就是 null。 */
+  decision: string | null;
+}
+
+export interface RelationEvidenceView {
+  detail: RelationDetail | null;
+  semanticSimilarity: number | null;
+  evidence: GraphEvidence[];
+  semantics: string;
+}
+
+/** 只读：算出一份计划，什么都不写。 */
+export async function knowledgeGraphCreatePlan(goal: GraphGoal): Promise<GraphPlan> {
+  return invoke('knowledge_graph_create_plan', { goal });
+}
+
+/** 取回用户还在审的那份计划。 */
+export async function knowledgeGraphGetPlan(planId: string): Promise<GraphPlan | null> {
+  return invoke('knowledge_graph_get_plan', { planId });
+}
+
+/**
+ * 只生成预览批次，不写图谱。
+ *
+ * `selectedIds` 为空数组表示「整份计划」，所以调用方必须显式传用户勾选的那些 id。
+ */
+export async function knowledgeGraphStagePlan(
+  planId: string,
+  selectedIds: string[],
+  vaultPath: string,
+  vaultPaths?: string[],
+): Promise<PlanOutcome> {
+  return invoke('knowledge_graph_stage_plan', { planId, selectedIds, vaultPath, vaultPaths });
+}
+
+/** 唯一真正写入的一步。 */
+export async function knowledgeGraphCommitPlan(planId: string): Promise<PlanOutcome> {
+  return invoke('knowledge_graph_commit_plan', { planId });
+}
+
+/** 撤销一次已提交的计划。 */
+export async function knowledgeGraphRollbackPlan(planId: string): Promise<PlanOutcome> {
+  return invoke('knowledge_graph_rollback_plan', { planId });
+}
+
+/** 提交后回查：库里是不是真的有这些边。 */
+export async function knowledgeGraphVerifyPlan(planId: string): Promise<PlanVerification> {
+  return invoke('knowledge_graph_verify_plan', { planId });
+}
+
+/** 一条边的详情与证据，供关系抽屉使用。 */
+export async function knowledgeGraphRelationEvidence(
+  sourcePath: string,
+  targetPath: string,
+  relationType: string,
+): Promise<RelationEvidenceView> {
+  return invoke('knowledge_graph_relation_evidence', { sourcePath, targetPath, relationType });
+}
+
+/** 用户对一条边下判断，并记住这个判断。 */
+export async function knowledgeGraphDecideRelation(
+  sourcePath: string,
+  targetPath: string,
+  relationType: string,
+  accept: boolean,
+  reason?: string,
+): Promise<string> {
+  return invoke('knowledge_graph_decide_relation', {
+    sourcePath, targetPath, relationType, accept, reason,
+  });
+}
+
+/** 生成一份 MOC 草稿（草稿而已，确认后才走笔记写入路径）。 */
+export async function knowledgeGraphCreateMocDraft(
+  title: string,
+  memberPaths: string[],
+): Promise<MocDraft> {
+  return invoke('knowledge_graph_create_moc_draft', { title, memberPaths });
 }
 
 
@@ -2384,10 +2636,40 @@ export type ChangeConflict =
   | { kind: 'checksum'; expected: string; actual: string }
   | { kind: 'target_gone'; target: string };
 
+/**
+ * 一条边的载荷 / the payload of one relation operation.
+ *
+ * 关系操作（`add_relation` / `delete_relation`）没有"正文"，所以不能当文本 diff 渲染。
+ * 后端把两端、关系类型、置信度和来源结构化地给出来，UI 直接读字段——从 `after` 那行
+ * 摘要里反解析"从哪指向哪"迟早解析错。
+ */
+export interface ChangeRelationOp {
+  sourcePath: string;
+  targetPath: string;
+  relationType: string;
+  confidence: number;
+  reason: string | null;
+  /** `user_link`（用户自己连的）/ `agent_proposed` / `semantic` / `external`。 */
+  origin: string;
+  /** 改之前的置信度。删除或改置信度时才有值。 */
+  oldConfidence: number | null;
+  oldReason: string | null;
+}
+
 export interface ChangeOpPreview {
   opId: string;
   seq: number;
-  opKind: 'create' | 'edit' | 'patch' | 'append' | 'rename' | 'move' | 'delete' | 'merge';
+  opKind:
+    | 'create'
+    | 'edit'
+    | 'patch'
+    | 'append'
+    | 'rename'
+    | 'move'
+    | 'delete'
+    | 'merge'
+    | 'add_relation'
+    | 'delete_relation';
   targetObjectId: string | null;
   path: string | null;
   before: string | null;
@@ -2398,6 +2680,8 @@ export interface ChangeOpPreview {
   conflict: ChangeConflict | null;
   /** 冲突的人话版本。措辞由后端给，前端不再自己拼一套。 */
   conflictMessage: string | null;
+  /** 只有关系操作会有。见 {@link ChangeRelationOp}。 */
+  relation: ChangeRelationOp | null;
 }
 
 export interface ChangeSetDryRun {

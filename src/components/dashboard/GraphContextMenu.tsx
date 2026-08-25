@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { t } from '../../lib/i18n';
+import { t, tf } from '../../lib/i18n';
 import {
   addNoteRelation,
   deleteNoteRelation,
   explainRelationship,
 } from '../../lib/tauri';
-import { getRelationTypes } from '../canvas/canvasConstants';
+import { getRelationTypes, getRelationLabel } from '../canvas/canvasConstants';
+import { RelationEvidenceDrawer } from '../knowledge/RelationEvidenceDrawer';
 import type { LlmConfig } from '../../contexts/BaseContext';
 import type { FGNode } from './KnowledgeGraph';
 
@@ -48,6 +49,13 @@ export function GraphContextMenu({
   const [showDeleteRelation, setShowDeleteRelation] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showExplainPicker, setShowExplainPicker] = useState(false);
+  /** 打开证据抽屉时选中的那条边。关系类型必须由用户指定——两篇笔记之间可以有多条。 */
+  const [evidenceEdge, setEvidenceEdge] = useState<{
+    source: string;
+    target: string;
+    relationType: string;
+  } | null>(null);
 
   const node = contextMenu.node;
   // Determine if we have a pair for relationship operations
@@ -83,31 +91,51 @@ export function GraphContextMenu({
   const handleAddRelation = async (relationType: string) => {
     if (!pairNodes) return;
     const [a, b] = pairNodes;
+    const label = relationLabelOf(relationType);
     try {
-      await addNoteRelation(a.id, b.id, relationType, 'Created from graph view');
-      showToast?.(isZh ? `已添加关系: ${relationType}` : `Relation added: ${relationType}`, 'success');
-      onRelationChanged?.();
+      // 后端回的是「真的发生了什么」，不是 void：已存在与曾被拒绝都不是新增，
+      // 报成「已添加」就是假成功。
+      const outcome = await addNoteRelation(a.id, b.id, relationType, 'Created from graph view');
+      if (outcome === 'added') {
+        showToast?.(tf('graph.relation.added', label), 'success');
+        onRelationChanged?.();
+      } else if (outcome === 'already_exists') {
+        showToast?.(tf('graph.relation.alreadyExists', label), 'info');
+      } else {
+        showToast?.(tf('graph.relation.rejectedByUser', label), 'info');
+      }
       close();
     } catch (e) {
-      showToast?.(isZh ? `添加关系失败: ${e}` : `Failed: ${e}`, 'error');
+      showToast?.(tf('graph.relation.addFailed', String(e)), 'error');
     }
   };
 
-  const handleDeleteRelation = async () => {
+  const handleDeleteRelation = async (relationType: string) => {
     if (!pairNodes) return;
     const [a, b] = pairNodes;
+    const label = relationLabelOf(relationType);
     try {
-      const deleted = await deleteNoteRelation(a.id, b.id);
-      if (deleted) {
-        // Also try reverse direction
-        await deleteNoteRelation(b.id, a.id);
+      // 关系有方向，两个方向各删一次；两次都说「不存在」才算真的没有这条边。
+      const forward = await deleteNoteRelation(a.id, b.id, relationType);
+      const backward = await deleteNoteRelation(b.id, a.id, relationType);
+      if (forward || backward) {
+        showToast?.(tf('graph.relation.deleted', label), 'success');
+        onRelationChanged?.();
+      } else {
+        showToast?.(tf('graph.relation.notFound', label), 'info');
       }
-      showToast?.(isZh ? '已删除关系' : 'Relation deleted', 'success');
-      onRelationChanged?.();
       close();
     } catch (e) {
-      showToast?.(isZh ? `删除失败: ${e}` : `Failed: ${e}`, 'error');
+      showToast?.(tf('graph.relation.deleteFailed', String(e)), 'error');
     }
+  };
+
+  /** 打开证据抽屉：这条边的来历、语义与原文都由后端给，前端不猜。 */
+  const handleExplainRelation = (relationType: string) => {
+    if (!pairNodes) return;
+    const [a, b] = pairNodes;
+    setShowExplainPicker(false);
+    setEvidenceEdge({ source: a.id, target: b.id, relationType });
   };
 
   const handleAiExplain = async () => {
@@ -135,6 +163,7 @@ export function GraphContextMenu({
   };
 
   return (
+    <>
     <div
       className="kg-context-menu"
       style={{ left: contextMenu.x, top: contextMenu.y }}
@@ -154,6 +183,30 @@ export function GraphContextMenu({
       {pairNodes && (
         <>
           <div className="kg-context-divider" />
+
+          {/* 解释关系 —— 后端证据抽屉：来历、语义、原文、接受/拒绝 */}
+          <div
+            className="kg-context-menu-item"
+            onClick={() => setShowExplainPicker(!showExplainPicker)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6, verticalAlign: -1 }}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {t('graph.relation.explain')}
+          </div>
+          {showExplainPicker && (
+            <div className="kg-context-submenu">
+              <div className="kg-context-hint">{t('graph.relation.pickType')}</div>
+              {getRelationTypes().map(rel => (
+                <div
+                  key={rel.type}
+                  className="kg-context-relation-item"
+                  onClick={() => handleExplainRelation(rel.type)}
+                >
+                  <div className="kg-context-relation-dot" style={{ backgroundColor: rel.color }} />
+                  {getRelationLabel(rel)}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* AI Explain Relationship */}
           <div className="kg-context-menu-item kg-context-menu-ai" onClick={handleAiExplain}>
@@ -181,13 +234,13 @@ export function GraphContextMenu({
                     className="kg-context-relation-dot"
                     style={{ backgroundColor: rel.color }}
                   />
-                  {isZh ? rel.labelZh : rel.label}
+                  {getRelationLabel(rel)}
                 </div>
               ))}
             </div>
           )}
 
-          {/* Delete relation */}
+          {/* Delete relation — 必须指定关系类型，两篇笔记之间可能有多条边 */}
           <div
             className="kg-context-menu-item"
             onClick={() => setShowDeleteRelation(!showDeleteRelation)}
@@ -197,12 +250,17 @@ export function GraphContextMenu({
           </div>
           {showDeleteRelation && (
             <div className="kg-context-submenu">
-              <div
-                className="kg-context-relation-item kg-context-relation-danger"
-                onClick={handleDeleteRelation}
-              >
-                {isZh ? '确认删除连线' : 'Confirm delete'}
-              </div>
+              <div className="kg-context-hint">{t('graph.relation.deletePick')}</div>
+              {getRelationTypes().map(rel => (
+                <div
+                  key={rel.type}
+                  className="kg-context-relation-item kg-context-relation-danger"
+                  onClick={() => handleDeleteRelation(rel.type)}
+                >
+                  <div className="kg-context-relation-dot" style={{ backgroundColor: rel.color }} />
+                  {getRelationLabel(rel)}
+                </div>
+              ))}
             </div>
           )}
         </>
@@ -253,5 +311,23 @@ export function GraphContextMenu({
         {t('common.delete' as any)}
       </div>
     </div>
+
+    {evidenceEdge && (
+      <RelationEvidenceDrawer
+        sourcePath={evidenceEdge.source}
+        targetPath={evidenceEdge.target}
+        relationType={evidenceEdge.relationType}
+        showToast={showToast}
+        onDecided={() => onRelationChanged?.()}
+        onClose={() => setEvidenceEdge(null)}
+      />
+    )}
+    </>
   );
+}
+
+/** 关系类型的人类可读名字，找不到就退回原始串（而不是造一个假标签）。 */
+function relationLabelOf(relationType: string): string {
+  const meta = getRelationTypes().find(r => r.type === relationType);
+  return meta ? getRelationLabel(meta) : relationType;
 }

@@ -2741,3 +2741,167 @@ hr.dash-divider + .dash-band {
 :root[data-theme="dark"] .gap-analysis-ai {
   border-color: var(--border);
 }
+
+/* ── 图谱修复计划：目标 / 发现 / 计划 / 结果 ────────────────────────── */
+/* 沿用 gap-* 一套的边框、间距与配色，不引入新的视觉语言。 */
+
+.gap-plan-block {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--border);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--bg-secondary);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* 只有真的写进去了才用成功色描边。 */
+.gap-plan-block-ok {
+  border-left-color: var(--success);
+  background: var(--success-bg);
+}
+
+.gap-plan-heading {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.gap-plan-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-tertiary);
+}
+
+.gap-plan-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.gap-plan-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.gap-plan-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.gap-plan-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.gap-plan-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.gap-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* 警示行：拒绝、冲突、已存在都走这一套，不各造一种颜色。 */
+.gap-plan-warn {
+  border: 1px solid var(--warning-border);
+  border-left: 2px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm, 2px);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.gap-plan-warn-line {
+  color: var(--warning);
+}
+
+.gap-plan-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gap-plan-group-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.gap-plan-observation,
+.gap-plan-proposal {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--bg-elevated);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gap-plan-observation-title {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.gap-plan-observation-summary,
+.gap-plan-proposal-reason {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.gap-plan-proposal-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.gap-plan-proposal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.gap-plan-details summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  padding: var(--space-2) 0;
+}
+
+.gap-plan-details[open] summary {
+  color: var(--text-secondary);
+}
+
+/* 关系抽屉宽度：复用 kc-drawer 的内部排版，只约束外框。 */
+.kg-relation-drawer {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
