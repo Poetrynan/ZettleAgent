@@ -14,11 +14,68 @@
 use crate::agents::intent::TurnIntent;
 use crate::llm::ToolDef;
 
+// ── Domain-Specific Capability Packs ───────────────────────────────
+
+/// Canvas Reasoning Pack: interactive reasoning, visual layout & graph-to-canvas compiling
+pub const CANVAS_REASONING_TOOLS: &[&str] = &[
+    "read_canvas",
+    "modify_canvas",
+    "create_canvas",
+    "knowledge_canvas_plan",
+    "group_canvas_nodes",
+    "arrange_canvas_by",
+    "compile_canvas_to_note",
+    "generate_canvas_from_notes",
+];
+
+/// Graph Diagnose Pack: topological health, lint, isolated nodes & repair planning
+pub const GRAPH_DIAGNOSE_TOOLS: &[&str] = &[
+    "get_graph",
+    "get_local_graph",
+    "find_shortest_path",
+    "run_lint",
+    "knowledge_graph_plan",
+    "get_vault_stats",
+];
+
+/// Graph Explore Pack: relations, communities, clusters & semantic topology
+pub const GRAPH_EXPLORE_TOOLS: &[&str] = &[
+    "get_graph",
+    "get_local_graph",
+    "query_relations",
+    "get_relations_by_type",
+    "explain_relationship",
+    "query_graph_communities",
+    "generate_community_summaries",
+];
+
+/// MOC Construction Pack: structure note creation & evidence-backed MOC drafting
+pub const MOC_CONSTRUCTION_TOOLS: &[&str] = &[
+    "generate_structure_note",
+    "knowledge_create_moc_draft",
+    "batch_read_notes",
+    "get_note_metadata",
+];
+
+/// Evidence Investigation Pack: temporal tracking, fact verification & note comparisons
+pub const EVIDENCE_INVESTIGATION_TOOLS: &[&str] = &[
+    "get_note_facts",
+    "query_temporal",
+    "compare_notes",
+    "get_timeline",
+    "get_global_timeline",
+    "get_embedding_status",
+];
+
+/// Memory Lifecycle Pack: user preferences, profile & memory updates
+pub const MEMORY_LIFECYCLE_TOOLS: &[&str] = &[
+    "read_memory",
+    "search_memory",
+    "update_memory",
+];
+
 /// Read-focused knowledge tools that must be reachable without a discovery
 /// round-trip when the request is about structure, graph, canvas, or health.
-///
-/// Kept deliberately smaller than `agents::KNOWLEDGE_TOOLS`: write / repair
-/// tools stay behind Diagnose/Curate scopes or `list_available_tools`.
 pub const KNOWLEDGE_BROAD_TOOLS: &[&str] = &[
     "get_graph",
     "get_local_graph",
@@ -27,6 +84,13 @@ pub const KNOWLEDGE_BROAD_TOOLS: &[&str] = &[
     "run_lint",
     "get_vault_stats",
     "read_canvas",
+    "modify_canvas",
+    "create_canvas",
+    "knowledge_canvas_plan",
+    "group_canvas_nodes",
+    "arrange_canvas_by",
+    "compile_canvas_to_note",
+    "generate_canvas_from_notes",
     "get_note_metadata",
     "compare_notes",
     "get_timeline",
@@ -139,20 +203,51 @@ pub fn merge_named_tools(visible: &mut Vec<ToolDef>, catalogue: &[ToolDef], extr
     added
 }
 
+/// Detect the specific domain matching the user's inquiry
+pub fn detect_domain(query: &str) -> &'static str {
+    let q = query.to_lowercase();
+    if q.contains("白板") || q.contains("画布") || q.contains("canvas") || q.contains("board") {
+        "canvas_reasoning"
+    } else if q.contains("moc") || q.contains("结构笔记") || q.contains("大纲") || q.contains("目录") {
+        "moc_construction"
+    } else if q.contains("诊断") || q.contains("孤立") || q.contains("断着") || q.contains("断裂") || q.contains("盲区") || q.contains("lint") || q.contains("orphan") {
+        "graph_diagnose"
+    } else if q.contains("社区") || q.contains("聚类") || q.contains("cluster") || q.contains("community") {
+        "graph_explore"
+    } else if q.contains("证据") || q.contains("事实") || q.contains("时序") || q.contains("时间线") || q.contains("timeline") || q.contains("temporal") {
+        "evidence_investigation"
+    } else if q.contains("记忆") || q.contains("偏好") || q.contains("档案") || q.contains("memory") {
+        "memory_lifecycle"
+    } else {
+        "knowledge_broad"
+    }
+}
+
 /// Expand the visible ToolDef list for this turn when knowledge signals demand it.
 ///
-/// Returns the names that were added (empty when nothing changed) so the caller
-/// can emit a `capability_expanded` event.
+/// Returns `(added_tool_names, domain_identifier)` so the caller can emit
+/// a localized, domain-aware `capability_expanded` event.
 pub fn expand_visible_tools(
     visible: &mut Vec<ToolDef>,
     catalogue: &[ToolDef],
     intent: &TurnIntent,
     query: &str,
-) -> Vec<String> {
+) -> (Vec<String>, &'static str) {
     if !should_expand_knowledge_broad(intent, query) {
-        return Vec::new();
+        return (Vec::new(), "none");
     }
-    merge_named_tools(visible, catalogue, KNOWLEDGE_BROAD_TOOLS)
+    let domain = detect_domain(query);
+    let tools_to_add = match domain {
+        "canvas_reasoning" => CANVAS_REASONING_TOOLS,
+        "moc_construction" => MOC_CONSTRUCTION_TOOLS,
+        "graph_diagnose" => GRAPH_DIAGNOSE_TOOLS,
+        "graph_explore" => GRAPH_EXPLORE_TOOLS,
+        "evidence_investigation" => EVIDENCE_INVESTIGATION_TOOLS,
+        "memory_lifecycle" => MEMORY_LIFECYCLE_TOOLS,
+        _ => KNOWLEDGE_BROAD_TOOLS,
+    };
+    let added = merge_named_tools(visible, catalogue, tools_to_add);
+    (added, domain)
 }
 
 #[cfg(test)]
@@ -173,6 +268,16 @@ mod tests {
         ));
         assert!(!has_knowledge_signals("你好"));
         assert!(!has_knowledge_signals("what is the capital of France"));
+    }
+
+    #[test]
+    fn domain_detection_routes_accurately() {
+        assert_eq!(detect_domain("在白板上构建推理画布"), "canvas_reasoning");
+        assert_eq!(detect_domain("基于这几篇笔记生成一个 MOC 目录"), "moc_construction");
+        assert_eq!(detect_domain("审查知识库盲区和孤立卡片"), "graph_diagnose");
+        assert_eq!(detect_domain("查看知识图谱社区分布"), "graph_explore");
+        assert_eq!(detect_domain("探索这一结论的事实证据和时间线"), "evidence_investigation");
+        assert_eq!(detect_domain("更新我的用户偏好记忆档案"), "memory_lifecycle");
     }
 
     #[test]
@@ -197,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_adds_get_graph_to_core_surface() {
+    fn expand_adds_domain_tools_to_core_surface() {
         let catalogue = crate::tools::get_all_tool_defs(&[], &[]);
         let mut visible = catalogue
             .iter()
@@ -206,23 +311,23 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!visible.iter().any(|t| t.function.name == "get_graph"));
 
-        let added = expand_visible_tools(
+        let (added, domain) = expand_visible_tools(
             &mut visible,
             &catalogue,
             &TurnIntent::Unknown,
             "检查知识库结构和孤立笔记",
         );
+        assert_eq!(domain, "graph_diagnose");
         assert!(added.contains(&"get_graph".to_string()));
         assert!(added.contains(&"run_lint".to_string()));
         assert!(visible.iter().any(|t| t.function.name == "get_graph"));
         assert!(visible.iter().any(|t| t.function.name == "run_lint"));
-        assert!(visible.iter().any(|t| t.function.name == "read_canvas"));
         // Still not the full catalogue.
         assert!(visible.len() < catalogue.len());
     }
 
     #[test]
-    fn knowledge_broad_tools_exist_in_catalogue() {
+    fn all_domain_pack_tools_exist_in_catalogue() {
         let catalogue = crate::tools::get_all_tool_defs(&[], &[]);
         let names: Vec<&str> = catalogue.iter().map(|t| t.function.name.as_str()).collect();
         for required in KNOWLEDGE_BROAD_TOOLS {

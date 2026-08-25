@@ -493,8 +493,10 @@ pub(super) fn execute_add_relation(
         expected_target_version: None,
     };
 
+    let changeset_id = args["changeset_id"].as_str();
+    let run_id = crate::llm::tool_hooks::current_run_id();
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
-    let outcome = relations::add_relation(&conn, &op, None, crate::llm::tool_hooks::current_run_id().as_deref())
+    let outcome = relations::add_relation(&conn, &op, changeset_id, run_id.as_deref())
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // `success` 说的是"图谱变了吗"，不是"调用没报错吗"。已存在和被用户拒过都不是成功——
@@ -1075,7 +1077,8 @@ pub(super) fn execute_batch_link_notes(
                 expected_source_version: None,
                 expected_target_version: None,
             };
-            let result = relations::add_relation(&conn, &op, None, run_id.as_deref())
+            let changeset_id = args["changeset_id"].as_str();
+            let result = relations::add_relation(&conn, &op, changeset_id, run_id.as_deref())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             match result {
                 relations::RelationOutcome::Added => added += 1,
@@ -1814,7 +1817,20 @@ pub(super) fn execute_knowledge_graph_plan(
     let plan = graph_plan::create_plan(&conn, goal)?;
     let _ = graph_plan::save_plan(&conn, &plan);
 
-    Ok(serde_json::to_string_pretty(&plan)?)
+    let plan_id = plan.id.clone();
+    let observations_count = plan.observations.len();
+    let proposals_count = plan.proposals.len();
+
+    Ok(json!({
+        "success": true,
+        "plan_id": plan_id,
+        "goal_type": goal_type,
+        "observations_count": observations_count,
+        "proposals_count": proposals_count,
+        "action_link": format!("action:open_knowledge_center?tab=gap_analysis&planId={}", plan_id),
+        "review_guidance": "知识图谱优化计划已生成并暂存。请在知识中心（Gap Analysis / 拓扑优化）审查并批准应用。",
+        "plan": plan
+    }).to_string())
 }
 
 pub(super) fn execute_knowledge_create_moc_draft(
@@ -1833,6 +1849,13 @@ pub(super) fn execute_knowledge_create_moc_draft(
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
     let draft = graph_plan::create_moc_draft(&conn, title, &member_paths)?;
 
-    Ok(serde_json::to_string_pretty(&draft)?)
+    Ok(json!({
+        "success": true,
+        "title": title,
+        "member_count": member_paths.len(),
+        "action_link": format!("action:open_note?path={}.md", title),
+        "review_guidance": "MOC 结构笔记草稿已生成。可在对话中确认保存或点击链接创建笔记。",
+        "draft": draft
+    }).to_string())
 }
 

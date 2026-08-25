@@ -1485,6 +1485,41 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
+        // Knowledge Canvas Plan
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "knowledge_canvas_plan".to_string(),
+                description: "Run structured Canvas reasoning planning to generate evidence-backed visual layout and card reasoning proposals for an infinite canvas without directly overwriting files.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "enum": ["explain", "compare", "trace", "cluster"],
+                            "description": "The canvas reasoning goal: 'explain' (explore one concept & context), 'compare' (contrast multiple notes), 'trace' (dependency/timeline flow), 'cluster' (topic groupings)"
+                        },
+                        "canvas_path": {
+                            "type": "string",
+                            "description": "Target canvas path (e.g. 'research.canvas' or 'reasoning.canvas')"
+                        },
+                        "anchor_paths": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "List of core anchor note paths for the canvas reasoning flow"
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "The user's central question or research topic to map on the canvas"
+                        },
+                        "max_nodes": {
+                            "type": "integer",
+                            "description": "Maximum number of nodes to include on canvas (default: 20)"
+                        }
+                    }
+                }),
+            },
+        },
     ]
 }
 
@@ -1604,6 +1639,7 @@ pub async fn try_execute(
         // Knowledge Graph Planning & MOC
         "knowledge_graph_plan" => Some(graph_ops::execute_knowledge_graph_plan(arguments, db)),
         "knowledge_create_moc_draft" => Some(graph_ops::execute_knowledge_create_moc_draft(arguments, db)),
+        "knowledge_canvas_plan" => Some(canvas_ops::execute_knowledge_canvas_plan(arguments, db, vault_path, all_vault_paths)),
 
         _ => None,
     };

@@ -269,20 +269,49 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
           // Style links
           a: ({ href, children }) => {
             const isExternal = href && (href.startsWith('http://') || href.startsWith('https://'));
+            const isAction = href && (href.startsWith('action:') || href.startsWith('zettel:') || href.startsWith('zettel://'));
+
+            const handleLinkClick = (e: React.MouseEvent) => {
+              e.preventDefault();
+              if (!href) return;
+              if (isExternal) {
+                window.open(href, '_blank');
+                return;
+              }
+              if (isAction) {
+                const rawAction = href.replace(/^(action:|zettel:\/\/|zettel:)/, '');
+                const [actionName, queryStr] = rawAction.split('?');
+                const params = new URLSearchParams(queryStr || '');
+                if (actionName === 'open_knowledge_center' || actionName === 'knowledge_center' || actionName === 'open_knowledge') {
+                  setView('bases');
+                  window.dispatchEvent(new CustomEvent('open-knowledge-center', { detail: Object.fromEntries(params.entries()) }));
+                } else if (actionName === 'open_canvas' || actionName === 'canvas') {
+                  const targetCanvas = params.get('path');
+                  if (targetCanvas) {
+                    setCurrentFile(targetCanvas);
+                  }
+                  setView('canvas');
+                  window.dispatchEvent(new CustomEvent('open-canvas', { detail: Object.fromEntries(params.entries()) }));
+                } else if (actionName === 'open_note' || actionName === 'note') {
+                  const targetNote = params.get('path');
+                  if (targetNote) {
+                    setCurrentFile(targetNote);
+                    setView('note');
+                  }
+                }
+              }
+            };
+
             return (
               <a
                 href={isExternal ? href : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (isExternal && href) {
-                    window.open(href, '_blank');
-                  }
-                }}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="md-link"
-                style={isExternal ? undefined : { cursor: 'default', opacity: 0.6 }}
+                onClick={handleLinkClick}
+                target={isExternal ? '_blank' : undefined}
+                rel={isExternal ? 'noopener noreferrer' : undefined}
+                className={isAction ? 'md-action-btn' : 'md-link'}
+                style={isExternal || isAction ? { cursor: 'pointer' } : { cursor: 'default', opacity: 0.6 }}
               >
+                {isAction && <span style={{ marginRight: 4 }}>⚡</span>}
                 {children}
               </a>
             );

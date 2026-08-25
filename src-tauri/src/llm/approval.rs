@@ -107,6 +107,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
             | "web_search"              // web_ops.rs:6
             // ── Canvas read ──
             | "read_canvas"             // canvas_ops.rs:41
+            | "knowledge_canvas_plan"   // canvas_ops.rs → structured reasoning canvas plan, no write
             // ── Workspace reads (workspace_ops.rs) ──
             | "list_workspace_folders"  // workspace_ops.rs:8
             | "get_vault_stats"         // workspace_ops.rs:197
@@ -334,7 +335,7 @@ pub fn base_risk_level(tool_name: &str) -> RiskLevel {
         // Low — additive, overwrites nothing, or read-only/derived-cache generation.
         "create_note" | "create_folder" | "create_canvas" | "append_to_note"
         | "generate_canvas_from_notes" | "query_graph_communities" | "generate_community_summaries"
-        | "knowledge_graph_plan" | "knowledge_create_moc_draft" => RiskLevel::Low,
+        | "knowledge_graph_plan" | "knowledge_create_moc_draft" | "knowledge_canvas_plan" => RiskLevel::Low,
 
         // Medium — rewrites one object; a pre-write snapshot can restore it.
         "edit_note" | "patch_note" | "apply_edit" | "modify_canvas" | "group_canvas_nodes"

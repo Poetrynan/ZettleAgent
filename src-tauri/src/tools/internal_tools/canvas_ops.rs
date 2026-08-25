@@ -423,7 +423,7 @@ pub(super) fn execute_modify_canvas(
                     // so origin stays distinguishable from user wikilinks.
                     let run_id = crate::llm::tool_hooks::current_run_id();
                     let _ = crate::knowledge::relations::add_relation(
-                        &conn, &op, run_id.as_deref(), None,
+                        &conn, &op, None, run_id.as_deref(),
                     )?;
                 }
 
@@ -1271,5 +1271,65 @@ pub(super) fn execute_generate_canvas_from_notes(
         "edges_created": canvas.edges.len(),
         "layout": layout,
         "message": format!("Successfully generated canvas with {} nodes at '{}'", canvas.nodes.len(), canvas_path)
+    }).to_string())
+}
+
+/// 执行画布推理计划计算 / execute canvas reasoning planning
+pub(super) fn execute_knowledge_canvas_plan(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+    _vault_path: &str,
+    _all_vault_paths: &[String],
+) -> anyhow::Result<String> {
+    use crate::knowledge::canvas_plan::{self, CanvasGoal};
+    use crate::knowledge::graph_plan::KnowledgeScope;
+
+    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or(serde_json::json!({}));
+    let goal_type = args["goal"].as_str().unwrap_or("explain");
+    let raw_canvas_path = args["canvas_path"].as_str().unwrap_or("reasoning_canvas.canvas");
+    let limit = args["limit"].as_u64().or_else(|| args["max_nodes"].as_u64()).unwrap_or(20) as usize;
+    let anchor_paths: Vec<String> = args["anchor_paths"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .or_else(|| {
+            args["paths"].as_array().map(|arr| {
+                arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            })
+        })
+        .unwrap_or_default();
+
+    let question = args["question"].as_str().unwrap_or("").to_string();
+
+    let scope = KnowledgeScope {
+        paths: anchor_paths.clone(),
+        cluster: None,
+    };
+    let goal = CanvasGoal {
+        goal_type: goal_type.to_string(),
+        scope,
+        anchor_paths,
+        question,
+        constraints: Vec::new(),
+        max_nodes: Some(limit),
+    };
+
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+    let plan = canvas_plan::create_plan(&conn, goal, raw_canvas_path)?;
+    let _ = canvas_plan::save_plan(&conn, &plan);
+
+    let plan_id = plan.id.clone();
+    let observations_count = plan.observations.len();
+    let proposals_count = plan.proposals.len();
+
+    Ok(json!({
+        "success": true,
+        "plan_id": plan_id,
+        "canvas_path": raw_canvas_path,
+        "goal_type": goal_type,
+        "observations_count": observations_count,
+        "proposals_count": proposals_count,
+        "action_link": format!("action:open_canvas?path={}&planId={}", raw_canvas_path, plan_id),
+        "review_guidance": "画布推理计划已生成并暂存。请在无限白板中审查/应用节点与连线提议。",
+        "plan": plan
     }).to_string())
 }

@@ -344,5 +344,10 @@ mod tests {
         assert_eq!(cap_summaries.effect, Effect::Reindex);
         assert_eq!(cap_summaries.risk, RiskLevel::Low);
         assert!(!cap_summaries.requires_changeset);
+
+        let cap_canvas_plan = capability_of("knowledge_canvas_plan");
+        assert_eq!(cap_canvas_plan.effect, Effect::Read);
+        assert_eq!(cap_canvas_plan.risk, RiskLevel::Low);
+        assert!(!cap_canvas_plan.requires_changeset);
     }
 }

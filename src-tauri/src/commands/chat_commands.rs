@@ -1165,30 +1165,52 @@ async fn run_agent_turn(
     }
     // Unknown + knowledge signals must not collapse to CORE_TOOLS alone —
     // otherwise the model invents "I don't have get_graph" while the catalogue
-    // still has it. Expand only the read-focused KnowledgeBroad pack.
-    let expanded = crate::agents::capability_resolver::expand_visible_tools(
+    // still has it. Expand only the domain-specific knowledge tool pack.
+    let (expanded, domain) = crate::agents::capability_resolver::expand_visible_tools(
         &mut filtered_tools,
         &tools,
         &classification.intent,
         &user_query,
     );
     if !expanded.is_empty() {
+        let domain_label_zh = match domain {
+            "canvas_reasoning" => "白板推理与画布规划能力",
+            "moc_construction" => "MOC 结构生成与主题整理能力",
+            "graph_diagnose" => "知识图谱与结构诊断能力",
+            "graph_explore" => "图谱探索与拓扑聚类能力",
+            "evidence_investigation" => "事实证据与时序探索能力",
+            "memory_lifecycle" => "长期记忆与偏好维护能力",
+            _ => "全域知识与图谱能力",
+        };
+        let domain_label_en = match domain {
+            "canvas_reasoning" => "Canvas reasoning and planning capabilities",
+            "moc_construction" => "MOC construction and topic structuring capabilities",
+            "graph_diagnose" => "Graph diagnosis and structure review capabilities",
+            "graph_explore" => "Graph exploration and community clustering capabilities",
+            "evidence_investigation" => "Evidence investigation and temporal tracking capabilities",
+            "memory_lifecycle" => "Memory lifecycle and profile capabilities",
+            _ => "Graph and knowledge capabilities",
+        };
+
+        let message = if is_zh {
+            format!("已为本次任务加载{}（+{} 工具）", domain_label_zh, expanded.len())
+        } else {
+            format!("Loaded {} (+{} tools) for this turn", domain_label_en, expanded.len())
+        };
+
         let _ = app.emit(
             "agent-event",
             serde_json::json!({
                 "type": "capability_expanded",
                 "run_id": crate::llm::tool_hooks::current_run_id(),
-                "reason": "knowledge_broad",
+                "reason": domain,
                 "tools": expanded,
-                "message": if is_zh {
-                    "已为本次任务加载图谱与知识能力"
-                } else {
-                    "Loaded graph and knowledge capabilities for this turn"
-                },
+                "message": message,
             }),
         );
         crate::chat_file_log::log_agent(&format!(
-            "capability_expanded knowledge_broad +{} tools",
+            "capability_expanded domain={} +{} tools",
+            domain,
             expanded.len()
         ));
     }
