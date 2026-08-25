@@ -48,6 +48,7 @@ import { FreehandOverlay } from './FreehandOverlay';
 import type { PenMode, FreehandOverlayHandle } from './FreehandOverlay';
 import { CanvasControls } from './CanvasControls';
 import { SmartCanvasPanel } from './SmartCanvasPanel';
+import { CanvasPlanPanel } from './CanvasPlanPanel';
 import { CanvasModals } from './CanvasModals';
 import { ProgressPanel } from '../dashboard/ProgressPanel';
 
@@ -257,6 +258,9 @@ function CanvasInner() {
   const [smartCanvasOpen, setSmartCanvasOpen] = useState(false);
   const [smartCanvasQuery, setSmartCanvasQuery] = useState('');
   const [smartCanvasLoading, setSmartCanvasLoading] = useState(false);
+
+  // ── Canvas Plan：目标→计划→预览→部分批准→提交→验证 ──
+  const [canvasPlanOpen, setCanvasPlanOpen] = useState(false);
 
   // ── Agent 操作进度浮层 ──
   // `desc`/`descZh` are optional: the AI-layout flow only supplies labels, while the
@@ -1740,6 +1744,15 @@ Return ONLY a JSON array, no markdown, no explanation:
             <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z"/><path d="M19 16l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/>
           </svg>
         </button>
+        <button
+          className={`canvas-toolbar-btn ${canvasPlanOpen ? 'canvas-mode-active' : ''}`}
+          onClick={() => setCanvasPlanOpen(!canvasPlanOpen)}
+          data-tooltip={state.lang === 'zh' ? 'Canvas Plan（目标→预览→批准→验证）' : 'Canvas Plan (goal → preview → approve → verify)'}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>
+          </svg>
+        </button>
 
         {/* Canvas → Chat: 讨论选中的节点 */}
         {nodes.filter(n => n.selected).length > 0 && (
@@ -1961,6 +1974,22 @@ Return ONLY a JSON array, no markdown, no explanation:
         }}
         canvasNodePaths={nodes.filter(n => n.type === 'file').map(n => n.data.file as string)}
         lang={state.lang}
+      />
+
+      {/* Canvas Plan Panel — 与 Smart Canvas 并列的另一个入口，不替换它 */}
+      <CanvasPlanPanel
+        isOpen={canvasPlanOpen}
+        onClose={() => setCanvasPlanOpen(false)}
+        lang={state.lang}
+        canvasPath={canvasPath}
+        vaultPath={state.vaultPath || ''}
+        vaultPaths={state.vaultPaths || []}
+        canvasNodePaths={nodes.filter(n => n.type === 'file').map(n => n.data.file as string)}
+        onCommitted={() => {
+          // 写入是后端做的，前端这里只重新读盘。自己在内存里"顺便"加一遍节点会让
+          // 界面显示的内容与文件里的不是同一份。
+          if (canvasPath) reloadCanvasFromPath(canvasPath, { silent: true, fitView: false });
+        }}
       />
 
       {/* Canvas Controls — 左下角浮动控制 */}
