@@ -178,9 +178,6 @@ pub fn capability_of(name: &str) -> ToolCapability {
 }
 
 /// 读工具能寻址什么 / what a read tool can address.
-///
-/// 关系不是对象（它们住在 `relations_v2`），所以关系类工具声明的是它们的**端点**
-/// 类型 `document`，而不是一个不存在的 `ObjectKind::Relation`。
 fn read_targets(name: &str) -> &'static [ObjectKind] {
     match name {
         "read_memory" | "search_memory" => &[ObjectKind::Memory],
@@ -191,6 +188,12 @@ fn read_targets(name: &str) -> &'static [ObjectKind] {
     }
 }
 
+/// 图谱写工具改的是边，不是笔记正文 / graph writers touch edges, not note bodies.
+///
+/// 声明 `Relation` 而不是 `Document` 是一条越权边界：`add_relation` 拿到的许可不该
+/// 顺带让它改一篇笔记的正文，而 `edit_note` 的许可也不该让它偷偷连线。
+const RELATION_KINDS: &[ObjectKind] = &[ObjectKind::Relation];
+
 /// 写工具能寻址什么 / what a write tool can address.
 ///
 /// 未登记的工具落到 `NOTE_KINDS`：一个没登记的工具不该被推断出"能改记忆"。
@@ -198,6 +201,7 @@ fn write_targets(name: &str) -> &'static [ObjectKind] {
     match name {
         "update_memory" => &[ObjectKind::Memory],
         "propagate_fact_update" => &[ObjectKind::Fact, ObjectKind::Document],
+        "add_relation" | "delete_relation" | "batch_link_notes" => RELATION_KINDS,
         _ => NOTE_KINDS,
     }
 }

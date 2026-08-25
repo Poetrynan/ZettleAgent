@@ -87,6 +87,11 @@ str_enum! {
         Skill => "skill",
         Resource => "resource",
         Collection => "collection",
+        // 两个对象之间的一条边 / one edge between two objects. 关系不是文件，所以它
+        // 自己一类：`Document` 的越权检查问的是"能不能改这篇笔记的正文"，而一条
+        // `supports` 边改的是图谱结构，两者的风险和可回滚方式都不一样。混用会让
+        // "允许改关系"顺带变成"允许改正文"。
+        Relation => "relation",
     }
 }
 
@@ -160,7 +165,9 @@ str_enum! {
 str_enum! {
     /// 单个写操作的类型 / the operation a `changeset_ops` row performs.
     ///
-    /// 一一对应 `note_ops` 里已有的真实写回函数，不新造写入语义。
+    /// 前八种一一对应 `note_ops` 里已有的真实写回函数，不新造写入语义。后两种是图谱
+    /// 关系：它们改的不是某个文件的某一版，而是 `note_relations` 里的一行，所以既不能
+    /// 塞进 `Patch`（那会让 diff 显示整篇笔记被改写），也不能继续留在守卫之外。
     ChangeOpKind {
         Create => "create",
         Edit => "edit",
@@ -170,6 +177,8 @@ str_enum! {
         Move => "move",
         Delete => "delete",
         Merge => "merge",
+        AddRelation => "add_relation",
+        DeleteRelation => "delete_relation",
     }
 }
 

@@ -28,14 +28,18 @@
 //! [`Guarded::Refused`]，changeset 记成 `rejected`。放行等于让一次写入绕过预览、基线
 //! 和回滚，只在审计里留下一个空批次；假装知道目标同样危险。
 //!
-//! 现在落在这一类里的是三种写入：目录（`create_folder` / `delete_folder`）、关系表
-//! （`add_relation` / `delete_relation` / `batch_link_notes`）、以及目标要等模型跑完才
-//! 知道的（`propagate_fact_update`）；第三方 MCP 的写工具也一样。它们共同的问题是这一
-//! 层的 op 模型只描述"某个文件/对象的某一版变成另一版"，而目录、关系行、事后才确定的
-//! 目标都不是那个形状。要让它们能写，得先给 op 模型补上对应的种类，而不是在这里放行。
+//! 现在落在这一类里的是两种写入：目录（`create_folder` / `delete_folder`）、以及目标
+//! 要等模型跑完才知道的（`propagate_fact_update` 的下游 patch）；第三方 MCP 的写工具也
+//! 一样。它们共同的问题是这一层的 op 模型只描述"某个文件/对象的某一版变成另一版"，而
+//! 目录和事后才确定的目标都不是那个形状。要让它们能写，得先给 op 模型补上对应的种类，
+//! 而不是在这里放行。
 //!
-//! [`intents_of`] 已经覆盖的是笔记与画布文件、`fix_broken_link`、OCR/PDF 存稿，以及
-//! Core Memory（`.zettelagent/memory.md`）。
+//! 关系表（`add_relation` / `delete_relation` / `batch_link_notes`）曾经也在这一类里。
+//! 现在 [`ChangeOpKind::AddRelation`] / [`ChangeOpKind::DeleteRelation`] 就是那个缺掉的
+//! 形状：一条边的两端、类型、置信度和来源都进 op，于是它能被预览、逐条审批、验证和撤销。
+//!
+//! [`intents_of`] 已经覆盖的是笔记与画布文件、`fix_broken_link`、OCR/PDF 存稿、
+//! Core Memory（`.zettelagent/memory.md`），以及图谱关系。
 //!
 //! ## 冲突检测覆盖到哪里，没覆盖到哪里
 //!
@@ -115,7 +119,10 @@ struct SideEffect {
 // ── 参数映射 / mapping tool arguments onto operations ────────────────────────
 
 /// 一个工具调用打算做的事 / what a tool call intends, before any path resolution.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 没有 `Eq`：关系意图带 `f64` 置信度。用 `PartialEq` 比较对测试足够，而给置信度硬凑
+/// 一个整数表示只会让"0.7 到底存的是哪个数"变成第二个问题。
+#[derive(Debug, Clone, PartialEq)]
 pub struct Intent {
     pub kind: ChangeOpKind,
     /// 工具参数里给的路径，可能是 vault 相对路径。
@@ -125,6 +132,42 @@ pub struct Intent {
     /// 改名/移动的目标路径（相对或绝对，按工具的参数原样）。
     pub dest: Option<String>,
     pub target_kind: ObjectKind,
+    /// 关系操作的另一端与语义。只有 `AddRelation` / `DeleteRelation` 会有。
+    pub relation: Option<RelationIntent>,
+}
+
+impl Intent {
+    /// 文件类意图 / an intent that targets one file.
+    fn on_file(
+        kind: ChangeOpKind,
+        raw_path: impl Into<String>,
+        content: Option<String>,
+        dest: Option<String>,
+        target_kind: ObjectKind,
+    ) -> Self {
+        Self {
+            kind,
+            raw_path: raw_path.into(),
+            content,
+            dest,
+            target_kind,
+            relation: None,
+        }
+    }
+}
+
+/// 关系意图 / one edge a graph tool wants to add or remove.
+///
+/// 路径还是参数里的原样：解析成索引用的 key 要 vault 上下文，那是 [`open`] 的活。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelationIntent {
+    pub raw_target: String,
+    pub relation_type: String,
+    pub confidence: f64,
+    pub reason: Option<String>,
+    /// Agent 提议的边一律 `agent_proposed`。用户手连的边不走这条路（那是
+    /// `migrate_links_to_relations` 从 wikilink 迁进来的），所以这里不该出现 `user_link`。
+    pub origin: String,
 }
 
 /// 参数形状已经登记过的写工具 / write tools whose arguments this module understands.
@@ -159,7 +202,39 @@ const MAPPED_WRITE_TOOLS: &[&str] = &[
     "ocr_image",
     "extract_pdf_text",
     "update_memory",
+    // 图谱关系：目标是一对对象加一个关系类型，由 `AddRelation` / `DeleteRelation` 承载。
+    "add_relation",
+    "delete_relation",
+    "batch_link_notes",
 ];
+
+/// 自己开批次的写工具 / writers that stage their own change sets.
+///
+/// 这些工具的目标**只能查库才知道**：`propagate_fact_update` 要改的是"依赖这条 fact
+/// 的下游笔记"，而参数里只有 `fact_id`。[`intents_of`] 拿不到 `Connection`，硬要在那里
+/// 猜就会猜错——所以它们自己在函数内部按每篇下游笔记调 [`open_intents`]，一篇一个批次。
+///
+/// 一篇一个批次不是偷懒：混成一个批次时，任何一篇冲突都会让整批停下，于是"三篇能改、
+/// 一篇不能"这种最常见的情况会退化成"一篇都没改"。分开开批次让每篇笔记各自有预览、
+/// 各自可回滚，冲突也只影响它自己。
+///
+/// 加进这张表的前提是那个工具**真的**在内部 stage，否则这就是一个放行后门。
+const SELF_GUARDED_WRITE_TOOLS: &[&str] = &["propagate_fact_update"];
+
+/// 这个工具在内部自己开批次吗 / does this tool stage its own operations?
+pub fn stages_its_own_operations(tool_name: &str) -> bool {
+    SELF_GUARDED_WRITE_TOOLS.contains(&tool_name)
+}
+
+/// Agent 提议的边的来源标记 / the provenance stamp for an agent-proposed edge.
+pub const AGENT_RELATION_ORIGIN: &str = "agent_proposed";
+
+/// 模型没给置信度时用哪个值 / the confidence an unqualified agent edge gets.
+///
+/// 0.6 而不是 1.0。旧的 `add_relation` 硬写 1.0，等于宣称"模型猜的这条边和你亲手连的
+/// 一样确定"。0.6 落在"值得看一眼但不是事实"这一档，和 `semantic_edges` 的阈值语义
+/// 一致，也让"低置信关系不得批量入库"这条规则有个可比的数。
+pub const DEFAULT_AGENT_RELATION_CONFIDENCE: f64 = 0.6;
 
 /// 这个工具的参数形状登记过吗 / does the guard know how to read this tool's arguments?
 pub fn maps_to_operations(tool_name: &str) -> bool {
@@ -206,15 +281,43 @@ pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
     };
     let note = |kind: ChangeOpKind, path: Option<String>, content: Option<String>| {
         path.filter(|p| !p.is_empty())
-            .map(|raw_path| Intent {
-                kind,
-                raw_path,
-                content,
-                dest: None,
-                target_kind: ObjectKind::Document,
+            .map(|raw_path| {
+                Intent::on_file(kind, raw_path, content, None, ObjectKind::Document)
             })
             .into_iter()
             .collect::<Vec<_>>()
+    };
+    // 关系工具的一端 / one end of a relation tool call.
+    //
+    // 置信度不再硬写 1.0。一条模型猜出来的边和一条用户亲手连的边给同一个 1.0，图谱
+    // 就再也分不出"确定"和"猜的"——而这正是"连接质量优先于数量"要靠的那个数。
+    let relation_intent = |kind: ChangeOpKind,
+                           source: Option<String>,
+                           target: Option<String>,
+                           relation_type: Option<String>,
+                           confidence: Option<f64>,
+                           reason: Option<String>| {
+        match (source, target, relation_type) {
+            (Some(s), Some(t), Some(rt))
+                if !s.is_empty() && !t.is_empty() && !rt.trim().is_empty() =>
+            {
+                vec![Intent {
+                    kind,
+                    raw_path: s,
+                    content: None,
+                    dest: None,
+                    target_kind: ObjectKind::Relation,
+                    relation: Some(RelationIntent {
+                        raw_target: t,
+                        relation_type: rt,
+                        confidence: confidence.unwrap_or(DEFAULT_AGENT_RELATION_CONFIDENCE),
+                        reason,
+                        origin: AGENT_RELATION_ORIGIN.to_string(),
+                    }),
+                }]
+            }
+            _ => Vec::new(),
+        }
     };
 
     match tool_name {
@@ -226,23 +329,25 @@ pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
         "revert_note" => note(ChangeOpKind::Patch, get("note_path"), None),
         "delete_note" => note(ChangeOpKind::Delete, get("path"), None),
         "rename_note" => match (get("old_path"), get("new_path")) {
-            (Some(old), Some(new)) if !old.is_empty() && !new.is_empty() => vec![Intent {
-                kind: ChangeOpKind::Rename,
-                raw_path: old,
-                content: None,
-                dest: Some(new),
-                target_kind: ObjectKind::Document,
-            }],
+            (Some(old), Some(new)) if !old.is_empty() && !new.is_empty() => vec![Intent::on_file(
+                ChangeOpKind::Rename,
+                old,
+                None,
+                Some(new),
+                ObjectKind::Document,
+            )],
             _ => Vec::new(),
         },
         "move_note" => match (get("path"), get("destination")) {
-            (Some(path), Some(dest)) if !path.is_empty() && !dest.is_empty() => vec![Intent {
-                kind: ChangeOpKind::Move,
-                raw_path: path,
-                content: None,
-                dest: Some(dest),
-                target_kind: ObjectKind::Document,
-            }],
+            (Some(path), Some(dest)) if !path.is_empty() && !dest.is_empty() => {
+                vec![Intent::on_file(
+                    ChangeOpKind::Move,
+                    path,
+                    None,
+                    Some(dest),
+                    ObjectKind::Document,
+                )]
+            }
             _ => Vec::new(),
         },
         // 合并是两件事：目标被改写、源被吃掉。拆成两个 op，UI 才能把"源笔记会消失"
@@ -250,22 +355,22 @@ pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
         "merge_notes" => {
             let mut ops = Vec::new();
             if let Some(target) = get("target_path").filter(|p| !p.is_empty()) {
-                ops.push(Intent {
-                    kind: ChangeOpKind::Edit,
-                    raw_path: target,
-                    content: None,
-                    dest: None,
-                    target_kind: ObjectKind::Document,
-                });
+                ops.push(Intent::on_file(
+                    ChangeOpKind::Edit,
+                    target,
+                    None,
+                    None,
+                    ObjectKind::Document,
+                ));
             }
             if let Some(source) = get("source_path").filter(|p| !p.is_empty()) {
-                ops.push(Intent {
-                    kind: ChangeOpKind::Delete,
-                    raw_path: source,
-                    content: None,
-                    dest: None,
-                    target_kind: ObjectKind::Document,
-                });
+                ops.push(Intent::on_file(
+                    ChangeOpKind::Delete,
+                    source,
+                    None,
+                    None,
+                    ObjectKind::Document,
+                ));
             }
             if ops.len() == 2 {
                 ops
@@ -301,13 +406,69 @@ pub fn intents_of(tool_name: &str, args_json: &str) -> Vec<Intent> {
         ),
         // Core Memory 写的是 `<vault>/.zettelagent/memory.md`，路径来自 vault 而不是
         // 参数。登记成 op 之后它才和笔记一样有版本、有 diff、能回滚。
-        "update_memory" => vec![Intent {
-            kind: ChangeOpKind::Patch,
-            raw_path: ".zettelagent/memory.md".to_string(),
-            content: None,
-            dest: None,
-            target_kind: ObjectKind::Memory,
-        }],
+        "update_memory" => vec![Intent::on_file(
+            ChangeOpKind::Patch,
+            ".zettelagent/memory.md",
+            None,
+            None,
+            ObjectKind::Memory,
+        )],
+        // ── 图谱关系 / graph edges ────────────────────────────────────────────
+        //
+        // 这三个工具以前落在"未映射"那一类，被守卫直接拒掉：op 模型只会描述"某个文件
+        // 的某一版变成另一版"，装不下一行关系。现在 `AddRelation` / `DeleteRelation`
+        // 就是那个缺掉的形状，所以它们终于能被预览、审批、验证和撤销。
+        "add_relation" => relation_intent(
+            ChangeOpKind::AddRelation,
+            get("source_path"),
+            get("target_path"),
+            get("relation_type"),
+            parsed.get("confidence").and_then(|v| v.as_f64()),
+            get("reason"),
+        ),
+        // `relation_type` 在这里是必填的，尽管旧实现连它都不看就
+        // `DELETE ... WHERE source = ? AND target = ?`——那条 SQL 会把两篇笔记之间**所
+        // 有类型**的边一起删掉，包括用户自己连的 wikilink。参数缺 `relation_type` 时
+        // 返回空 vec，`open` 会以"参数没填全"拒绝并让模型补全，而不是替它猜一个范围。
+        "delete_relation" => relation_intent(
+            ChangeOpKind::DeleteRelation,
+            get("source_path"),
+            get("target_path"),
+            get("relation_type"),
+            None,
+            get("reason"),
+        ),
+        // 批量连线拆成逐条 op：审查界面要能让用户否掉其中一条，而不是只能整批通过。
+        // 任何一条填不全就整批拒绝——半批可预览、半批不可预览的批次没法诚实地回滚。
+        "batch_link_notes" => {
+            let Some(links) = parsed.get("links").and_then(|v| v.as_array()) else {
+                return Vec::new();
+            };
+            if links.is_empty() {
+                return Vec::new();
+            }
+            let mut ops = Vec::with_capacity(links.len());
+            for link in links {
+                let field = |key: &str| {
+                    link.get(key)
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                };
+                let one = relation_intent(
+                    ChangeOpKind::AddRelation,
+                    field("source_path"),
+                    field("target_path"),
+                    field("relation_type"),
+                    link.get("confidence").and_then(|v| v.as_f64()),
+                    field("reason"),
+                );
+                if one.is_empty() {
+                    return Vec::new();
+                }
+                ops.extend(one);
+            }
+            ops
+        }
         _ => Vec::new(),
     }
 }
@@ -383,6 +544,35 @@ fn path_key_unchecked(ctx: &WriteContext, raw: &str) -> Option<String> {
     let resolved = resolve_path_multi_vault(raw, &ctx.primary_vault, &ctx.vaults)
         .unwrap_or_else(|_| std::path::PathBuf::from(&ctx.primary_vault).join(raw));
     Some(snapshot_path_key(&resolved))
+}
+
+/// 这条边现在的置信度与理由 / the confidence and reason this edge carries today.
+///
+/// 删除一条边之前先把原值记进 op。撤销时才能把它**原样**放回去——不记的话"撤销删除"
+/// 会用默认置信度重建一条用户确认过的边，等于悄悄把它降级。
+fn existing_relation_values(
+    conn: &Connection,
+    source: &str,
+    target: &str,
+    relation_type: &str,
+) -> ObjectResult<(Option<f64>, Option<String>)> {
+    let row: Option<(Option<f64>, Option<String>)> = conn
+        .query_row(
+            "SELECT confidence, reason FROM note_relations
+             WHERE source_path = ?1 AND target_path = ?2 AND relation_type = ?3",
+            params![source, target, relation_type],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.unwrap_or((None, None)))
+}
+
+/// 对象当前是第几版 / the version an object is on right now.
+///
+/// 只为审计和 verify 记录，不参与关系冲突判定。
+fn object_version(conn: &Connection, object_id: Option<&str>) -> ObjectResult<Option<i64>> {
+    let Some(id) = object_id else { return Ok(None) };
+    Ok(object_store::get_object(conn, id)?.map(|o| o.current_version))
 }
 
 // ── 读记录 / the read ledger ─────────────────────────────────────────────────
@@ -521,6 +711,16 @@ pub fn open(
         return Ok(Guarded::Unguarded);
     }
 
+    // 自己开批次的工具：这里放行，但它内部必须按目标逐个走 `open_intents`。在这里再开
+    // 一个批次只会得到一个没有 op 的空壳，反而让审计里出现"批准了却什么都没记"。
+    if stages_its_own_operations(tool_name) {
+        if let Err(e) = remember_reads(conn, ctx, tool_name, args_json) {
+            log::warn!("read baseline not recorded for {tool_name}: {e}");
+        }
+        return Ok(Guarded::Unguarded);
+    }
+
+
     let mut req = NewChangeSet::new(if ctx.actor.is_empty() { "agent" } else { &ctx.actor });
     req.session_id = ctx.session_id.clone();
     req.run_id = ctx.run_id.clone();
@@ -557,32 +757,8 @@ pub fn open(
     let mut paths = Vec::new();
 
     for intent in &intents {
-        // scope 判断交给 `resolve_path_multi_vault`：它已经是全仓库唯一的"路径在不在
-        // 库里"的答案，再写一个前缀比较就是第二份实现。
-        let Some(key) = path_key(ctx, &intent.raw_path) else {
-            changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
-            return Ok(Guarded::Refused {
-                changeset_id: Some(cs.id),
-                refusal: Refusal::OutOfScope(intent.raw_path.clone()),
-            });
-        };
-        let (key, object_id) = locate(conn, &key)?;
-
-        let mut op = NewOp::new(intent.kind, tool_name);
-        op.legacy_path = Some(key.clone());
-        op.target_object_id = object_id.clone();
-        op.new_content = intent.content.clone();
-        op.target_kind = intent.target_kind;
-        // 基线取 Agent 这一轮读到的那一版。没读过就留空，`baseline_of` 会退回当前版本。
-        op.observed_read = match &object_id {
-            Some(id) => baseline_from_read(conn, run_key.as_str(), id)?,
-            None => None,
-        };
-        op.side_effects = destination_key(ctx, intent)
-            .and_then(|new_path| serde_json::to_string(&SideEffect { new_path }).ok());
-
-        match changeset::add_op(conn, &cs.id, &ctx.vaults, &op)? {
-            Ok(_) => paths.push(key),
+        match stage_one(conn, ctx, &cs.id, tool_name, intent, &run_key)? {
+            Ok(key) => paths.push(key),
             Err(refusal) => {
                 changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
                 return Ok(Guarded::Refused {
@@ -606,6 +782,177 @@ pub fn open(
         changeset_id: cs.id,
         paths,
     }))
+}
+
+/// 把一个意图登记成 op / stage one intent as an operation.
+///
+/// 从 [`open`] 里抽出来，为的是让图谱计划走**同一段**代码：计划提交时的 scope 校验、
+/// 基线、关系载荷、冲突检测必须与 Agent 直接调工具时一模一样，否则就会出现"从图谱页
+/// 提交的关系绕过了守卫"这种最难发现的不一致。
+fn stage_one(
+    conn: &Connection,
+    ctx: &WriteContext,
+    changeset_id: &str,
+    tool_name: &str,
+    intent: &Intent,
+    run_key: &str,
+) -> ObjectResult<Result<String, Refusal>> {
+    // scope 判断交给 `resolve_path_multi_vault`：它已经是全仓库唯一的"路径在不在
+    // 库里"的答案，再写一个前缀比较就是第二份实现。
+    let Some(key) = path_key(ctx, &intent.raw_path) else {
+        return Ok(Err(Refusal::OutOfScope(intent.raw_path.clone())));
+    };
+    let (key, object_id) = locate(conn, &key)?;
+
+    let mut op = NewOp::new(intent.kind, tool_name);
+    op.legacy_path = Some(key.clone());
+    op.target_object_id = object_id.clone();
+    op.new_content = intent.content.clone();
+    op.target_kind = intent.target_kind;
+    // 基线取 Agent 这一轮读到的那一版。没读过就留空，`baseline_of` 会退回当前版本。
+    op.observed_read = match &object_id {
+        Some(id) => baseline_from_read(conn, run_key, id)?,
+        None => None,
+    };
+    op.side_effects = destination_key(ctx, intent)
+        .and_then(|new_path| serde_json::to_string(&SideEffect { new_path }).ok());
+
+    // 关系操作的另一端也要解析成索引里的那个拼法。解析不出来就是"目标不在库里"，
+    // 拒绝：把库外路径写进 `note_relations` 会让每个读关系表的地方都看到一个
+    // 指向空气的节点。
+    if let Some(rel) = &intent.relation {
+        let Some(target_key) = path_key(ctx, &rel.raw_target) else {
+            return Ok(Err(Refusal::OutOfScope(rel.raw_target.clone())));
+        };
+        let (target_key, target_object_id) = locate(conn, &target_key)?;
+        let (old_confidence, old_reason) =
+            existing_relation_values(conn, &key, &target_key, &rel.relation_type)?;
+        let payload = changeset::RelationOp {
+            source_path: key.clone(),
+            target_path: target_key.clone(),
+            relation_type: rel.relation_type.clone(),
+            confidence: rel.confidence,
+            reason: rel.reason.clone(),
+            origin: rel.origin.clone(),
+            old_confidence,
+            old_reason,
+            expected_source_version: object_version(conn, object_id.as_deref())?,
+            expected_target_version: object_version(conn, target_object_id.as_deref())?,
+        };
+        op.reason = rel.reason.clone();
+        op.patch = serde_json::to_string(&payload).ok();
+    }
+
+    match changeset::add_op(conn, changeset_id, &ctx.vaults, &op)? {
+        Ok(_) => Ok(Ok(key)),
+        Err(refusal) => Ok(Err(refusal)),
+    }
+}
+
+/// 用已经解析好的意图开一个批次 / gate a set of already-decomposed intents.
+///
+/// 图谱计划的提交口。它与 [`open`] 的唯一区别是意图从哪来：那边从工具参数解析，这边
+/// 由计划直接给出。**校验、冲突检测和记账走同一段代码**，所以两条路不可能漂移。
+///
+/// `op_tool_for` 决定每个 op 记在哪个工具名下——能力越权检查按它判，所以一份混了
+/// 新增和删除的计划里，两种 op 各自对应自己的工具名。
+pub fn open_intents(
+    conn: &Connection,
+    ctx: &WriteContext,
+    intent_label: &str,
+    intents: &[Intent],
+) -> ObjectResult<Guarded> {
+    if intents.is_empty() {
+        return Ok(Guarded::Refused {
+            changeset_id: None,
+            refusal: Refusal::NoResolvableOperation(intent_label.to_string()),
+        });
+    }
+
+    let mut req = NewChangeSet::new(if ctx.actor.is_empty() { "agent" } else { &ctx.actor });
+    req.session_id = ctx.session_id.clone();
+    req.run_id = ctx.run_id.clone();
+    req.intent = Some(intent_label.to_string());
+    req.scopes = ctx.vaults.clone();
+    let cs = changeset::propose(conn, &req)?;
+
+    let run_key = ctx.run_id.clone().unwrap_or_default();
+    let mut paths = Vec::new();
+    for intent in intents {
+        let op_tool = match intent.kind {
+            ChangeOpKind::AddRelation => "add_relation",
+            ChangeOpKind::DeleteRelation => "delete_relation",
+            _ => intent_label,
+        };
+        match stage_one(conn, ctx, &cs.id, op_tool, intent, &run_key)? {
+            Ok(key) => paths.push(key),
+            Err(refusal) => {
+                changeset::set_state(conn, &cs.id, super::types::ChangeSetState::Rejected, None)?;
+                return Ok(Guarded::Refused {
+                    changeset_id: Some(cs.id),
+                    refusal,
+                });
+            }
+        }
+    }
+
+    let report = changeset::dry_run(conn, &cs.id)?;
+    if report.has_conflicts {
+        return Ok(Guarded::Conflicted {
+            changeset_id: cs.id,
+            report,
+        });
+    }
+    changeset::record_decision(conn, &cs.id, true)?;
+    Ok(Guarded::Ready(ReadyWrite {
+        changeset_id: cs.id,
+        paths,
+    }))
+}
+
+/// 关系意图的构造口 / build one relation intent from resolved parts.
+///
+/// 给图谱计划用。路径按参数原样传（相对或绝对都行），解析在 [`stage_one`] 里做。
+pub fn relation_intent(
+    kind: ChangeOpKind,
+    source_path: impl Into<String>,
+    target_path: impl Into<String>,
+    relation_type: impl Into<String>,
+    confidence: f64,
+    reason: Option<String>,
+) -> Intent {
+    Intent {
+        kind,
+        raw_path: source_path.into(),
+        content: None,
+        dest: None,
+        target_kind: ObjectKind::Relation,
+        relation: Some(RelationIntent {
+            raw_target: target_path.into(),
+            relation_type: relation_type.into(),
+            confidence,
+            reason,
+            origin: AGENT_RELATION_ORIGIN.to_string(),
+        }),
+    }
+}
+
+/// 笔记改写意图 / one note rewrite whose final content is already known.
+///
+/// 给"目标只能查库才知道"的工具用（见 [`SELF_GUARDED_WRITE_TOOLS`]）：fact 传播算出下游
+/// 笔记的完整新正文之后，用它把这一篇登记成一个可审查、可回滚的 op。
+///
+/// `content` 传全文而不是 `None`：这里的新正文在写盘前就已经确定，留空会让
+/// [`backfill_landed_content`] 去回读磁盘，等于把"我打算写什么"和"磁盘上是什么"混成
+/// 一件事——传播过程中任何一处不一致都会被这一次回读悄悄抹平。
+pub fn rewrite_intent(raw_path: impl Into<String>, content: String) -> Intent {
+    Intent::on_file(
+        ChangeOpKind::Patch,
+        raw_path,
+        Some(content),
+        None,
+        ObjectKind::Document,
+    )
 }
 
 // ── 写之后 / after the write ─────────────────────────────────────────────────
@@ -639,11 +986,14 @@ fn backfill_landed_content(conn: &Connection, changeset_id: &str) -> ObjectResul
         if op.new_content.is_some() {
             continue;
         }
-        // 删除与改名不需要内容：一个变墓碑，一个只换 source_id。
+        // 删除与改名不需要内容：一个变墓碑，一个只换 source_id。关系操作也不需要：
+        // 它的 `legacy_path` 是源笔记，回读那篇笔记的全文塞进 op 会让一条边的记录看
+        // 起来像整篇笔记被改写过。
         if matches!(
             op.op_kind,
             ChangeOpKind::Delete | ChangeOpKind::Rename | ChangeOpKind::Move
-        ) {
+        ) || changeset::is_relation_kind(op.op_kind)
+        {
             continue;
         }
         let Some(path) = &op.legacy_path else { continue };

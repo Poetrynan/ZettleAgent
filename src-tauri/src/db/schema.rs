@@ -513,6 +513,46 @@ pub fn migrate_schema_columns(conn: &Connection) -> Result<()> {
     // and recompute once, never as a match.
     let _ = conn.execute("ALTER TABLE graph_cache ADD COLUMN content_fingerprint TEXT;", []);
 
+    // 关系的来源必须可区分 / a relation must say where it came from.
+    //
+    // 在这之前 `note_relations` 只有 (source, target, type, confidence, reason)：
+    // 用户手写的 wikilink（由 `migrate_links_to_relations` 迁进来）、Agent 提议的边、
+    // 以及外部来源的边在表里长得一模一样。于是图谱没法告诉用户"这条线是你连的还是
+    // 模型猜的"，而"未经确认的推断不得伪装成用户事实"这条规则也就无从执行。
+    //
+    // 默认值刻意是 `user_link`：已存在的行全部来自 wikilink 迁移，把它们标成推断会
+    // 反过来污染用户自己的连接。
+    let _ = conn.execute(
+        "ALTER TABLE note_relations ADD COLUMN origin TEXT DEFAULT 'user_link';",
+        [],
+    );
+    // 用户是否亲自确认过这条边。Agent 写入时为 0，用户在关系详情里点"接受"后为 1。
+    let _ = conn.execute(
+        "ALTER TABLE note_relations ADD COLUMN confirmed INTEGER DEFAULT 0;",
+        [],
+    );
+    // 哪一批变更写进来的。撤销一次图谱变更时按它反查，而不是靠时间戳猜。
+    let _ = conn.execute("ALTER TABLE note_relations ADD COLUMN changeset_id TEXT;", []);
+    let _ = conn.execute("ALTER TABLE note_relations ADD COLUMN run_id TEXT;", []);
+
+    // 用户对一条关系的判断要记住 / remember what the user decided about an edge.
+    //
+    // 没有这张表的话，用户删掉一条 AI 关系之后，下一次语义刷新或 Auto-Fix 会用同样的
+    // 理由把它再建一遍——这正是"AI 建议反复骚扰"的机制。这里存的是判断，不是关系本身，
+    // 所以即使关系行被删掉，判断依然在。
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS relation_decisions (
+            source_path TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            reason TEXT,
+            decided_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (source_path, target_path, relation_type)
+        );",
+        [],
+    );
+
     Ok(())
 }
 

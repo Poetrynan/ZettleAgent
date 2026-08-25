@@ -1999,13 +1999,12 @@ fn a_write_tool_that_resolves_no_operation_is_refused_not_approved() {
 
 /// 参数形状没登记的写工具也不能放行 / an unmapped write tool is refused too.
 ///
-/// 目录、关系行、第三方 MCP 的写入这一层读不懂，所以既不能预演也不能回滚。拒绝的理由
-/// 要与"参数没填全"分开：让模型去"补全参数重试"在这里是假建议，它无论怎么填都一样。
+/// 目录和第三方 MCP 的写入这一层读不懂，所以既不能预演也不能回滚。拒绝的理由要与
+/// "参数没填全"分开：让模型去"补全参数重试"在这里是假建议，它无论怎么填都一样。
 #[test]
 fn an_unmapped_write_tool_cannot_slip_past_the_guard() {
     for (tool, args) in [
         ("create_folder", r#"{"path":"新文件夹"}"#),
-        ("add_relation", r#"{"source_path":"a.md","target_path":"b.md"}"#),
         ("mcp_fs_write_file", r#"{"path":"/tmp/x","content":"y"}"#),
     ] {
         let conn = migrated_db();
@@ -2021,6 +2020,36 @@ fn an_unmapped_write_tool_cannot_slip_past_the_guard() {
                 // 给模型的话不能是"补全参数"——那件事它做不到。
                 assert!(!refusal.message().contains("补全参数"), "{tool}");
             }
+            other => panic!("{tool} must not be allowed to write, got {other:?}"),
+        }
+    }
+}
+
+/// 关系工具参数没填全时是"补全参数"，不是"这个工具不行" / a half-filled edge is retryable.
+///
+/// `add_relation` 现在登记过了，所以缺 `relation_type` 的那次调用要报
+/// `NoResolvableOperation`（重试有用），而不是 `UnmappedWriteTool`（重试没用）。
+/// `delete_relation` 缺 `relation_type` 同理——旧实现在这种情况下会删掉两篇笔记之间
+/// 所有类型的边。
+#[test]
+fn a_relation_call_missing_its_type_is_refused_as_retryable() {
+    for (tool, args) in [
+        ("add_relation", r#"{"source_path":"a.md","target_path":"b.md"}"#),
+        (
+            "delete_relation",
+            r#"{"source_path":"a.md","target_path":"b.md"}"#,
+        ),
+        ("batch_link_notes", r#"{"links":[]}"#),
+    ] {
+        let conn = migrated_db();
+        let vault = temp_vault("relation-args");
+        let ctx = guard_ctx(&vault);
+
+        match write_guard::open(&conn, &ctx, tool, args).unwrap() {
+            Guarded::Refused { refusal, .. } => assert!(
+                matches!(refusal, Refusal::NoResolvableOperation(ref t) if t == tool),
+                "{tool}: expected NoResolvableOperation, got {refusal:?}"
+            ),
             other => panic!("{tool} must not be allowed to write, got {other:?}"),
         }
     }
@@ -2053,6 +2082,18 @@ fn every_registered_write_tool_really_maps_onto_operations() {
         ("ocr_image", r#"{"image_path":"a.png","store_as_note":true}"#),
         ("extract_pdf_text", r#"{"pdf_path":"a.pdf","save_to_vault":true}"#),
         ("update_memory", r#"{"content":"x"}"#),
+        (
+            "add_relation",
+            r#"{"source_path":"a.md","target_path":"b.md","relation_type":"supports"}"#,
+        ),
+        (
+            "delete_relation",
+            r#"{"source_path":"a.md","target_path":"b.md","relation_type":"supports"}"#,
+        ),
+        (
+            "batch_link_notes",
+            r#"{"links":[{"source_path":"a.md","target_path":"b.md","relation_type":"related"}]}"#,
+        ),
     ] {
         assert!(
             write_guard::maps_to_operations(tool),
@@ -2064,7 +2105,6 @@ fn every_registered_write_tool_really_maps_onto_operations() {
         );
     }
     assert!(!write_guard::maps_to_operations("create_folder"));
-    assert!(!write_guard::maps_to_operations("add_relation"));
     assert!(!write_guard::maps_to_operations("mcp_fs_write_file"));
 }
 
@@ -3501,6 +3541,407 @@ fn restoring_something_that_was_never_rejected_is_refused() {
         "遗忘也是可以撤回的"
     );
 }
+
+// ── 图谱关系写入 / graph relation writes ─────────────────────────────────────
+//
+// 这一组锁的是"关系写入与笔记写入受同一套治理"这件事。以前 `add_relation` 直接
+// `INSERT OR IGNORE`，既不预览也不可回滚，而且回给模型的永远是 `success: true`。
+
+use super::relations;
+
+/// 一次连线变成一个可审查的操作 / one edge becomes one reviewable op.
+#[test]
+fn adding_a_relation_stages_a_reviewable_operation() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-add");
+    let ctx = guard_ctx(&vault);
+    let (source, _) = vault_note(&conn, &vault, "源.md", "源内容");
+    let (target, _) = vault_note(&conn, &vault, "目标.md", "目标内容");
+
+    let args = format!(
+        r#"{{"source_path":"源.md","target_path":"目标.md","relation_type":"supports","reason":"两者论证同一结论","confidence":0.8}}"#
+    );
+    let ready = match write_guard::open(&conn, &ctx, "add_relation", &args).unwrap() {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the edge to be reviewable, got {other:?}"),
+    };
+
+    let ops = changeset::list_ops(&conn, &ready.changeset_id).unwrap();
+    assert_eq!(ops.len(), 1, "一条边一个 op");
+    assert_eq!(ops[0].op_kind, ChangeOpKind::AddRelation);
+
+    let payload = changeset::relation_payload(&ops[0]).expect("relation payload");
+    assert_eq!(payload.source_path, source);
+    assert_eq!(payload.target_path, target, "目标要解析成索引里的那个拼法");
+    assert_eq!(payload.relation_type, "supports");
+    assert_eq!(payload.confidence, 0.8);
+    assert_eq!(
+        payload.origin,
+        relations::ORIGIN_AGENT,
+        "Agent 提议的边必须与用户手连的边可区分"
+    );
+
+    // 预览里 before 是"现在没有这条边"，after 是它将长成什么样——而不是整篇笔记的全文。
+    let report = changeset::dry_run(&conn, &ready.changeset_id).unwrap();
+    assert!(!report.has_conflicts);
+    assert!(report.ops[0].before.is_none());
+    let after = report.ops[0].after.as_deref().unwrap_or_default();
+    assert!(after.contains("supports"), "after 要说清是哪条关系: {after}");
+    assert!(
+        !after.contains("源内容"),
+        "关系的 diff 不该把笔记正文当成改动"
+    );
+}
+
+/// 批量连线拆成逐条 / a batch decomposes into one op per link.
+#[test]
+fn batch_link_notes_decomposes_into_one_operation_per_link() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-batch");
+    let ctx = guard_ctx(&vault);
+    vault_note(&conn, &vault, "a.md", "a");
+    vault_note(&conn, &vault, "b.md", "b");
+    vault_note(&conn, &vault, "c.md", "c");
+
+    let args = r#"{"links":[
+        {"source_path":"a.md","target_path":"b.md","relation_type":"related"},
+        {"source_path":"b.md","target_path":"c.md","relation_type":"extends"}
+    ]}"#;
+    let ready = match write_guard::open(&conn, &ctx, "batch_link_notes", args).unwrap() {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected a reviewable batch, got {other:?}"),
+    };
+
+    let ops = changeset::list_ops(&conn, &ready.changeset_id).unwrap();
+    assert_eq!(ops.len(), 2, "用户要能否掉其中一条，所以不能合成一个 op");
+    assert!(ops
+        .iter()
+        .all(|op| op.op_kind == ChangeOpKind::AddRelation));
+}
+
+/// 已经存在的关系是冲突，不是成功 / an existing edge is a conflict, not a success.
+#[test]
+fn an_existing_relation_is_reported_instead_of_silently_ignored() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-dup");
+    let ctx = guard_ctx(&vault);
+    let (source, _) = vault_note(&conn, &vault, "a.md", "a");
+    let (target, _) = vault_note(&conn, &vault, "b.md", "b");
+
+    let op = changeset::RelationOp {
+        source_path: source.clone(),
+        target_path: target.clone(),
+        relation_type: "related".into(),
+        confidence: 0.6,
+        reason: None,
+        origin: relations::ORIGIN_AGENT.into(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+    assert_eq!(
+        relations::add_relation(&conn, &op, None, None).unwrap(),
+        relations::RelationOutcome::Added
+    );
+    // 第二次同样的写入不能报成功——旧的 `INSERT OR IGNORE` 会。
+    assert_eq!(
+        relations::add_relation(&conn, &op, None, None).unwrap(),
+        relations::RelationOutcome::AlreadyExists
+    );
+
+    let args = r#"{"source_path":"a.md","target_path":"b.md","relation_type":"related"}"#;
+    match write_guard::open(&conn, &ctx, "add_relation", args).unwrap() {
+        Guarded::Conflicted { report, .. } => {
+            assert!(matches!(
+                report.ops[0].conflict,
+                Some(Conflict::RelationExists { .. })
+            ));
+        }
+        other => panic!("expected a RelationExists conflict, got {other:?}"),
+    }
+}
+
+/// 用户拒绝过的关系不会被重新建立 / a rejected edge is not recreated.
+#[test]
+fn a_relation_the_user_rejected_is_not_created_again() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-reject");
+    let ctx = guard_ctx(&vault);
+    let (source, _) = vault_note(&conn, &vault, "a.md", "a");
+    let (target, _) = vault_note(&conn, &vault, "b.md", "b");
+
+    relations::reject_relation(&conn, &source, &target, "related", Some("这两篇没关系"))
+        .unwrap();
+
+    // 预演阶段就说清楚，而不是等提交后再解释。
+    let args = r#"{"source_path":"a.md","target_path":"b.md","relation_type":"related"}"#;
+    match write_guard::open(&conn, &ctx, "add_relation", args).unwrap() {
+        Guarded::Conflicted { report, .. } => assert!(matches!(
+            report.ops[0].conflict,
+            Some(Conflict::RelationRejectedByUser { .. })
+        )),
+        other => panic!("expected a RelationRejectedByUser conflict, got {other:?}"),
+    }
+
+    // 即使有人绕过预演直接写，写入口也拦得住。
+    let op = changeset::RelationOp {
+        source_path: source,
+        target_path: target,
+        relation_type: "related".into(),
+        confidence: 0.9,
+        reason: None,
+        origin: relations::ORIGIN_AGENT.into(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+    assert_eq!(
+        relations::add_relation(&conn, &op, None, None).unwrap(),
+        relations::RelationOutcome::RejectedByUser
+    );
+}
+
+/// 删除只删指定类型 / deleting names exactly one relation type.
+///
+/// 旧实现的 `DELETE ... WHERE source = ? AND target = ?` 会把用户手连的 wikilink 边
+/// 一起删掉，而那次删除不可撤销。
+#[test]
+fn deleting_a_relation_leaves_the_other_types_alone() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-del");
+    let (source, _) = vault_note(&conn, &vault, "a.md", "a");
+    let (target, _) = vault_note(&conn, &vault, "b.md", "b");
+
+    for (kind, origin) in [
+        ("related", relations::ORIGIN_USER_LINK),
+        ("supports", relations::ORIGIN_AGENT),
+    ] {
+        let op = changeset::RelationOp {
+            source_path: source.clone(),
+            target_path: target.clone(),
+            relation_type: kind.into(),
+            confidence: 0.7,
+            reason: None,
+            origin: origin.into(),
+            old_confidence: None,
+            old_reason: None,
+            expected_source_version: None,
+            expected_target_version: None,
+        };
+        relations::add_relation(&conn, &op, None, None).unwrap();
+    }
+
+    assert_eq!(
+        relations::delete_relation(&conn, &source, &target, "supports").unwrap(),
+        relations::RelationOutcome::Deleted
+    );
+    assert!(
+        changeset::relation_exists(&conn, &source, &target, "related").unwrap(),
+        "用户自己连的那条边必须还在"
+    );
+    assert_eq!(
+        relations::delete_relation(&conn, &source, &target, "supports").unwrap(),
+        relations::RelationOutcome::Missing,
+        "删一条不存在的边不算成功"
+    );
+}
+
+/// 撤销一次删除要还原原值 / undoing a delete restores the original confidence.
+#[test]
+fn rolling_back_a_relation_change_restores_the_original_values() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-undo");
+    let ctx = guard_ctx(&vault);
+    let (source, _) = vault_note(&conn, &vault, "a.md", "a");
+    let (target, _) = vault_note(&conn, &vault, "b.md", "b");
+
+    let original = changeset::RelationOp {
+        source_path: source.clone(),
+        target_path: target.clone(),
+        relation_type: "supports".into(),
+        confidence: 0.95,
+        reason: Some("用户确认过".into()),
+        origin: relations::ORIGIN_USER_LINK.into(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+    relations::add_relation(&conn, &original, None, None).unwrap();
+
+    let args = r#"{"source_path":"a.md","target_path":"b.md","relation_type":"supports"}"#;
+    let ready = match write_guard::open(&conn, &ctx, "delete_relation", args).unwrap() {
+        Guarded::Ready(ready) => ready,
+        other => panic!("expected the delete to be reviewable, got {other:?}"),
+    };
+    let applied = relations::apply_changeset_relations(&conn, &ready.changeset_id).unwrap();
+    assert_eq!(applied.applied, 1);
+    assert!(!changeset::relation_exists(&conn, &source, &target, "supports").unwrap());
+
+    let undone = relations::rollback_changeset_relations(&conn, &ready.changeset_id).unwrap();
+    assert_eq!(undone.applied, 1);
+    let detail = relations::relation_detail(&conn, &source, &target, "supports")
+        .unwrap()
+        .expect("relation is back");
+    assert_eq!(
+        detail.confidence, 0.95,
+        "撤销不能把用户确认过的边降级成默认置信度"
+    );
+    assert_eq!(detail.reason.as_deref(), Some("用户确认过"));
+}
+
+/// 一端在库外就整批拒绝 / an edge that leaves the vault is refused.
+#[test]
+fn a_relation_pointing_outside_the_vault_is_refused() {
+    let conn = migrated_db();
+    let vault = temp_vault("rel-scope");
+    let ctx = guard_ctx(&vault);
+    vault_note(&conn, &vault, "a.md", "a");
+
+    let args = r#"{"source_path":"a.md","target_path":"../外面.md","relation_type":"related"}"#;
+    match write_guard::open(&conn, &ctx, "add_relation", args).unwrap() {
+        Guarded::Refused { refusal, .. } => {
+            assert!(matches!(refusal, Refusal::OutOfScope(_)), "{refusal:?}")
+        }
+        other => panic!("a cross-vault edge must be refused, got {other:?}"),
+    }
+}
+
+/// 目标要查库才知道的写工具走自己那条路 / a writer whose targets live in the DB stages itself.
+///
+/// `propagate_fact_update` 的参数里只有 `fact_id`，要改哪几篇下游笔记得查
+/// `note_relations` 才知道。`intents_of` 拿不到 `Connection`，所以它不在
+/// `MAPPED_WRITE_TOOLS` 里——但它也不能被当成"未映射写工具"拒掉，那会让整个 fact 传播
+/// 功能从对话里彻底不可用。这条钉住第三条路：守卫放行，工具自己按篇开批次。
+#[test]
+fn a_writer_whose_targets_come_from_the_database_stages_itself() {
+    let conn = migrated_db();
+    let vault = temp_vault("selfguard");
+    let ctx = guard_ctx(&vault);
+
+    assert!(
+        write_guard::stages_its_own_operations("propagate_fact_update"),
+        "fact 传播必须登记成自开批次的工具"
+    );
+    assert!(
+        !write_guard::maps_to_operations("propagate_fact_update"),
+        "它的目标不在参数里，登进参数映射表就是在假装我们能从参数读出目标"
+    );
+    assert!(
+        matches!(
+            write_guard::open(&conn, &ctx, "propagate_fact_update", r#"{"fact_id":1,"new_content":"新事实"}"#)
+                .unwrap(),
+            Guarded::Unguarded
+        ),
+        "自开批次的工具在这里不该再被套一个空批次"
+    );
+    // 反过来：没登记过的写工具依然要被拒。放行一个不能预览也不能回滚的写入，
+    // 比拒绝一个正常功能危险得多。
+    match write_guard::open(&conn, &ctx, "create_folder", r#"{"path":"新目录"}"#).unwrap() {
+        Guarded::Refused { refusal, .. } => assert!(
+            matches!(refusal, Refusal::UnmappedWriteTool(_)),
+            "{refusal:?}"
+        ),
+        other => panic!("未映射的写工具必须被拒，实际是 {other:?}"),
+    }
+}
+
+/// 下游改写是一个可审查的 op / a propagated rewrite is one reviewable operation.
+///
+/// 传播出去的每一篇下游笔记都必须能在变更审查里单独看到、单独撤销。这条同时钉住
+/// "新正文在开批次时就已经记进 op"：留空会让记账阶段回读磁盘，等于把"我打算写什么"
+/// 和"磁盘上现在是什么"混成一件事。
+#[test]
+fn a_propagated_rewrite_is_staged_as_one_reviewable_operation() {
+    let conn = migrated_db();
+    let vault = temp_vault("propagate");
+    let ctx = guard_ctx(&vault);
+    let (key, _) = vault_note(&conn, &vault, "下游.md", "旧事实：产能 100 台。");
+
+    let rewritten = "旧事实：产能 200 台。".to_string();
+    let ready = match write_guard::open_intents(
+        &conn,
+        &ctx,
+        "propagate_fact_update",
+        &[write_guard::rewrite_intent("下游.md", rewritten.clone())],
+    )
+    .unwrap()
+    {
+        Guarded::Ready(ready) => ready,
+        other => panic!("下游改写应当可审查，实际是 {other:?}"),
+    };
+
+    let ops = changeset::list_ops(&conn, &ready.changeset_id).unwrap();
+    assert_eq!(ops.len(), 1, "一篇下游笔记对应一个 op");
+    assert_eq!(ops[0].op_kind, ChangeOpKind::Patch);
+    assert_eq!(ops[0].legacy_path.as_deref(), Some(key.as_str()));
+    assert_eq!(
+        ops[0].new_content.as_deref(),
+        Some(rewritten.as_str()),
+        "新正文必须在开批次时就记下来，不能等写盘后回读"
+    );
+
+    std::fs::write(vault.join("下游.md"), &rewritten).unwrap();
+    write_guard::settle(&conn, &ready, Ok(())).unwrap();
+    assert_eq!(
+        changeset::get(&conn, &ready.changeset_id).unwrap().unwrap().state,
+        ChangeSetState::Committed
+    );
+}
+
+/// 冲突的那一篇不写，其余的照常 / a conflicted note is skipped, the rest still land.
+///
+/// 一篇一个批次的理由就在这里：混成一个批次时，任何一篇的基线过期都会让整批停下，
+/// 于是"三篇能改、一篇不能"会退化成"一篇都没改"。
+#[test]
+fn one_conflicted_downstream_note_does_not_block_the_others() {
+    let conn = migrated_db();
+    let vault = temp_vault("propagate-conflict");
+    let ctx = guard_ctx(&vault);
+    let (_, stale_id) = vault_note(&conn, &vault, "过期.md", "第一版");
+    vault_note(&conn, &vault, "正常.md", "第一版");
+
+    // Agent 这一轮读过"过期.md"，随后用户改了它：基线因此落后。
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"过期.md"}"#).unwrap();
+    write_guard::open(&conn, &ctx, "read_note", r#"{"path":"正常.md"}"#).unwrap();
+    object_store::update_object_patch(
+        &conn,
+        &stale_id,
+        ObjectPatch {
+            content: Some("用户刚改的第二版".to_string()),
+            actor: "user".to_string(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let stale = write_guard::open_intents(
+        &conn,
+        &ctx,
+        "propagate_fact_update",
+        &[write_guard::rewrite_intent("过期.md", "传播结果".to_string())],
+    )
+    .unwrap();
+    assert!(
+        matches!(stale, Guarded::Conflicted { .. }),
+        "基线过期的那一篇必须报冲突，实际是 {stale:?}"
+    );
+
+    let fresh = write_guard::open_intents(
+        &conn,
+        &ctx,
+        "propagate_fact_update",
+        &[write_guard::rewrite_intent("正常.md", "传播结果".to_string())],
+    )
+    .unwrap();
+    assert!(
+        matches!(fresh, Guarded::Ready(_)),
+        "没被改过的那一篇不该受影响，实际是 {fresh:?}"
+    );
+}
+
 
 
 

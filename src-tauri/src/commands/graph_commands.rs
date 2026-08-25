@@ -131,6 +131,10 @@ pub fn get_edges_by_relation(
 
 /// Add a note relation directly from the knowledge graph view.
 /// Reuses the same note_relations table as canvas connections.
+///
+/// 这是**用户亲手连的**边，所以 `origin = user_link`、`confirmed = 1`、置信度 1.0：
+/// 它不需要走 ChangeSet（用户就是决策者），但必须与 Agent 推断的边可区分，否则图谱
+/// 无从回答"这条线是谁连的"。
 #[tauri::command]
 pub fn add_note_relation(
     state: State<'_, AppState>,
@@ -138,34 +142,62 @@ pub fn add_note_relation(
     target_path: String,
     relation_type: String,
     reason: Option<String>,
-) -> Result<(), ZettelError> {
+) -> Result<String, ZettelError> {
+    use crate::knowledge::{changeset::RelationOp, relations};
+
     let conn = state.db.lock()?;
-    conn.execute(
-        "INSERT OR IGNORE INTO note_relations (source_path, target_path, relation_type, confidence, reason)
-         VALUES (?1, ?2, ?3, 1.0, ?4)",
-        rusqlite::params![
-            source_path,
-            target_path,
-            relation_type,
-            reason.unwrap_or_else(|| "Created manually on graph".to_string())
-        ],
-    )?;
-    Ok(())
+    let op = RelationOp {
+        source_path,
+        target_path,
+        relation_type,
+        confidence: 1.0,
+        reason: Some(reason.unwrap_or_else(|| "Created manually on the graph".to_string())),
+        origin: relations::ORIGIN_USER_LINK.to_string(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+    // 用户手连的边不受"之前拒绝过"的约束——那条规则约束的是自动重建，不是用户自己。
+    let _ = crate::knowledge::changeset::record_relation_decision(
+        &conn,
+        &op.source_path,
+        &op.target_path,
+        &op.relation_type,
+        "accepted",
+        None,
+    );
+    let outcome = relations::add_relation(&conn, &op, None, None)
+        .map_err(|e| ZettelError::System(e.to_string()))?;
+    if outcome == relations::RelationOutcome::Added {
+        let _ = relations::confirm_relation(&conn, &op.source_path, &op.target_path, &op.relation_type);
+    }
+    Ok(outcome.as_str().to_string())
 }
 
 /// Remove a note relation directly from the knowledge graph view.
+///
+/// `relation_type` 是必填的：不带类型的删除会把两篇笔记之间所有类型的边一起删掉。
+/// 同时记下"用户拒绝过"，这样下一次语义刷新不会把它重新建起来。
 #[tauri::command]
 pub fn delete_note_relation(
     state: State<'_, AppState>,
     source_path: String,
     target_path: String,
+    relation_type: String,
 ) -> Result<bool, ZettelError> {
+    use crate::knowledge::relations;
+
     let conn = state.db.lock()?;
-    let deleted = conn.execute(
-        "DELETE FROM note_relations WHERE source_path = ?1 AND target_path = ?2",
-        rusqlite::params![source_path, target_path],
-    )?;
-    Ok(deleted > 0)
+    let outcome = relations::reject_relation(
+        &conn,
+        &source_path,
+        &target_path,
+        &relation_type,
+        Some("Removed by the user on the graph"),
+    )
+    .map_err(|e| ZettelError::System(e.to_string()))?;
+    Ok(outcome.changed_graph())
 }
 
 /// AI-powered relationship explanation between two notes.
@@ -280,5 +312,183 @@ pub async fn explain_relationship(
         .map_err(|e| ZettelError::Llm(e.to_string()))?;
 
     Ok(response)
+}
+
+// ── 图谱计划 / the graph plan surface ─────────────────────────────────────────
+//
+// 目标 → 观察 → 提议 → 预览 → 批准 → 提交 → 验证 → 撤销。每一步都是一个命令，返回值
+// 都带真实数字，前端不需要（也不允许）自己判断"是不是成功了"。
+
+use crate::knowledge::graph_plan::{
+    self, GraphGoal, GraphPlan, MocDraft, PlanOutcome, PlanVerification, RelationEvidenceView,
+};
+
+/// 算一份图谱计划 / compute a plan. Reads only.
+#[tauri::command]
+pub fn knowledge_graph_create_plan(
+    state: State<'_, AppState>,
+    goal: GraphGoal,
+) -> Result<GraphPlan, ZettelError> {
+    let conn = state.db.lock()?;
+    let plan = graph_plan::create_plan(&conn, goal).map_err(|e| ZettelError::System(e.to_string()))?;
+    graph_plan::save_plan(&conn, &plan).map_err(|e| ZettelError::System(e.to_string()))?;
+    Ok(plan)
+}
+
+/// 取回一份计划 / load a plan the user is still reviewing.
+#[tauri::command]
+pub fn knowledge_graph_get_plan(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<Option<GraphPlan>, ZettelError> {
+    let conn = state.db.lock()?;
+    graph_plan::load_plan(&conn, &plan_id).map_err(|e| ZettelError::System(e.to_string()))
+}
+
+/// 生成预览批次 / stage the selected proposals. Writes nothing to the graph.
+///
+/// `selected_ids` 为空表示"整份计划"。返回的 `state` 只会是 `awaiting_approval`、
+/// `conflict` 或 `rejected`——三者都意味着还没有任何东西落库。
+#[tauri::command]
+pub fn knowledge_graph_stage_plan(
+    state: State<'_, AppState>,
+    plan_id: String,
+    selected_ids: Vec<String>,
+    vault_path: String,
+    vault_paths: Option<Vec<String>>,
+) -> Result<PlanOutcome, ZettelError> {
+    use crate::knowledge::write_guard::WriteContext;
+
+    let conn = state.db.lock()?;
+    let Some(mut plan) = graph_plan::load_plan(&conn, &plan_id)
+        .map_err(|e| ZettelError::System(e.to_string()))?
+    else {
+        return Err(ZettelError::System(format!("找不到计划 {plan_id}")));
+    };
+
+    let vaults = vault_paths.unwrap_or_else(|| vec![vault_path.clone()]);
+    let ctx = WriteContext {
+        // 计划是用户在图谱页发起的，但执行者仍是 Agent 的提议——审计里要能分清。
+        actor: "agent".to_string(),
+        session_id: None,
+        run_id: Some(plan_id.clone()),
+        primary_vault: vault_path,
+        vaults,
+    };
+
+    let outcome = graph_plan::stage_plan(&conn, &ctx, &mut plan, &selected_ids)
+        .map_err(|e| ZettelError::System(e.to_string()))?;
+    let _ = graph_plan::record_plan_audit(&conn, "agent", "graph_plan_staged", &outcome);
+    Ok(outcome)
+}
+
+/// 提交 / commit. Success comes from the store, not from the model.
+#[tauri::command]
+pub fn knowledge_graph_commit_plan(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<PlanOutcome, ZettelError> {
+    let conn = state.db.lock()?;
+    let Some(mut plan) = graph_plan::load_plan(&conn, &plan_id)
+        .map_err(|e| ZettelError::System(e.to_string()))?
+    else {
+        return Err(ZettelError::System(format!("找不到计划 {plan_id}")));
+    };
+    let outcome = graph_plan::commit_plan(&conn, &mut plan)
+        .map_err(|e| ZettelError::System(e.to_string()))?;
+    let _ = graph_plan::record_plan_audit(&conn, "agent", "graph_plan_committed", &outcome);
+    Ok(outcome)
+}
+
+/// 撤销 / roll back exactly this plan's batch, nothing else.
+#[tauri::command]
+pub fn knowledge_graph_rollback_plan(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<PlanOutcome, ZettelError> {
+    let conn = state.db.lock()?;
+    let Some(mut plan) = graph_plan::load_plan(&conn, &plan_id)
+        .map_err(|e| ZettelError::System(e.to_string()))?
+    else {
+        return Err(ZettelError::System(format!("找不到计划 {plan_id}")));
+    };
+    let outcome = graph_plan::rollback_plan(&conn, &mut plan)
+        .map_err(|e| ZettelError::System(e.to_string()))?;
+    let _ = graph_plan::record_plan_audit(&conn, "user", "graph_plan_rolled_back", &outcome);
+    Ok(outcome)
+}
+
+/// 验证 / re-query the store and report what is actually there.
+#[tauri::command]
+pub fn knowledge_graph_verify_plan(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<PlanVerification, ZettelError> {
+    let conn = state.db.lock()?;
+    let Some(plan) = graph_plan::load_plan(&conn, &plan_id)
+        .map_err(|e| ZettelError::System(e.to_string()))?
+    else {
+        return Err(ZettelError::System(format!("找不到计划 {plan_id}")));
+    };
+    graph_plan::verify_plan(&conn, &plan).map_err(|e| ZettelError::System(e.to_string()))
+}
+
+/// 一条关系的详情与证据 / the relation drawer payload.
+#[tauri::command]
+pub fn knowledge_graph_relation_evidence(
+    state: State<'_, AppState>,
+    source_path: String,
+    target_path: String,
+    relation_type: String,
+) -> Result<RelationEvidenceView, ZettelError> {
+    let conn = state.db.lock()?;
+    graph_plan::relation_evidence(&conn, &source_path, &target_path, &relation_type)
+        .map_err(|e| ZettelError::System(e.to_string()))
+}
+
+/// 用户对一条关系下判断 / accept or reject one edge, and remember it.
+#[tauri::command]
+pub fn knowledge_graph_decide_relation(
+    state: State<'_, AppState>,
+    source_path: String,
+    target_path: String,
+    relation_type: String,
+    accept: bool,
+    reason: Option<String>,
+) -> Result<String, ZettelError> {
+    use crate::knowledge::relations;
+
+    let conn = state.db.lock()?;
+    let outcome = if accept {
+        relations::confirm_relation(&conn, &source_path, &target_path, &relation_type)
+            .map(|ok| if ok { "confirmed" } else { "missing" })
+            .map_err(|e| ZettelError::System(e.to_string()))?
+            .to_string()
+    } else {
+        relations::reject_relation(
+            &conn,
+            &source_path,
+            &target_path,
+            &relation_type,
+            reason.as_deref(),
+        )
+        .map_err(|e| ZettelError::System(e.to_string()))?
+        .as_str()
+        .to_string()
+    };
+    crate::db::search::invalidate_graph_cache(&conn);
+    Ok(outcome)
+}
+
+/// MOC 草稿 / draft a MOC. Creates no file.
+#[tauri::command]
+pub fn knowledge_graph_create_moc_draft(
+    state: State<'_, AppState>,
+    title: String,
+    member_paths: Vec<String>,
+) -> Result<MocDraft, ZettelError> {
+    let conn = state.db.lock()?;
+    graph_plan::create_moc_draft(&conn, &title, &member_paths)
+        .map_err(|e| ZettelError::System(e.to_string()))
 }
 

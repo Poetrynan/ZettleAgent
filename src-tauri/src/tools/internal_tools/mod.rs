@@ -834,7 +834,8 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                         "source_path": { "type": "string", "description": "File path of the source note" },
                         "target_path": { "type": "string", "description": "File path of the target note" },
                         "relation_type": { "type": "string", "description": "Type of relation: supports, contradicts, related, references, extends, example_of" },
-                        "reason": { "type": "string", "description": "Optional reason/explanation for this relation" }
+                        "reason": { "type": "string", "description": "Optional reason/explanation for this relation" },
+                        "confidence": { "type": "number", "description": "How sure you are, 0-1. Defaults to 0.6. An inferred relation must not claim the certainty of a user-authored link." }
                     },
                     "required": ["source_path", "target_path", "relation_type"]
                 }),
@@ -845,14 +846,16 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
             tool_type: "function".to_string(),
             function: ToolFunction {
                 name: "delete_relation".to_string(),
-                description: "Remove a relation between two notes in the knowledge graph.".to_string(),
+                description: "Remove one relation of a given type between two notes. The relation type is required — removing every relation between two notes at once is not allowed, because it would also delete the user's own links.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "source_path": { "type": "string", "description": "File path of the source note" },
-                        "target_path": { "type": "string", "description": "File path of the target note" }
+                        "target_path": { "type": "string", "description": "File path of the target note" },
+                        "relation_type": { "type": "string", "description": "Which relation to remove. Required." },
+                        "reason": { "type": "string", "description": "Why this relation should go" }
                     },
-                    "required": ["source_path", "target_path"]
+                    "required": ["source_path", "target_path", "relation_type"]
                 }),
             },
         },
@@ -1494,8 +1497,10 @@ pub async fn try_execute(
 
         // ── New Tools ──────────────────────────────────────────────
         // Knowledge Graph Write
-        "add_relation" => Some(graph_ops::execute_add_relation(arguments, db)),
-        "delete_relation" => Some(graph_ops::execute_delete_relation(arguments, db)),
+        // 三个写关系的工具都要 vault 上下文：参数里的路径必须先解析成索引用的那个拼法，
+        // 否则写进 `note_relations` 的是一个每个读图谱的地方都看得见的幽灵节点。
+        "add_relation" => Some(graph_ops::execute_add_relation(arguments, db, vault_path, all_vault_paths)),
+        "delete_relation" => Some(graph_ops::execute_delete_relation(arguments, db, vault_path, all_vault_paths)),
         "get_relations_by_type" => Some(graph_ops::execute_get_relations_by_type(arguments, db)),
 
         // Database
@@ -1526,7 +1531,7 @@ pub async fn try_execute(
         "explain_relationship" => Some(graph_ops::execute_explain_relationship(arguments, db, llm_config, vault_path, all_vault_paths).await),
         "extract_facts" => Some(graph_ops::execute_extract_facts(arguments, db, llm_config, vault_path, all_vault_paths).await),
         "query_temporal" => Some(graph_ops::execute_query_temporal(arguments, db)),
-        "batch_link_notes" => Some(graph_ops::execute_batch_link_notes(arguments, db)),
+        "batch_link_notes" => Some(graph_ops::execute_batch_link_notes(arguments, db, vault_path, all_vault_paths)),
         "compare_notes" => Some(note_ops::execute_compare_notes(arguments, llm_config, vault_path, all_vault_paths).await),
         "ocr_image" => Some(note_ops::execute_ocr_image(arguments, vault_path, all_vault_paths, Some(llm_config)).await),
         "group_canvas_nodes" => Some(canvas_ops::execute_group_canvas_nodes(arguments, vault_path, all_vault_paths)),

@@ -28,7 +28,7 @@
 //! 能查出来，不会静静消失。
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::object_store::{self, ObjectError, ObjectResult};
 use super::types::*;
@@ -96,6 +96,62 @@ pub struct ObservedRead {
     pub checksum: Option<String>,
     pub read_at_ms: i64,
 }
+
+/// 一条关系操作的完整载荷 / everything one relation operation needs.
+///
+/// 存在 `changeset_ops.patch` 里，而不是塞进 `new_content`。两个理由：
+///
+/// - `record_commit` 看见 `new_content` 就会给对象追加一个新版本并把这段字符串当成
+///   笔记正文的指纹。关系不是正文，那样记出来的是假指纹。
+/// - 关系操作的目标是**一对**对象，`legacy_path` 只装得下一个。源放 `legacy_path`
+///   （scope 检查要用），另一端和关系语义放这里。
+///
+/// `old_*` 是删除时的原值：撤销一次删除要能把置信度和理由一起还原，否则"撤销"会
+/// 悄悄把一条用户确认过的边降级成默认值。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationOp {
+    pub source_path: String,
+    pub target_path: String,
+    pub relation_type: String,
+    pub confidence: f64,
+    pub reason: Option<String>,
+    /// 谁提出的：`user_link` / `agent_proposed` / `semantic` / `external`。
+    pub origin: String,
+    pub old_confidence: Option<f64>,
+    pub old_reason: Option<String>,
+    /// 提交时源/目标笔记应该是哪一版。只用于审计与 verify，不参与冲突判定——
+    /// 关系行的冲突在关系本身（已存在/不存在/被用户拒过），而不是在正文版本上。
+    pub expected_source_version: Option<i64>,
+    pub expected_target_version: Option<i64>,
+}
+
+impl RelationOp {
+    /// 人话一行 / one line a human can read in the review UI.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} --[{}]--> {} (confidence {:.2})",
+            self.source_path, self.relation_type, self.target_path, self.confidence
+        )
+    }
+}
+
+/// 这个 op 改的是关系而不是文件吗 / does this op touch an edge rather than a file?
+pub fn is_relation_kind(kind: ChangeOpKind) -> bool {
+    matches!(
+        kind,
+        ChangeOpKind::AddRelation | ChangeOpKind::DeleteRelation
+    )
+}
+
+/// 取出关系载荷 / the relation payload this op carries, if any.
+pub fn relation_payload(op: &ChangeSetOp) -> Option<RelationOp> {
+    if !is_relation_kind(op.op_kind) {
+        return None;
+    }
+    serde_json::from_str(op.patch.as_deref()?).ok()
+}
+
 
 impl NewOp {
     pub fn new(op_kind: ChangeOpKind, tool_name: impl Into<String>) -> Self {
@@ -306,6 +362,26 @@ pub fn validate_op(scopes: &[String], op: &NewOp) -> Option<Refusal> {
         }
     }
 
+    // 关系操作的两端都要在 scope 内，而且载荷必须解得开。
+    //
+    // 只检查 `legacy_path`（源）是不够的：一条边把库内的笔记连到库外的路径，写进
+    // `note_relations` 之后每个读关系表的地方都会看到一个库外目标。载荷解不开则说明
+    // 这个 op 根本没法预览也没法撤销，拒绝比"先记下来再说"安全。
+    if is_relation_kind(op.op_kind) {
+        let Some(raw) = op.patch.as_deref() else {
+            return Some(Refusal::NoResolvableOperation(op.tool_name.clone()));
+        };
+        let Ok(payload) = serde_json::from_str::<RelationOp>(raw) else {
+            return Some(Refusal::NoResolvableOperation(op.tool_name.clone()));
+        };
+        if payload.relation_type.trim().is_empty() {
+            return Some(Refusal::NoResolvableOperation(op.tool_name.clone()));
+        }
+        if !path_in_scope(&payload.target_path, scopes) {
+            return Some(Refusal::OutOfScope(payload.target_path.clone()));
+        }
+    }
+
     // create/edit 必须带内容；patch 带 patch 就够。
     let needs_content = matches!(
         op.op_kind,
@@ -345,6 +421,13 @@ fn path_in_scope(path: &str, scopes: &[String]) -> bool {
 /// 校验和住在 `object_versions` 而不是 `knowledge_objects`：对象行只记"当前是第几版"，
 /// 内容指纹跟着版本走，否则回滚到旧版时校验和就对不上了。
 fn baseline_of(conn: &Connection, op: &NewOp) -> ObjectResult<(Option<i64>, Option<String>)> {
+    // 关系操作没有"正文基线"。硬给它一个源笔记的版本号，用户在 Agent 读完笔记之后
+    // 改一个错别字就会让一条完全无关的连线报冲突——那是假冲突，会训练用户无脑点通过。
+    // 源/目标的版本号记在 `RelationOp::expected_*_version` 里供审计和 verify 使用。
+    if is_relation_kind(op.op_kind) {
+        return Ok((None, None));
+    }
+
     let object = match (&op.target_object_id, &op.legacy_path) {
         (Some(id), _) => object_store::get_object(conn, id)?,
         (None, Some(path)) => object_store::find_by_source(conn, &SourceRef::file(path))?,
@@ -390,6 +473,8 @@ pub struct OpPreview {
     /// 措辞留在 Rust 一份：`kind` 是给程序看的，UI 直接渲染 `kind` 就等于把内部枚举
     /// 名字甩给用户。两边各写一套文案，迟早有一套是错的。
     pub conflict_message: Option<String>,
+    /// 关系操作的两端与语义。见 [`OpDetail::relation`]。
+    pub relation: Option<RelationOp>,
 }
 
 /// 几种不同的冲突 / the distinct kinds of conflict.
@@ -418,6 +503,34 @@ pub enum Conflict {
     Checksum { expected: String, actual: String },
     /// 目标已经不存在了（被删/被改名）。
     TargetGone { target: String },
+    /// 要新增的关系已经在库里了。
+    ///
+    /// 不是错误，但也**不是成功**：以前 `INSERT OR IGNORE` 把这件事咽了下去，于是
+    /// "写了 5 条关系"里可能有 5 条都什么也没做。分成一种冲突，UI 才能如实说
+    /// "已存在，未新增"。
+    #[serde(rename_all = "camelCase")]
+    RelationExists {
+        source: String,
+        target: String,
+        relation_type: String,
+    },
+    /// 要删除的关系不在库里。
+    #[serde(rename_all = "camelCase")]
+    RelationMissing {
+        source: String,
+        target: String,
+        relation_type: String,
+    },
+    /// 用户明确拒绝过这条关系。
+    ///
+    /// 拦在提交之前而不是提交之后：下一次语义刷新或 Auto-Fix 用同样的理由再建一遍，
+    /// 就是"AI 建议反复骚扰"本身。
+    #[serde(rename_all = "camelCase")]
+    RelationRejectedByUser {
+        source: String,
+        target: String,
+        relation_type: String,
+    },
 }
 
 impl Conflict {
@@ -436,6 +549,24 @@ impl Conflict {
             ),
             Self::Checksum { .. } => "磁盘上的内容与生成这份改动时读到的不一致".to_string(),
             Self::TargetGone { target } => format!("目标 `{target}` 已不存在"),
+            Self::RelationExists {
+                source,
+                target,
+                relation_type,
+            } => format!("`{source}` → `{target}` 的 {relation_type} 关系已经存在，不会重复新增"),
+            Self::RelationMissing {
+                source,
+                target,
+                relation_type,
+            } => format!("`{source}` → `{target}` 没有 {relation_type} 关系可删"),
+            Self::RelationRejectedByUser {
+                source,
+                target,
+                relation_type,
+            } => format!(
+                "你之前拒绝过 `{source}` → `{target}` 的 {relation_type} 关系，\
+                 除非重新允许，不会再自动建立"
+            ),
         }
     }
 }
@@ -463,6 +594,22 @@ pub fn dry_run(conn: &Connection, changeset_id: &str) -> ObjectResult<DryRunRepo
     for op in ops {
         let conflict = detect_conflict(conn, &op)?;
         let before = current_content(conn, &op)?;
+        // 关系载荷只解析一次，摘要和结构化字段都从它来。解析两遍就有两份"这条边是什么"。
+        let relation = relation_payload(&op);
+        // 关系操作的 "after" 从载荷算，不从 `new_content` 取：删除的 after 是"没有这条
+        // 边"（`None`），新增的 after 是这条边将长成什么样。
+        let after = match (is_relation_kind(op.op_kind), relation.as_ref()) {
+            (true, Some(payload)) if op.op_kind == ChangeOpKind::AddRelation => {
+                let mut text = payload.summary();
+                if let Some(reason) = &payload.reason {
+                    text.push('\n');
+                    text.push_str(reason);
+                }
+                Some(text)
+            }
+            (true, _) => None,
+            (false, _) => op.new_content.clone(),
+        };
 
         if let Some(path) = &op.legacy_path {
             if !touched.contains(path) {
@@ -477,12 +624,13 @@ pub fn dry_run(conn: &Connection, changeset_id: &str) -> ObjectResult<DryRunRepo
             target_object_id: op.target_object_id,
             path: op.legacy_path,
             before,
-            after: op.new_content,
+            after,
             reason: op.reason,
             evidence_ids: op.evidence_ids,
             affected_objects: op.affected_objects,
             conflict_message: conflict.as_ref().map(|c| c.message()),
             conflict,
+            relation,
         });
     }
 
@@ -504,6 +652,10 @@ pub fn dry_run(conn: &Connection, changeset_id: &str) -> ObjectResult<DryRunRepo
 
 /// 版本与校验和检查 / the optimistic-concurrency check.
 fn detect_conflict(conn: &Connection, op: &ChangeSetOp) -> ObjectResult<Option<Conflict>> {
+    if is_relation_kind(op.op_kind) {
+        return detect_relation_conflict(conn, op);
+    }
+
     // 没有基线的操作（backfill 未覆盖，或者是新建）无从比较。这不是冲突：
     // 报一个假冲突会让一次完全正常的写入卡住。
     let Some(expected_version) = op.old_version else {
@@ -550,11 +702,179 @@ fn detect_conflict(conn: &Connection, op: &ChangeSetOp) -> ObjectResult<Option<C
     Ok(None)
 }
 
+/// 关系操作的冲突 / the conflicts an edge operation can hit.
+///
+/// 关系没有版本号，所以这里问的是四件事实，而不是比较版本：两端还在不在、这条边现在
+/// 在不在、以及用户是不是已经拒绝过它。前两件以前被 `INSERT OR IGNORE` /
+/// `DELETE ... WHERE` 的返回值咽掉了，第三件以前根本没人记。
+fn detect_relation_conflict(
+    conn: &Connection,
+    op: &ChangeSetOp,
+) -> ObjectResult<Option<Conflict>> {
+    let Some(payload) = relation_payload(op) else {
+        return Ok(None);
+    };
+
+    let file_exists = |path: &str| -> ObjectResult<bool> {
+        let hit: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM files WHERE path = ?1 COLLATE NOCASE",
+                params![path],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(hit.is_some())
+    };
+
+    for end in [&payload.source_path, &payload.target_path] {
+        if !file_exists(end)? {
+            return Ok(Some(Conflict::TargetGone {
+                target: end.clone(),
+            }));
+        }
+    }
+
+    let existing = relation_exists(
+        conn,
+        &payload.source_path,
+        &payload.target_path,
+        &payload.relation_type,
+    )?;
+
+    match op.op_kind {
+        ChangeOpKind::AddRelation => {
+            if existing {
+                return Ok(Some(Conflict::RelationExists {
+                    source: payload.source_path,
+                    target: payload.target_path,
+                    relation_type: payload.relation_type,
+                }));
+            }
+            if relation_rejected(
+                conn,
+                &payload.source_path,
+                &payload.target_path,
+                &payload.relation_type,
+            )? {
+                return Ok(Some(Conflict::RelationRejectedByUser {
+                    source: payload.source_path,
+                    target: payload.target_path,
+                    relation_type: payload.relation_type,
+                }));
+            }
+        }
+        ChangeOpKind::DeleteRelation => {
+            if !existing {
+                return Ok(Some(Conflict::RelationMissing {
+                    source: payload.source_path,
+                    target: payload.target_path,
+                    relation_type: payload.relation_type,
+                }));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(None)
+}
+
+/// 这条边现在在库里吗 / is this exact edge in the table right now?
+pub fn relation_exists(
+    conn: &Connection,
+    source: &str,
+    target: &str,
+    relation_type: &str,
+) -> ObjectResult<bool> {
+    let hit: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM note_relations
+             WHERE source_path = ?1 AND target_path = ?2 AND relation_type = ?3",
+            params![source, target, relation_type],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(hit.is_some())
+}
+
+/// 用户拒绝过这条边吗 / did the user already say no to this edge?
+pub fn relation_rejected(
+    conn: &Connection,
+    source: &str,
+    target: &str,
+    relation_type: &str,
+) -> ObjectResult<bool> {
+    let decision: Option<String> = conn
+        .query_row(
+            "SELECT decision FROM relation_decisions
+             WHERE source_path = ?1 AND target_path = ?2 AND relation_type = ?3",
+            params![source, target, relation_type],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(decision.as_deref() == Some("rejected"))
+}
+
+/// 记下用户对一条边的判断 / remember what the user decided about an edge.
+///
+/// `decision` 只有 `accepted` / `rejected` 两种。写这张表是为了让下一次语义刷新和
+/// Auto-Fix 能闭嘴，所以即使关系行本身被删了，判断也要留下。
+pub fn record_relation_decision(
+    conn: &Connection,
+    source: &str,
+    target: &str,
+    relation_type: &str,
+    decision: &str,
+    reason: Option<&str>,
+) -> ObjectResult<()> {
+    conn.execute(
+        "INSERT INTO relation_decisions
+            (source_path, target_path, relation_type, decision, reason, decided_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(source_path, target_path, relation_type) DO UPDATE SET
+            decision = ?4, reason = ?5, decided_at_ms = ?6",
+        params![source, target, relation_type, decision, reason, now_ms()],
+    )?;
+    Ok(())
+}
+
 /// 取目标当前内容用于 diff / read the current content for the diff.
 ///
 /// `document` 对象不存内容副本（只存校验和），所以内容要从 `chunks` 拼回来——
 /// 那是这个进程能看到的、最接近磁盘的东西。
 fn current_content(conn: &Connection, op: &ChangeSetOp) -> ObjectResult<Option<String>> {
+    // 关系操作的 "before" 是这条边现在的样子，不是源笔记的全文。拼全文会让审查界面
+    // 显示"整篇笔记将被替换"，而实际上只多了一行边。
+    if is_relation_kind(op.op_kind) {
+        let Some(payload) = relation_payload(op) else {
+            return Ok(None);
+        };
+        let existing: Option<(f64, Option<String>, String)> = conn
+            .query_row(
+                "SELECT confidence, reason, COALESCE(origin, 'user_link') FROM note_relations
+                 WHERE source_path = ?1 AND target_path = ?2 AND relation_type = ?3",
+                params![
+                    payload.source_path,
+                    payload.target_path,
+                    payload.relation_type
+                ],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        return Ok(existing.map(|(confidence, reason, origin)| {
+            format!(
+                "{} --[{}]--> {} (confidence {:.2}, origin {}){}",
+                payload.source_path,
+                payload.relation_type,
+                payload.target_path,
+                confidence,
+                origin,
+                reason
+                    .map(|r| format!("\n{r}"))
+                    .unwrap_or_default()
+            )
+        }));
+    }
+
     let Some(path) = &op.legacy_path else {
         return Ok(None);
     };
@@ -793,7 +1113,14 @@ pub struct OpDetail {
     /// 只对还没落地的批次算。已落地的批次谈"冲突"没有意义——它已经写完了。
     pub conflict: Option<Conflict>,
     pub conflict_message: Option<String>,
+    /// 关系操作的两端与语义 / the two endpoints of a relation operation.
+    ///
+    /// 只有 `AddRelation` / `DeleteRelation` 会有。给出来是因为一条边不能当文本 diff
+    /// 渲染：`before` 和 `after` 那两行字符串是给人读的摘要，UI 想显示"从哪指向哪、
+    /// 什么关系、几分置信度"就只能去解析那行字——解析摘要迟早解析错。
+    pub relation: Option<RelationOp>,
 }
+
 
 /// 读一个批次 / load one change set and its operations.
 pub fn detail(conn: &Connection, changeset_id: &str) -> ObjectResult<Option<ChangeSetDetail>> {
@@ -830,6 +1157,8 @@ pub fn detail(conn: &Connection, changeset_id: &str) -> ObjectResult<Option<Chan
         } else {
             detect_conflict(conn, &op)?
         };
+        let relation = relation_payload(&op);
+
 
         ops.push(OpDetail {
             op_id: op.id,
@@ -848,12 +1177,19 @@ pub fn detail(conn: &Connection, changeset_id: &str) -> ObjectResult<Option<Chan
             target_object_id: op.target_object_id,
             before,
             before_source,
-            after: op.new_content,
+            // 关系操作没有 `new_content`（一条边不是一篇正文）。给出摘要而不是 `None`，
+            // 否则界面会以为"内容没记下来"，把一次正常的加边显示成一次可疑的写入。
+            after: match (&relation, op.op_kind) {
+                (Some(payload), ChangeOpKind::AddRelation) => Some(payload.summary()),
+                (Some(_), ChangeOpKind::DeleteRelation) => None,
+                _ => op.new_content,
+            },
             reason: op.reason,
             evidence_ids: op.evidence_ids,
             affected_objects: op.affected_objects,
             conflict_message: conflict.as_ref().map(|c| c.message()),
             conflict,
+            relation,
         });
     }
 

@@ -27,12 +27,15 @@
 //! - [`commitments`]：承诺与 open loop 的状态机，以及主动提醒的四道闸门。
 
 pub mod backfill;
+pub mod canvas_plan;
 pub mod changeset;
 pub mod commitments;
 pub mod evidence;
+pub mod graph_plan;
 pub mod memory;
 pub mod migration;
 pub mod object_store;
+pub mod relations;
 pub mod retrieval;
 pub mod types;
 pub mod write_guard;
