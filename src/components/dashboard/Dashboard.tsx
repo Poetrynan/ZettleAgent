@@ -263,7 +263,8 @@ export function Dashboard() {
 
   return (
     <div className="panel">
-      <div className="panel-content" style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 40px' }}>
+      <div className="panel-content" style={{ padding: 0 }}>
+        <div style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 40px' }}>
         {/* ── Document Desk Header (Swiss Editorial) ────────────────── */}
         <section className="dash-band dash-band--now animate-enter" aria-label={state.lang === 'zh' ? '当前状态' : 'Current state'}>
           <div className="doc-desk-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
@@ -663,6 +664,7 @@ export function Dashboard() {
           {/* Knowledge Gap Analysis */}
           <KnowledgeGapAnalysis />
         </section>
+        </div>
       </div>
 
       {/* Canvas Export Modal */}
