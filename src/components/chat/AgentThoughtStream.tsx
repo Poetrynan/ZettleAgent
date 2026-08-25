@@ -378,24 +378,31 @@ function TraceThoughtItem({
             onClick={isLive ? undefined : onToggle}
             onKeyDown={isLive ? undefined : handleKey}
           >
-            <span className="trace-thought-label">
-              {isLive ? (isZh ? '思考中' : 'Thinking') : (isZh ? '思考' : 'Thought')}
-            </span>
+            <div className="trace-thought-full-header">
+              <span className="trace-thought-tag active">
+                {isLive ? (isZh ? '正在思考' : 'Thinking…') : (isZh ? '思考过程' : 'Thought')}
+              </span>
+              {!isLive && (
+                <span className="trace-thought-collapse-hint trace-chevron open">
+                  <IconChevronDown size={11} />
+                </span>
+              )}
+            </div>
             <div className="trace-thought-text">
               <MarkdownRenderer content={displayContent || content} className="chat-markdown" />
             </div>
           </div>
         ) : (
           <div
-            className="trace-row"
+            className="trace-row trace-thought-row"
             role="button"
             tabIndex={0}
             aria-expanded={false}
             onClick={onToggle}
             onKeyDown={handleKey}
           >
-            <span className="trace-thought-label">{isZh ? '思考' : 'Thought'}</span>
-            <span className="trace-thought-preview trace-thought-preview-clamp">{preview}</span>
+            <span className="trace-thought-tag">{isZh ? '思考' : 'Thought'}</span>
+            <span className="trace-thought-preview">{preview}</span>
             <span className="trace-row-meta">
               <span className="trace-chevron" aria-hidden="true"><IconChevronDown size={12} /></span>
             </span>
@@ -417,9 +424,11 @@ function PlanChecklist({ steps, isStreaming }: { steps: PlanStep[]; isStreaming:
   return (
     <div className={`agent-plan-checklist ${isStreaming ? 'streaming' : 'finished'}`}>
       <div className="agent-plan-header">
-        <PlanIcon />
-        <span className="agent-plan-title">{isZh ? '计划' : 'Plan'}</span>
-        <span className="agent-plan-progress">{doneCount}/{steps.length}</span>
+        <div className="agent-plan-header-title">
+          <PlanIcon size={12} />
+          <span className="agent-plan-title">{isZh ? '执行计划' : 'Execution Plan'}</span>
+        </div>
+        <span className="agent-plan-progress">{doneCount} / {steps.length}</span>
       </div>
       <ul className="agent-plan-list" role="list">
         {steps.map((step, idx) => (
@@ -429,20 +438,20 @@ function PlanChecklist({ steps, isStreaming }: { steps: PlanStep[]; isStreaming:
           >
             <span className="agent-plan-step-icon" aria-hidden="true">
               {step.status === 'done' ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--success, #16a34a)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="done">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--success, #10B981)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="done">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
               ) : step.status === 'in_progress' && isStreaming ? (
-                <svg className="trace-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-label="in progress">
+                <svg className="trace-spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent, #3B82F6)" strokeWidth="2.5" strokeLinecap="round" aria-label="in progress">
                   <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                 </svg>
               ) : step.status === 'in_progress' ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="interrupted" opacity={0.45}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="interrupted" opacity={0.45}>
                   <circle cx="12" cy="12" r="9"/>
                   <line x1="8" y1="12" x2="16" y2="12"/>
                 </svg>
               ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="pending" opacity={0.45}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="pending" opacity={0.35}>
                   <circle cx="12" cy="12" r="9"/>
                 </svg>
               )}
@@ -453,7 +462,8 @@ function PlanChecklist({ steps, isStreaming }: { steps: PlanStep[]; isStreaming:
       </ul>
       {isStreaming && inProgress && (
         <div className="agent-plan-current" aria-live="polite">
-          {isZh ? '当前：' : 'Now: '}{inProgress.text}
+          <span className="agent-plan-current-label">{isZh ? '当前执行：' : 'Now: '}</span>
+          <span className="agent-plan-current-text">{inProgress.text}</span>
         </div>
       )}
     </div>
@@ -869,41 +879,39 @@ export function TypingIndicator() {
 }
 
 // ── RAG Progress Indicator ─────────────────────────────────────────
-// Only stages that represent a real wait get their own row. Building the
-// prompt from retrieved chunks is sub-millisecond in-memory work, and the
-// embedding call — when it happens — is done client-side before the backend
-// command is invoked, so neither is exposed as a visible checklist step.
-// Coarser, honest stages > fine-grained theater.
 
 const RAG_STEPS = [
-  { key: 'searching', label: 'Searching…' },
-  { key: 'generating', label: 'Generating…' },
+  { key: 'searching', labelZh: '检索知识库…', labelEn: 'Searching notes…' },
+  { key: 'generating', labelZh: '生成回答…', labelEn: 'Generating answer…' },
 ];
 
 export function RagProgressIndicator({ stage }: { stage: string; searchMode?: string }) {
+  const isZh = isZhLang();
   const currentIdx = RAG_STEPS.findIndex(s => s.key === stage);
 
   return (
     <div className="rag-progress">
-      {RAG_STEPS.map((step, i) => {
-        const isDone = i < currentIdx;
-        const isActive = i === currentIdx;
-        return (
-          <div
-            key={step.key}
-            className={`rag-progress-step ${isDone ? 'done' : ''} ${isActive ? 'active' : ''}`}
-          >
-            <span className="rag-progress-icon" aria-hidden="true">
-              {isDone
-                ? <StatusIndicator status="done" size={11} />
-                : isActive
-                  ? <StatusIndicator status="running" size={11} />
-                  : <StatusIndicator status="pending" size={11} />}
-            </span>
-            <span className="rag-progress-label">{step.label}</span>
-          </div>
-        );
-      })}
+      <div className="rag-progress-track">
+        {RAG_STEPS.map((step, i) => {
+          const isDone = i < currentIdx;
+          const isActive = i === currentIdx;
+          return (
+            <div
+              key={step.key}
+              className={`rag-progress-step ${isDone ? 'done' : ''} ${isActive ? 'active' : ''}`}
+            >
+              <span className="rag-progress-icon" aria-hidden="true">
+                {isDone
+                  ? <StatusIndicator status="done" size={12} />
+                  : isActive
+                    ? <StatusIndicator status="running" size={12} />
+                    : <StatusIndicator status="pending" size={12} />}
+              </span>
+              <span className="rag-progress-label">{isZh ? step.labelZh : step.labelEn}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

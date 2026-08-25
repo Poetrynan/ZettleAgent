@@ -59,12 +59,11 @@ export function ModelDownloadModal() {
         position: 'fixed',
         inset: 0,
         background: 'rgba(0, 0, 0, 0.45)',
-        backdropFilter: 'blur(4px)',
         zIndex: 9999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        animation: 'fadeIn 0.2s ease-out',
+        animation: 'fadeIn 0.15s ease-out',
       }}
       role="dialog"
       aria-modal="true"
@@ -73,32 +72,31 @@ export function ModelDownloadModal() {
       <div
         className="model-download-modal"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--bg-elevated, #FFFFFF)',
           border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-xl, 16px)',
-          padding: 'var(--space-8) var(--space-10)',
-          minWidth: 420,
-          maxWidth: 480,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          borderRadius: 'var(--radius-sm, 2px)',
+          padding: 'var(--space-6)',
+          minWidth: 400,
+          maxWidth: 460,
+          boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 'var(--space-5)',
+          gap: 'var(--space-4)',
         }}
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          {/* Animated download icon */}
           <div style={{
-            width: 40, height: 40,
-            borderRadius: 'var(--radius-full)',
-            background: 'color-mix(in srgb, var(--accent-primary) 10%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--accent-primary) 20%, transparent)',
+            width: 36, height: 36,
+            borderRadius: 'var(--radius-sm, 2px)',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            color: 'var(--accent, #3B82F6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke="var(--accent-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ animation: 'dash-bounce 1.2s ease-in-out infinite' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -106,16 +104,16 @@ export function ModelDownloadModal() {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
-              fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)',
+              fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)',
               lineHeight: 1.3,
             }}>
               {isZh ? '下载嵌入模型' : 'Downloading Embedding Model'}
             </div>
             <div style={{
-              fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 2,
+              fontSize: '11px', color: 'var(--text-secondary)', marginTop: 2,
             }}>
               {isZh
-                ? '首次使用需要下载模型，完成后即可离线使用'
+                ? '首次使用需下载模型（约 131MB），完成后永久离线可用'
                 : 'First-time download required. Will work offline afterwards.'}
             </div>
           </div>
@@ -123,12 +121,12 @@ export function ModelDownloadModal() {
 
         {/* File name */}
         <div style={{
-          fontSize: '11px',
+          fontSize: '10.5px',
           fontFamily: 'var(--font-mono, monospace)',
-          color: 'var(--text-tertiary)',
-          background: 'var(--bg-primary)',
-          padding: '6px 10px',
-          borderRadius: 'var(--radius-sm, 6px)',
+          color: 'var(--text-secondary)',
+          background: 'var(--bg-secondary)',
+          padding: '5px 8px',
+          borderRadius: 'var(--radius-sm, 2px)',
           border: '1px solid var(--border)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -149,49 +147,39 @@ export function ModelDownloadModal() {
               {loadedMB} / {totalMB} MB
             </span>
             <span style={{
-              fontSize: '18px', fontWeight: 700,
+              fontSize: '16px', fontWeight: 700,
               fontFamily: 'var(--font-mono, monospace)',
-              color: 'var(--accent-primary)',
+              color: 'var(--accent, #3B82F6)',
             }}>
               {pct}%
             </span>
           </div>
           <div style={{
-            height: 8,
-            background: 'var(--bg-tertiary)',
-            borderRadius: 'var(--radius-full)',
+            height: 6,
+            background: 'var(--bg-secondary)',
+            borderRadius: 'var(--radius-sm, 2px)',
+            border: '1px solid var(--border)',
             overflow: 'hidden',
             position: 'relative',
           }}>
             <div style={{
               width: `${pct}%`,
               height: '100%',
-              borderRadius: 'var(--radius-full)',
-              background: 'linear-gradient(90deg, var(--accent-primary), color-mix(in srgb, var(--accent-primary) 60%, transparent))',
-              boxShadow: '0 0 12px color-mix(in srgb, var(--accent-primary) 40%, transparent)',
-              transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-              position: 'relative',
-              overflow: 'hidden',
-            }}>
-              {/* Shimmer */}
-              <div style={{
-                position: 'absolute', inset: 0,
-                backgroundImage: `linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--bg-primary) 30%, transparent) 50%, transparent 100%)`,
-                backgroundSize: '200% 100%',
-                animation: 'dash-shimmer 1.5s ease-in-out infinite',
-              }} />
-            </div>
+              borderRadius: 'var(--radius-sm, 2px)',
+              background: 'var(--accent, #3B82F6)',
+              transition: 'width 0.2s ease',
+            }} />
           </div>
         </div>
 
         {/* Footer hint */}
         <div style={{
-          fontSize: '11px', color: 'var(--text-quaternary, var(--text-tertiary))',
+          fontSize: '11px', color: 'var(--text-tertiary)',
           textAlign: 'center', lineHeight: 1.5,
         }}>
           {isZh
-            ? '模型约 131 MB，下载后自动缓存，后续无需重复下载'
-            : 'Model is ~131 MB. Auto-cached after download — no repeat needed.'}
+            ? '模型仅在首次加载时下载一次，后续对话秒级响应'
+            : 'Downloaded once on initial run. Subsequent turns respond instantly.'}
         </div>
       </div>
 
