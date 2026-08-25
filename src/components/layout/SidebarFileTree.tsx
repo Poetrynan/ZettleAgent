@@ -178,11 +178,11 @@ export function SidebarFileTree(props: FileTreeProps) {
                 }}
               />
             ))}
-            <TreeChevron expanded={isExpanded} />
             <span className="tree-folder-icon">
               {isExpanded ? <IconFolderOpen size={14} /> : <IconFolder size={14} />}
             </span>
             <span className="tree-item-label" title={node.name}>{node.name}</span>
+            <TreeChevron expanded={isExpanded} />
             {bookmarks.includes(node.path) && <TreeBookmarkPin />}
             <TreeCountBadge count={node.file_count} />
             {/* Hover actions (VSCode/Cursor style) */}
@@ -309,7 +309,6 @@ export function SidebarFileTree(props: FileTreeProps) {
             }}
           />
         ))}
-        <TreeIndentSpacer />
         <span className="tree-file-icon">{getFileIcon(node.name)}</span>
         <span className="tree-item-label" title={isExternal ? `${node.name} (${state.lang === 'zh' ? '外部打开' : 'open externally'})` : node.name}>
           {isMd ? node.name.replace(/\.md$/, '') : node.name}

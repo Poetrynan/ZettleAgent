@@ -264,13 +264,24 @@ export function SmartChat() {
   const [exportSuccessPath, setExportSuccessPath] = useState<string | null>(null);
   const [exportIsRunning, setExportIsRunning] = useState(false);
 
-  // Knowledge panel: Context Inspector / Memory Inbox / Change Preview /
-  // Tasks / Index Health. `knowledgeContext` is the compiled ContextPackage
-  // summary for the run being rendered — the same structure that produced the
-  // prompt, so the panel cannot disagree with what the model actually saw.
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
   const [knowledgeContext, setKnowledgeContext] = useState<ContextPackageSummary | null>(null);
   const [knowledgeRunId, setKnowledgeRunId] = useState<string | null>(null);
+
+  const deskAsideRef = useRef<HTMLElement>(null);
+  const [isWideDesk, setIsWideDesk] = useState(false);
+
+  useEffect(() => {
+    const el = deskAsideRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsWideDesk(entry.contentRect.width >= 480);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const isZh = (state.lang || 'zh') === 'zh';
 
@@ -1656,7 +1667,8 @@ export function SmartChat() {
 
   return (
     <aside
-      className="panel chat-panel"
+      ref={deskAsideRef}
+      className={`panel chat-panel agent-desk ${isWideDesk ? 'agent-desk--wide' : ''}`}
       style={{ width: '100%', height: '100%', position: 'relative' }}
     >
       <ChatHeader
@@ -1670,171 +1682,215 @@ export function SmartChat() {
         showKnowledgePanel={showKnowledgePanel}
         setShowKnowledgePanel={setShowKnowledgePanel}
         toggleChat={toggleChat}
+        onNewSession={handleNewSession}
+        sessionTitle={sess.sessions.find(s => s.id === sess.sessionId)?.title}
+        hasPendingApproval={messages.some(m => m.isApprovalRequest)}
       />
 
-      {/* This-turn inspector. 长期状态（记忆/变更/任务/健康）在知识中心，不在这条侧栏里。 */}
-      {showKnowledgePanel && (
-        <KnowledgePanel
-          contextPackage={knowledgeContext}
-          runId={knowledgeRunId}
-          onOpenCenter={() => setView('knowledge')}
-          onOpenSource={openLocator}
-          onClose={() => setShowKnowledgePanel(false)}
-        />
-      )}
-
-      {/* Session list panel */}
-      {sess.showSessionList && (
-        <SessionListPanel
-          sessions={sess.sessions}
-          sessionId={sess.sessionId}
-          editingSessionId={sess.editingSessionId}
-          editTitle={sess.editTitle}
-          lockedSessionId={isLoading ? sess.sessionId : null}
-          onLoadSession={handleLoadSession}
-          onNewSession={handleNewSession}
-          onDelete={(sid) => handleDeleteSession(sid)}
-          onStartRename={(sid, title) => { sess.setEditTitle(title); sess.setEditingSessionId(sid); }}
-          onRename={sess.handleRenameSession}
-          onExport={(sid) => {
-            setExportSessionId(sid);
-            setExportFormat('markdown');
-            setExportSuccessPath(null);
-            setExportModalOpen(true);
-          }}
-          onEditTitleChange={sess.setEditTitle}
-        />
-      )}
-
-      <ChatMessageList
-        messages={messages}
-        messagesEndRef={messagesEndRef}
-        mode={mode}
-        searchMode={searchMode}
-        ragProgress={ragProgress}
-        showTyping={showTyping}
-        isLoading={isLoading}
-        expandedToolCalls={expandedToolCalls}
-        toggleToolCallExpand={toggleToolCallExpand}
-        activeTemplates={activeTemplates}
-        onSelectTemplate={(prompt) => {
-          setInput(prompt);
-          setTimeout(() => {
-            autoResize();
-            inputRef.current?.focus();
-          }, 50);
-        }}
-        onApprovalResolved={(approvalId, approved) => {
-          // 审批卡片已操作:把它从 approval 卡片变形为普通状态消息(避免永久转圈)
-          setMessages((prev) => prev.map((m) => {
-            if (m.approvalId !== approvalId) return m;
-            return {
-              ...m,
-              isApprovalRequest: false,
-              // approved → 前端只显示"已批准";rejected → 显示拒绝原因(由后端 ToolEnd 触发后续)
-              content: approved
-                ? (isZh ? '✅ 已批准该操作' : '✅ Approved')
-                : (isZh ? '🚫 已拒绝该操作' : '🚫 Rejected'),
-              isError: !approved,
-            };
-          }));
-        }}
-        onRegenerate={handleRegenerate}
-        onEditResend={handleEditResend}
-        onRetryError={handleRetryError}
-        onScroll={handleMessagesScroll}
-        showScrollToBottom={showScrollToBottom}
-        onScrollToBottom={scrollToBottom}
-        isZh={isZh}
-      />
-
-      <div className="panel-footer">
-        {/* Context row — which notes this turn will be able to read. In a
-            knowledge-base agent this is the most consequential thing about a
-            prompt, so it sits directly above the composer, not in a menu. */}
-        {attachedNotes.length > 0 && (
-          <div className="chat-context-row" aria-label={isZh ? '本轮附带的笔记' : 'Notes attached to this turn'}>
-            {attachedNotes.map((note, idx) => (
-              <span
-                key={`${note.path}-${idx}`}
-                className={`chat-attached-note-chip ${note.source === 'canvas' ? 'from-canvas' : ''}`}
-                title={note.path}
-              >
-                {note.source === 'canvas'
-                  ? <IconCanvas size={11} />
-                  : <IconFile size={11} />}
-                <span className="chat-attached-note-name">{note.name}</span>
-                {note.source === 'canvas' && (
-                  <span className="chip-canvas-badge">
-                    {isZh ? '画布' : 'Canvas'}
-                  </span>
-                )}
-                <button
-                  className="chat-attached-note-remove"
-                  onClick={() => setAttachedNotes(prev => prev.filter((_, i) => i !== idx))}
-                  title={t('common.remove' as any) || 'Remove'}
-                  aria-label={t('common.remove' as any) || 'Remove'}
-                >
-                  <IconX size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
+      <div className="agent-desk__container">
+        {/* Floating Dropdown: Knowledge / Context Inspector */}
+        {showKnowledgePanel && (
+          <>
+            <div
+              className="chat-dropdown-backdrop"
+              onClick={() => setShowKnowledgePanel(false)}
+            />
+            <div className="chat-dropdown-menu chat-dropdown-inspector" role="dialog" aria-label="Context Inspector">
+              <KnowledgePanel
+                contextPackage={knowledgeContext}
+                runId={knowledgeRunId}
+                onOpenCenter={() => {
+                  setShowKnowledgePanel(false);
+                  setView('knowledge');
+                }}
+                onOpenSource={(loc) => {
+                  setShowKnowledgePanel(false);
+                  openLocator(loc);
+                }}
+                onClose={() => setShowKnowledgePanel(false)}
+              />
+            </div>
+          </>
         )}
 
-        {/* Input container V2 — elevated card */}
-        <div className="chat-input-container">
-          <textarea
-            ref={inputRef}
-            className="chat-input-textarea"
-            rows={1}
-            placeholder={mode === 'agent' ? t('chat.agentPlaceholder') : t('chat.placeholder')}
-            value={input}
-            onChange={(e) => { setInput(e.target.value); autoResize(); }}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            title={isLoading ? t('chat.inputDisabledTip' as any) : undefined}
-          />
-          <div className="chat-input-bar">
-            <div className="chat-input-bar-left">
-              <button
-                className={`chat-feature-btn ${webSearch ? 'active-search' : ''}`}
-                onClick={() => setWebSearch(prev => !prev)}
-                title={isZh ? '联网搜索' : 'Web Search'}
-              >
-                <IconGlobe size={12} />
-                <span>{isZh ? '联网' : 'Web'}</span>
-              </button>
-              {input.trim().length > 0 && (
-                <span
-                  className="chat-input-token-hint"
-                  title={isZh ? '预计输入 Token 消耗' : 'Estimated input tokens'}
-                >
-                  ~{Math.ceil(Array.from(input).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0))} tok
-                </span>
-              )}
+        {/* Floating Dropdown: Session History List */}
+        {sess.showSessionList && (
+          <>
+            <div
+              className="chat-dropdown-backdrop"
+              onClick={() => sess.setShowSessionList(false)}
+            />
+            <div className="chat-dropdown-menu chat-dropdown-sessions" role="dialog" aria-label="Session History">
+              <SessionListPanel
+                sessions={sess.sessions}
+                sessionId={sess.sessionId}
+                editingSessionId={sess.editingSessionId}
+                editTitle={sess.editTitle}
+                lockedSessionId={isLoading ? sess.sessionId : null}
+                onLoadSession={(sid) => {
+                  handleLoadSession(sid);
+                  sess.setShowSessionList(false);
+                }}
+                onNewSession={() => {
+                  handleNewSession();
+                  sess.setShowSessionList(false);
+                }}
+                onDelete={(sid) => handleDeleteSession(sid)}
+                onStartRename={(sid, title) => { sess.setEditTitle(title); sess.setEditingSessionId(sid); }}
+                onRename={sess.handleRenameSession}
+                onExport={(sid) => {
+                  setExportSessionId(sid);
+                  setExportFormat('markdown');
+                  setExportSuccessPath(null);
+                  setExportModalOpen(true);
+                }}
+                onEditTitleChange={sess.setEditTitle}
+              />
             </div>
-            <div className="chat-input-bar-right">
-              {isLoading ? (
-                <button
-                  className="chat-send-btn-v2 is-stop"
-                  onClick={handleStop}
-                  title={t('chat.stopGeneration' as any)}
-                >
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                </button>
-              ) : (
-                <button
-                  className="chat-send-btn-v2"
-                  onClick={() => handleSend()}
-                  disabled={!input.trim() && attachedNotes.length === 0}
-                  title={!input.trim() ? t('chat.inputEmptyTip' as any) : undefined}
-                >
-                  <IconSend size={15} />
-                </button>
-              )}
+          </>
+        )}
+
+        <div className="agent-desk__main">
+
+          <ChatMessageList
+            messages={messages}
+            messagesEndRef={messagesEndRef}
+            mode={mode}
+            searchMode={searchMode}
+            ragProgress={ragProgress}
+            showTyping={showTyping}
+            isLoading={isLoading}
+            expandedToolCalls={expandedToolCalls}
+            toggleToolCallExpand={toggleToolCallExpand}
+            activeTemplates={activeTemplates}
+            onSelectTemplate={(prompt) => {
+              setInput(prompt);
+              setTimeout(() => {
+                autoResize();
+                inputRef.current?.focus();
+              }, 50);
+            }}
+            onApprovalResolved={(approvalId, approved) => {
+              // 审批卡片已操作:把它从 approval 卡片变形为普通状态消息(避免永久转圈)
+              setMessages((prev) => prev.map((m) => {
+                if (m.approvalId !== approvalId) return m;
+                return {
+                  ...m,
+                  isApprovalRequest: false,
+                  // approved → 前端只显示"已批准";rejected → 显示拒绝原因(由后端 ToolEnd 触发后续)
+                  content: approved
+                    ? (isZh ? '✅ 已批准该操作' : '✅ Approved')
+                    : (isZh ? '🚫 已拒绝该操作' : '🚫 Rejected'),
+                  isError: !approved,
+                };
+              }));
+            }}
+            onRegenerate={handleRegenerate}
+            onEditResend={handleEditResend}
+            onRetryError={handleRetryError}
+            onScroll={handleMessagesScroll}
+            showScrollToBottom={showScrollToBottom}
+            onScrollToBottom={scrollToBottom}
+            isZh={isZh}
+          />
+
+          <div className="panel-footer">
+            {/* Preflight scope & status strip */}
+            <div className="chat-preflight-bar">
+              <div className="chat-preflight-scope">
+                <span className="chat-preflight-dot" />
+                <span>{state.vaultPath ? state.vaultPath.split(/[\\/]/).pop()?.replace(/\s*demo\s*/i, '').trim() || (isZh ? '全库范围' : 'Whole Vault') : (isZh ? '全库范围' : 'Whole Vault')}</span>
+                <span>·</span>
+                <span>{mode === 'agent' ? (isZh ? '自主 Agent 模式' : 'Agent Mode') : `${searchMode.toUpperCase()} 检索`}</span>
+              </div>
+            </div>
+
+            {/* Context row — which notes this turn will be able to read. */}
+            {attachedNotes.length > 0 && (
+              <div className="chat-context-row" aria-label={isZh ? '本轮附带的笔记' : 'Notes attached to this turn'}>
+                {attachedNotes.map((note, idx) => (
+                  <span
+                    key={`${note.path}-${idx}`}
+                    className={`chat-attached-note-chip ${note.source === 'canvas' ? 'from-canvas' : ''}`}
+                    title={note.path}
+                  >
+                    {note.source === 'canvas'
+                      ? <IconCanvas size={11} />
+                      : <IconFile size={11} />}
+                    <span className="chat-attached-note-name">{note.name}</span>
+                    {note.source === 'canvas' && (
+                      <span className="chip-canvas-badge">
+                        {isZh ? '画布' : 'Canvas'}
+                      </span>
+                    )}
+                    <button
+                      className="chat-attached-note-remove"
+                      onClick={() => setAttachedNotes(prev => prev.filter((_, i) => i !== idx))}
+                      title={t('common.remove' as any) || 'Remove'}
+                      aria-label={t('common.remove' as any) || 'Remove'}
+                    >
+                      <IconX size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Input container V2 — elevated card */}
+            <div className="chat-input-container">
+              <textarea
+                ref={inputRef}
+                className="chat-input-textarea"
+                rows={1}
+                placeholder={mode === 'agent' ? t('chat.agentPlaceholder') : t('chat.placeholder')}
+                value={input}
+                onChange={(e) => { setInput(e.target.value); autoResize(); }}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading}
+                title={isLoading ? t('chat.inputDisabledTip' as any) : undefined}
+              />
+              <div className="chat-input-bar">
+                <div className="chat-input-bar-left">
+                  <button
+                    className={`chat-feature-btn ${webSearch ? 'active-search' : ''}`}
+                    onClick={() => setWebSearch(prev => !prev)}
+                    title={isZh ? '联网搜索' : 'Web Search'}
+                  >
+                    <IconGlobe size={12} />
+                    <span>{isZh ? '联网' : 'Web'}</span>
+                  </button>
+                  {input.trim().length > 0 && (
+                    <span
+                      className="chat-input-token-hint"
+                      title={isZh ? '预计输入 Token 消耗' : 'Estimated input tokens'}
+                    >
+                      ~{Math.ceil(Array.from(input).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0))} tok
+                    </span>
+                  )}
+                </div>
+                <div className="chat-input-bar-right">
+                  {isLoading ? (
+                    <button
+                      className="chat-send-btn-v2 is-stop"
+                      onClick={handleStop}
+                      title={t('chat.stopGeneration' as any)}
+                    >
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      className="chat-send-btn-v2"
+                      onClick={() => handleSend()}
+                      disabled={!input.trim() && attachedNotes.length === 0}
+                      title={!input.trim() ? t('chat.inputEmptyTip' as any) : undefined}
+                    >
+                      <IconSend size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

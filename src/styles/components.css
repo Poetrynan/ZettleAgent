@@ -3,6 +3,7 @@
  * Each file covers a logical domain — edit the specific file instead.   *
  * ───────────────────────────────────────────────────────────────────── */
 
+@import './primitives.css';
 @import './toolbar.css';
 @import './cards.css';
 @import './buttons.css';

@@ -66,10 +66,20 @@ export function useEditorSuggestions({
 }: UseEditorSuggestionsParams) {
   const [suggestions, setSuggestions] = useState<EditorSuggestion[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [lastScanTime, setLastScanTime] = useState<number | null>(null);
   const dismissedRef = useRef<Set<string>>(new Set());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScanHashRef = useRef<string>('');
   const isZh = lang === 'zh';
+
+  // Reset scan state on note change
+  useEffect(() => {
+    setHasScanned(false);
+    setLastScanTime(null);
+    setSuggestions([]);
+    lastScanHashRef.current = '';
+  }, [filePath]);
 
   // Extract meaningful paragraphs from markdown (skip frontmatter, code blocks, headings)
   const extractParagraphs = useCallback((md: string): { text: string; start: number; end: number }[] => {
@@ -269,6 +279,8 @@ If no conflict, reply:
       }
 
       setSuggestions(newSuggestions);
+      setHasScanned(true);
+      setLastScanTime(Date.now());
     } catch (err) {
       console.warn('EditorSuggestions scan failed:', err);
     } finally {
@@ -394,6 +406,8 @@ If no conflict, reply:
   return {
     suggestions,
     isScanning,
+    hasScanned,
+    lastScanTime,
     dismissSuggestion,
     acceptSuggestion,
     resolveReconciliationConflict,

@@ -237,16 +237,19 @@ function MemoryFileSyncRow({
   };
 
   return (
-    <div className="kc-note">
-      <div>{t('knowledge.memory.syncHint')}</div>
-      <div className="kc-item-actions">
+    <div className="kc-sync-card">
+      <div className="kc-sync-card-info">
+        <div className="kc-sync-card-title">memory.md 长期记忆库</div>
+        <div className="kc-sync-card-desc">{t('knowledge.memory.syncHint')}</div>
+      </div>
+      <div className="kc-sync-card-action">
         <button className="kc-btn" disabled={busy} onClick={() => void run()}>
           {busy ? t('knowledge.memory.syncing') : t('knowledge.memory.syncFile')}
         </button>
-        {note && <span className="kc-muted">{note}</span>}
+        {note && <span className="kc-sync-card-status">{note}</span>}
       </div>
       {failed && (
-        <div className="kc-warn" role="alert">
+        <div className="kc-warn" role="alert" style={{ gridColumn: '1 / -1', marginTop: '6px' }}>
           {t('knowledge.loadFailed')}
           <details className="kc-details">
             <summary>{t('knowledge.advanced')}</summary>

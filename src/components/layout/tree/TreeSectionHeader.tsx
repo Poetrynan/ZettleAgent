@@ -47,15 +47,15 @@ export function TreeSectionHeader({
         }
       }}
     >
+      {icon && <span className="tree-section-icon">{icon}</span>}
+      <span className="tree-section-label">{label}</span>
       <span
         className="tree-section-chevron"
-        style={{ transform: expanded ? 'rotate(90deg)' : 'none' }}
+        style={{ transform: expanded ? 'rotate(90deg)' : 'none', marginLeft: '2px' }}
         aria-hidden="true"
       >
         <IconChevronRight size={12} />
       </span>
-      {icon && <span className="tree-section-icon">{icon}</span>}
-      <span className="tree-section-label">{label}</span>
       {trailing}
       {count != null && count > 0 && (
         <span className="tree-count-badge">{count}</span>

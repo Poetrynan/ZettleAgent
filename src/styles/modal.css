@@ -88,9 +88,7 @@
 .file-recovery-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -102,12 +100,8 @@
 .file-recovery-modal {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 4px 6px -1px rgba(0, 0, 0, 0.07),
-    0 10px 15px -3px rgba(0, 0, 0, 0.07),
-    0 20px 40px -4px rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
   width: 880px;
   max-width: 95vw;
   height: 80vh;

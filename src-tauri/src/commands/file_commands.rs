@@ -470,7 +470,7 @@ pub fn init_demo_vault(app: tauri::AppHandle) -> Result<String, ZettelError> {
     let doc_dir = app.path()
         .document_dir()
         .map_err(|e| ZettelError::System(format!("Failed to get document dir: {}", e)))?;
-    let target_dir = doc_dir.join("ZettelAgent Demo");
+    let target_dir = doc_dir.join("ZettelVault");
 
     // 如果目标目录已存在且有 .md 文件，直接返回
     if target_dir.exists() {

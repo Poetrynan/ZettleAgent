@@ -29,18 +29,14 @@ function StatTile({
   icon,
   value,
   label,
-  accent,
-  hero = false,
 }: {
   icon: ReactNode;
   value: number;
   label: string;
-  accent: 'blue' | 'green' | 'amber';
-  hero?: boolean;
 }) {
   return (
     <div
-      className={`agent-auto-stat agent-auto-stat--${accent}${hero ? ' agent-auto-stat--hero' : ''}`}
+      className="agent-auto-stat"
       aria-label={`${label}: ${value.toLocaleString()}`}
     >
       <div className="agent-auto-stat-icon" aria-hidden="true">{icon}</div>
@@ -94,12 +90,10 @@ export function AgentAutoOrganizeCard({
       aria-labelledby="agent-auto-title"
       aria-describedby="agent-auto-desc"
     >
-      <div className="agent-auto-glow" aria-hidden="true" />
-
       <header className="agent-auto-header">
         <div className="agent-auto-brand">
           <div className="agent-auto-icon-wrap" aria-hidden="true">
-            <IconRobot size={22} />
+            <IconRobot size={18} />
           </div>
           <div className="agent-auto-brand-text">
             <h3 id="agent-auto-title" className="agent-auto-title">
@@ -143,33 +137,29 @@ export function AgentAutoOrganizeCard({
 
       <div className="agent-auto-bento" role="group" aria-label={t('dashboard.agentMetrics' as any)}>
         <StatTile
-          hero
-          accent="green"
           value={reconciled}
           label={t('dashboard.reconciled')}
           icon={
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           }
         />
         <StatTile
-          accent="blue"
           value={processed}
           label={t('dashboard.processed')}
           icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
           }
         />
         <StatTile
-          accent="amber"
           value={apiCalls}
           label={t('dashboard.apiCalls')}
           icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
           }

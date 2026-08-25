@@ -607,19 +607,19 @@ In under 30 words, provide: Macro Theme | Hub: Top hubs | Suggestion: network ev
                   className={`kg-settings-tab-btn ${activeSettingsTab === 'filter' ? 'active' : ''}`}
                   onClick={() => setActiveSettingsTab('filter')}
                 >
-                  {isZh ? '🎛️ 过滤与视图' : 'Filters'}
+                  {isZh ? '过滤与视图' : 'Filters'}
                 </button>
                 <button
                   className={`kg-settings-tab-btn ${activeSettingsTab === 'legend' ? 'active' : ''}`}
                   onClick={() => setActiveSettingsTab('legend')}
                 >
-                  {isZh ? '🏷️ 图例' : 'Legend'}
+                  {isZh ? '图例' : 'Legend'}
                 </button>
                 <button
                   className={`kg-settings-tab-btn ${activeSettingsTab === 'forces' ? 'active' : ''}`}
                   onClick={() => setActiveSettingsTab('forces')}
                 >
-                  {isZh ? '⚙️ 力学' : 'Physics'}
+                  {isZh ? '力学' : 'Physics'}
                 </button>
               </div>
 

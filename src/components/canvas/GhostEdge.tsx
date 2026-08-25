@@ -78,15 +78,15 @@ export function GhostEdge({
     if (edgeData?.label) return edgeData.label as string;
     switch (smartType) {
       case 'suggestion':
-        return edgeData?.similarity ? `💡 ${edgeData.similarity}%` : '💡 Similar';
+        return edgeData?.similarity ? `${edgeData.similarity}%` : 'Similar';
       case 'contradiction':
-        return '⚠️ Contradiction';
+        return 'Contradiction';
       case 'duplicate':
-        return edgeData?.similarity ? `⚠️ Duplicate ${edgeData.similarity}%` : '⚠️ Duplicate';
+        return edgeData?.similarity ? `Duplicate ${edgeData.similarity}%` : 'Duplicate';
       case 'supports':
-        return '🤝 Supports';
+        return 'Supports';
       default:
-        return '💡 Suggested';
+        return 'Suggested';
     }
   }, [smartType, edgeData?.similarity, edgeData?.label]);
 

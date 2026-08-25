@@ -1,19 +1,7 @@
 import { SearchMode } from '../../lib/tauri';
 import { IconRobot, IconSearch, IconClose, IconInspect } from '../icons';
 import { t, getLang } from '../../lib/i18n';
-
-/**
- * Chat header / the agent panel's command strip.
- *
- * 这块头部原来是两行：第一行模式 tab + 动作图标，第二行在 RAG 模式下放检索方式，在
- * Agent 模式下放一句常驻说明「Agent 可自主调用工具、读写笔记」。那句话是引导文案，
- * 不是状态——第一次有用，第二次开始就是在一条 400px 宽的面板里长期占掉一整行。
- * 现在第二行只在真的有可调项（RAG 检索方式）时才出现。
- *
- * 模式指示器原来是一个 JS 驱动的滑动药丸：ResizeObserver + 双 rAF 量 offsetLeft/
- * offsetWidth，420ms 贝塞尔滑动加挤压。一个两档开关不值这些机器，而且它每次切换都要
- * 读一次布局。现在是纯 CSS 的选中态。
- */
+import { StatusStamp } from '../primitives/StatusStamp';
 
 interface ChatHeaderProps {
   mode: 'agent' | 'rag';
@@ -27,6 +15,9 @@ interface ChatHeaderProps {
   showKnowledgePanel: boolean;
   setShowKnowledgePanel: (show: boolean | ((p: boolean) => boolean)) => void;
   toggleChat: () => void;
+  onNewSession?: () => void;
+  sessionTitle?: string;
+  hasPendingApproval?: boolean;
 }
 
 const SEARCH_MODES: { key: SearchMode; label: string; labelZh: string }[] = [
@@ -35,6 +26,10 @@ const SEARCH_MODES: { key: SearchMode; label: string; labelZh: string }[] = [
   { key: 'fts', label: 'FTS', labelZh: '全文' },
 ];
 
+/**
+ * ChatHeader — Desk command header adhering to Swiss Knowledge Atlas principles.
+ * Houses mode segment switches, quick new-chat action, session navigator, inspection, and status badges.
+ */
 export function ChatHeader({
   mode,
   setMode,
@@ -46,12 +41,16 @@ export function ChatHeader({
   showKnowledgePanel,
   setShowKnowledgePanel,
   toggleChat,
+  onNewSession,
+  sessionTitle,
+  hasPendingApproval,
 }: ChatHeaderProps) {
   const isZh = getLang() === 'zh';
 
   return (
-    <div className="chat-header-v2">
+    <header className="chat-header-v2" aria-label="Agent Desk Header">
       <div className="chat-header-row-main">
+        {/* Left: Mode Segmented Switch */}
         <div className="chat-mode-tabs" role="tablist" aria-label={isZh ? '对话模式' : 'Chat mode'}>
           <button
             role="tab"
@@ -77,20 +76,57 @@ export function ChatHeader({
           </button>
         </div>
 
+        {/* Center: Status / Title Indicator */}
+        <div className="chat-header-status-slot">
+          {hasPendingApproval ? (
+            <StatusStamp variant="pending" size="xs">
+              {isZh ? '待决审批' : 'DECISION'}
+            </StatusStamp>
+          ) : sessionTitle ? (
+            <span className="chat-header-session-title" title={sessionTitle}>
+              {sessionTitle}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Right: Quick actions */}
         <div className="chat-header-actions">
+          {onNewSession && (
+            <button
+              className="chat-header-icon-btn chat-header-new-btn"
+              onClick={onNewSession}
+              title={isZh ? '新建会话 (Ctrl+N)' : 'New Chat Session'}
+              aria-label="New Chat"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          )}
           <button
             className={`chat-header-icon-btn ${showKnowledgePanel ? 'active' : ''}`}
-            onClick={() => setShowKnowledgePanel(p => !p)}
-            title={isZh ? '这一轮：Agent 用了什么、调了什么' : 'This turn: what the agent used and did'}
+            onClick={() => {
+              const next = !showKnowledgePanel;
+              setShowKnowledgePanel(next);
+              if (next) setShowSessionList(false);
+            }}
+            title={isZh ? '本轮上下文分析 · Context Inspector' : 'This turn: context inspector'}
+            aria-label="Toggle Context Inspector"
           >
-            <IconInspect size={15} />
+            <IconInspect size={14} />
           </button>
           <button
             className={`chat-header-icon-btn ${showSessionList ? 'active' : ''}`}
-            onClick={() => setShowSessionList(p => !p)}
+            onClick={() => {
+              const next = !showSessionList;
+              setShowSessionList(next);
+              if (next) setShowKnowledgePanel(false);
+            }}
             title={t('chat.sessionHistory' as any)}
+            aria-label="Session History"
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="8" y1="6" x2="21" y2="6"/>
               <line x1="8" y1="12" x2="21" y2="12"/>
               <line x1="8" y1="18" x2="21" y2="18"/>
@@ -103,19 +139,19 @@ export function ChatHeader({
             className="chat-header-icon-btn"
             onClick={toggleChat}
             title={t('common.close' as any) || 'Close'}
+            aria-label="Close Chat"
           >
-            <IconClose size={16} />
+            <IconClose size={15} />
           </button>
         </div>
       </div>
 
-      {/* Only rendered when there is something to set. Agent mode has no
-          retrieval knob, so it gets no second row at all. */}
+      {/* RAG Mode search strategy row (compact, stable) */}
       {mode === 'rag' && (
         <div className="chat-header-row-sub">
           <div className="chat-search-modes">
             <span className="chat-search-modes-label">
-              {isZh ? '检索' : 'Search'}
+              {isZh ? '检索策略' : 'Strategy'}
             </span>
             <div className="chat-search-modes-group" role="tablist" aria-label={isZh ? '检索方式' : 'Retrieval mode'}>
               {SEARCH_MODES.map(m => (
@@ -134,6 +170,6 @@ export function ChatHeader({
           </div>
         </div>
       )}
-    </div>
+    </header>
   );
 }

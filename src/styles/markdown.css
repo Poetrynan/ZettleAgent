@@ -1,17 +1,20 @@
 /* ── Markdown Content ────────────────────────────────────────────── */
 
 .markdown-content {
-  font-size: 0.875rem; /* 14px */
-  line-height: 1.6;
-  color: var(--text-secondary);
+  font-size: 0.9375rem; /* 15px */
+  line-height: 1.75;
+  color: var(--text-primary);
   max-width: 100%;
   overflow-wrap: break-word;
+  font-family: var(--font-sans);
 }
 
 .markdown-content h1 {
-  font-size: 1.625rem; /* 26px */
+  font-family: var(--font-serif);
+  font-size: 1.75rem; /* 28px */
   font-weight: 700;
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
   margin-top: 1.75rem;
   margin-bottom: 0.75rem;
   padding-bottom: var(--space-2);
@@ -24,18 +27,22 @@
 }
 
 .markdown-content h2 {
-  font-size: 1.25rem; /* 20px */
+  font-family: var(--font-serif);
+  font-size: 1.35rem; /* 21.6px */
   font-weight: 600;
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   color: var(--text-primary);
 }
 
 .markdown-content h3 {
-  font-size: 1.1rem; /* 17.6px */
+  font-family: var(--font-serif);
+  font-size: 1.15rem; /* 18.4px */
   font-weight: 600;
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
   margin-top: 1.25rem;
   margin-bottom: 0.5rem;
   color: var(--text-primary);

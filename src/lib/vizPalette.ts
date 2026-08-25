@@ -129,7 +129,7 @@ const CLUSTERS_DARK = [
 ];
 
 const VIZ_LIGHT: VizPalette = {
-  surface: { bg: '#FAFBFC', grid: '#D0D5DD' },
+  surface: { bg: '#F6F3EE', grid: '#E5E1D8' },
   label: {
     nodeFill: '#334155',
     nodeHalo: '#FFFFFF',
@@ -165,7 +165,7 @@ const VIZ_LIGHT: VizPalette = {
 };
 
 const VIZ_DARK: VizPalette = {
-  surface: { bg: '#0F172A', grid: '#334155' },
+  surface: { bg: '#151A17', grid: '#262D28' },
   label: {
     nodeFill: '#E2E8F0',
     nodeHalo: '#0F172A',

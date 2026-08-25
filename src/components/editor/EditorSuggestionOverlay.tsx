@@ -20,6 +20,8 @@ import { IconTimeline, IconContradicted, IconSuperseded, IconMerge, IconClose, I
 interface EditorSuggestionOverlayProps {
   suggestions: EditorSuggestion[];
   isScanning: boolean;
+  hasScanned?: boolean;
+  lastScanTime?: number | null;
   onDismiss: (id: string) => void;
   onNavigateToSource?: (path: string) => void;
   /** Resolve a reconciliation conflict with user's choice */
@@ -84,6 +86,8 @@ function getTypeLabel(type: string, isZh: boolean): string {
 export function EditorSuggestionOverlay({
   suggestions,
   isScanning,
+  hasScanned,
+  lastScanTime,
   onDismiss,
   onNavigateToSource,
   onResolveReconciliation,
@@ -281,23 +285,29 @@ export function EditorSuggestionOverlay({
     );
   }
 
-  // ── Floating mode: scanning indicator + suggestion count pill ──
-  if (suggestions.length === 0 && !isScanning) return null;
+  // ── Floating status notification badge ──
+  if (!isScanning && !hasScanned && suggestions.length === 0) return null;
 
   return (
     <div className="editor-suggestion-overlay">
-      {/* Scanning indicator */}
       {isScanning && (
-        <div className="editor-suggestion-scanning">
-          <div className="editor-suggestion-scanning-dot" />
-          <span>{isZh ? 'AI 正在核验事实...' : 'AI fact-checking...'}</span>
+        <div className="editor-suggestion-status-badge editor-suggestion-status-badge--scanning">
+          <span className="editor-suggestion-pulse-dot" />
+          <span>{isZh ? 'AI 正在核验全库事实...' : 'AI verifying facts across vault...'}</span>
         </div>
       )}
 
-      {/* Suggestion count pill — shows how many suggestions exist */}
-      {suggestions.length > 0 && !isScanning && (
-        <div className="editor-suggestion-count-pill">
-          {suggestions.length} {isZh ? '个建议' : 'suggestions'}
+      {!isScanning && suggestions.length > 0 && (
+        <div className="editor-suggestion-status-badge editor-suggestion-status-badge--conflict">
+          <span style={{ color: 'var(--vermilion)', fontWeight: 700 }}>●</span>
+          <span>{suggestions.length} {isZh ? '处知识冲突待核验' : 'conflicts detected'}</span>
+        </div>
+      )}
+
+      {!isScanning && hasScanned && suggestions.length === 0 && (
+        <div className="editor-suggestion-status-badge editor-suggestion-status-badge--passed">
+          <span style={{ color: 'var(--moss, #10b981)', fontWeight: 700 }}>✓</span>
+          <span>{isZh ? '事实核验通过 · 未发现知识冲突' : 'Fact check passed · No conflicts found'}</span>
         </div>
       )}
     </div>

@@ -141,22 +141,15 @@
 
 .ctx-menu {
   position: fixed;
-  background: var(--bg-secondary, rgba(255, 255, 255, 0.96));
-  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.1));
-  border-radius: 8px;
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 4px 0;
   z-index: 1000;
   min-width: 160px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
   animation: ctxMenuIn 120ms cubic-bezier(0.2, 0, 0.13, 1);
   transform-origin: top left;
-}
-
-@supports (backdrop-filter: blur(1px)) {
-  .ctx-menu {
-    backdrop-filter: blur(12px);
-    background: var(--bg-secondary, rgba(255, 255, 255, 0.88));
-  }
 }
 
 @keyframes ctxMenuIn {

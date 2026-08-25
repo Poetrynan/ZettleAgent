@@ -194,7 +194,7 @@ export function MermaidRenderer({ content }: MermaidRendererProps) {
  */
 export function MarkdownRenderer({ content, className = 'markdown-content' }: MarkdownRendererProps) {
   const { state, setCurrentFile, setView } = useApp();
-  const [hoverState, onHoverStart, onHoverEnd] = useHoverPreview();
+  const [hoverState, onHoverStart, onHoverEnd, onCardEnter, onCardLeave] = useHoverPreview();
 
   const handleWikilinkClick = async (targetTitle: string) => {
     if (!state.vaultPath) return;
@@ -433,7 +433,12 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
       >
         {content}
       </ReactMarkdown>
-      <HoverPreviewCard state={hoverState} onClose={onHoverEnd} />
+      <HoverPreviewCard
+        state={hoverState}
+        onClose={onHoverEnd}
+        onMouseEnter={onCardEnter}
+        onMouseLeave={onCardLeave}
+      />
     </div>
   );
 }

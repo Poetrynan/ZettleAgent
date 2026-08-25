@@ -20,11 +20,10 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(226, 232, 240, 0.5);
-  border-radius: 10px;
-  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.06);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
   animation: previewCardSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -187,24 +186,23 @@
 
 /* Group Node Frame — Clean */
 .group-node-frame {
-  border: 1.5px dashed rgba(148, 163, 184, 0.3);
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(241, 245, 249, 0.15) 0%, rgba(226, 232, 240, 0.08) 100%);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--bg-secondary);
   padding: 12px;
   box-sizing: border-box;
   position: relative;
-  transition: border-color 0.2s ease, background 0.25s ease, box-shadow 0.25s ease;
+  transition: all var(--duration-fast);
 }
 
 .group-node-frame:hover {
-  border-color: rgba(148, 163, 184, 0.45);
-  background: linear-gradient(135deg, rgba(241, 245, 249, 0.25) 0%, rgba(226, 232, 240, 0.12) 100%);
+  border-color: var(--border-strong);
 }
 
 [data-theme="dark"] .group-node-frame,
 .dark-theme .group-node-frame {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.12) 0%, rgba(51, 65, 85, 0.06) 100%);
-  border-color: rgba(100, 116, 139, 0.25);
+  background: var(--bg-secondary);
+  border-color: var(--border);
 }
 
 .group-node-frame.selected {
@@ -218,11 +216,9 @@
   position: absolute;
   top: -11px;
   left: 16px;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
-  border: 1px solid rgba(226, 232, 240, 0.5);
-  border-radius: 8px;
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -230,9 +226,9 @@
   outline: none;
   max-width: 200px;
   pointer-events: auto;
-  box-shadow: 0 1px 6px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   letter-spacing: 0.02em;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 /* Milkdown Overrides inside Canvas Note Cards */
@@ -280,12 +276,10 @@
 }
 
 .react-flow__minimap {
-  background: rgba(255, 255, 255, 0.7) !important;
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05) !important;
-  backdrop-filter: blur(10px) !important;
-  -webkit-backdrop-filter: blur(10px) !important;
+  background: var(--bg-elevated, #FFFFFF) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow-sm) !important;
 }
 
 .react-flow__minimap-mask {
@@ -296,8 +290,8 @@
 
 [data-theme="dark"] .react-flow__minimap,
 .dark-theme .react-flow__minimap {
-  background: rgba(15, 23, 42, 0.6) !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.15) !important;
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border) !important;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3) !important;
 }
 
@@ -320,12 +314,10 @@
   max-height: 540px;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.96) !important;
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid rgba(226, 232, 240, 0.5) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.03) !important;
+  background: var(--bg-elevated, #FFFFFF) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
 .canvas-note-selector .modal-header {
@@ -696,12 +688,10 @@
   z-index: 1000;
   min-width: 168px;
   padding: 4px;
-  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.96));
-  border: 1px solid var(--canvas-glass-border, rgba(0, 0, 0, 0.08));
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.12);
   animation: canvas-ctx-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -832,13 +822,12 @@
   font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(6px);
+  background: var(--bg-elevated, #FFFFFF);
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   pointer-events: none;
   transition: opacity 0.2s ease;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
 .embed-interaction-overlay:hover .embed-overlay-hint {
@@ -860,12 +849,10 @@
   z-index: 1000;
   min-width: 180px;
   padding: 4px;
-  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.97));
-  border: 1px solid var(--canvas-glass-border, rgba(0, 0, 0, 0.08));
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(99, 102, 241, 0.08);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.12);
   animation: quickConnectIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: top left;
   overflow: hidden;
@@ -999,28 +986,25 @@
   z-index: 10;
 }
 
-/* Label pill with glassmorphism */
+/* Label pill with Swiss Paper */
 .ghost-edge-label {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 10px;
-  border-radius: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid;
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   user-select: none;
   cursor: default;
 }
 
 .ghost-edge-label:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .ghost-edge-label-text {
@@ -1049,14 +1033,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1.5px solid;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
   cursor: pointer;
   transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .ghost-edge-btn:active {
@@ -1290,21 +1272,19 @@
 
 /* ── Group Node delete button (replaces inline styles) ── */
 .group-node-delete-btn {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(226, 232, 240, 0.5);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 3px 5px;
-  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s ease;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-elevated, #FFFFFF);
 }
 
 [data-theme="dark"] .group-node-delete-btn,
 .dark-theme .group-node-delete-btn {
-  background: rgba(30, 41, 59, 0.95);
-  border-color: rgba(71, 85, 105, 0.5);
-  box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.2);
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ── Note Selector Modal — dark mode ── */

@@ -63,7 +63,10 @@ export function KnowledgeGraph() {
   const [selectedCluster, setSelectedCluster] = useState<number | null>(null);
   const [relationFilter, setRelationFilter] = useState<RelationFilter>('all');
   const [timeSliderValue, setTimeSliderValue] = useState(-1);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [dimensions, setDimensions] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  });
   const [isDraggingBg, setIsDraggingBg] = useState(false);
 
   // ── Local Graph + Depth + Orphans ──
@@ -101,10 +104,10 @@ export function KnowledgeGraph() {
   const measure = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
     if (width > 0 && height > 0) {
-      setDimensions({ width, height });
+      setDimensions(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
     }
   }, []);
 
@@ -790,43 +793,32 @@ export function KnowledgeGraph() {
         onClick={() => setViewMode(prev => prev === '2d' ? '3d' : '2d')}
         style={{
           right: isAgentOpen ? 344 : 12,
-          top: 54,
+          top: 48,
           transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
           pointerEvents: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          background: 'var(--bg-panel)',
-          color: 'var(--text-primary)',
-          borderColor: 'var(--border-subtle)',
-          padding: '8px 14px',
-          borderRadius: '8px',
-          fontWeight: 500,
-          boxShadow: 'var(--shadow-md)',
-          cursor: 'pointer',
         }}
       >
         {viewMode === '2d' ? (
           <>
             {/* Box 3D Icon */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
               <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
               <line x1="12" y1="22.08" x2="12" y2="12" />
             </svg>
-            <span style={{ fontSize: 12 }}>{isZh ? '3D 视图' : '3D View'}</span>
+            <span>{isZh ? '3D 视图' : '3D View'}</span>
           </>
         ) : (
           <>
             {/* Grid 2D Icon */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 2 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <line x1="9" y1="3" x2="9" y2="21" />
               <line x1="15" y1="3" x2="15" y2="21" />
               <line x1="3" y1="9" x2="21" y2="9" />
               <line x1="3" y1="15" x2="21" y2="15" />
             </svg>
-            <span style={{ fontSize: 12 }}>{isZh ? '2D 视图' : '2D View'}</span>
+            <span>{isZh ? '2D 视图' : '2D View'}</span>
           </>
         )}
       </button>

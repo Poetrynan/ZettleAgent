@@ -90,23 +90,30 @@
 }
 
 .diff-approval-btn-approve {
-  background: var(--success-bg);
-  border-color: var(--success-border);
-  color: var(--success);
+  background: var(--vermilion);
+  border-color: var(--vermilion);
+  color: #FFFFFF;
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .diff-approval-btn-approve:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 20%, var(--bg-elevated));
+  opacity: 0.92;
+  background: var(--vermilion);
+  color: #FFFFFF;
 }
 
 .diff-approval-btn-reject {
-  background: var(--danger-bg);
-  border-color: var(--danger-border);
-  color: var(--danger);
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 .diff-approval-btn-reject:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 20%, var(--bg-elevated));
+  background: var(--bg-hover);
+  color: var(--danger);
+  border-color: var(--danger-border);
 }
 
 

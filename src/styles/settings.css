@@ -503,24 +503,22 @@
 .mcp-link-pill {
   display: inline-flex;
   align-items: center;
-  padding: 4px 12px;
-  border-radius: 20px;
-  background: var(--bg-tertiary);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm, 2px);
+  background: var(--bg-elevated, #FFFFFF);
   border: 1px solid var(--border);
   color: var(--text-secondary) !important;
   font-size: 11px;
-  font-weight: 500;
-  transition: all var(--duration-fast) var(--ease-out);
+  font-weight: 600;
+  transition: all var(--duration-fast);
   cursor: pointer;
   text-decoration: none;
 }
 
 .mcp-link-pill:hover {
-  border-color: var(--accent-primary);
-  color: var(--accent-primary) !important;
-  background: var(--bg-primary);
-  transform: translateY(-0.5px);
-  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.08);
+  border-color: var(--border-strong);
+  color: var(--text-primary) !important;
+  background: var(--bg-hover);
 }
 
 .mcp-add-dashed-btn {
@@ -571,54 +569,86 @@
   scrollbar-width: thin;
 }
 
-/* Scanning indicator */
-.editor-suggestion-scanning {
-  display: flex;
+/* ── Editor Suggestion Status Badges (Pure Swiss Paper) ──────────── */
+
+.editor-suggestion-status-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(99, 102, 241, 0.06);
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 8px;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, monospace);
   font-size: 11px;
-  font-weight: 500;
-  color: rgba(99, 102, 241, 0.8);
-  animation: editorSugFadeIn 0.3s ease;
+  font-weight: 600;
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  animation: editorSugFadeIn 0.2s ease;
+  user-select: none;
 }
 
-.editor-suggestion-scanning-dot {
+.editor-suggestion-status-badge--scanning {
+  color: var(--text-secondary);
+}
+
+.editor-suggestion-pulse-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #6366f1;
-  animation: editorSugPulse 1s ease-in-out infinite;
+  background: var(--cobalt, #2563eb);
+  animation: editorSugPulse 1.2s ease-in-out infinite;
+}
+
+.editor-suggestion-status-badge--passed {
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.editor-suggestion-status-badge--conflict {
+  border-color: var(--vermilion);
+  color: var(--vermilion);
+  background: var(--bg-elevated);
 }
 
 @keyframes editorSugPulse {
-  0%, 100% { opacity: 0.4; transform: scale(0.8); }
-  50%      { opacity: 1;   transform: scale(1.2); }
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.15); }
 }
 
 @keyframes editorSugFadeIn {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Suggestion card */
+/* Suggestion card — Pure Swiss Paper */
 .editor-suggestion-card {
-  border: 1px solid;
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  box-shadow: 0 2px 12px -4px rgba(0, 0, 0, 0.08);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-  animation: editorSugFadeIn 0.3s ease;
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.15s ease;
+  animation: editorSugFadeIn 0.2s ease;
 }
 
 .editor-suggestion-card:hover {
-  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
+  border-color: var(--border-focus);
+}
+
+.editor-suggestion-count-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 /* Card header */
@@ -1688,9 +1718,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(15, 17, 23, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.4);
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -1701,11 +1729,11 @@
 .index-build-card {
   width: 90%;
   max-width: 480px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: var(--space-6) var(--space-8);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);

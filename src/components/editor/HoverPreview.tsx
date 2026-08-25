@@ -56,33 +56,65 @@ function parseFrontmatterFields(content: string): { noteType: string; tags: stri
 }
 
 /**
- * Hook: returns [state, onHoverStart(wikilinkTitle, el), onHoverEnd].
+ * Hook: returns [state, onHoverStart(wikilinkTitle, el), onHoverEnd, onCardEnter, onCardLeave].
  * Call onHoverStart with the wikilink target title and the anchor DOM element.
  */
 export function useHoverPreview(): [
   HoverPreviewState,
   (title: string, el: HTMLElement) => void,
+  () => void,
+  () => void,
   () => void
 ] {
   const [state, setState] = useState<HoverPreviewState>(EMPTY_STATE);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelRef = useRef<AbortController | null>(null);
 
+  const clearTimers = () => {
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  };
+
   const onHoverStart = useCallback((wikilinkTitle: string, anchorEl: HTMLElement) => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    clearTimers();
     if (cancelRef.current) cancelRef.current.abort();
+
+    // Immediately capture bounding rect on hover start to prevent (0, 0) coordinates if unmounted during streaming
+    const initialRect = anchorEl ? anchorEl.getBoundingClientRect() : null;
+    if (!initialRect || (initialRect.width === 0 && initialRect.height === 0 && initialRect.top === 0 && initialRect.left === 0)) {
+      return;
+    }
+
+    const initialX = initialRect.left;
+    const initialY = initialRect.bottom + 4;
 
     const controller = new AbortController();
     cancelRef.current = controller;
 
-    hoverTimer.current = setTimeout(async () => {
+    openTimer.current = setTimeout(async () => {
       if (controller.signal.aborted) return;
 
-      const rect = anchorEl.getBoundingClientRect();
+      // Re-check bounding rect if element is still connected to DOM
+      let targetX = initialX;
+      let targetY = initialY;
+
+      if (anchorEl && anchorEl.isConnected) {
+        const curRect = anchorEl.getBoundingClientRect();
+        if (curRect.width > 0 || curRect.height > 0) {
+          targetX = curRect.left;
+          targetY = curRect.bottom + 4;
+        }
+      }
+
+      // If coordinates are invalid, do not display preview card
+      if (targetX <= 0 && targetY <= 4) {
+        return;
+      }
 
       setState(prev => ({
         ...prev, visible: true, title: wikilinkTitle,
-        x: rect.left, y: rect.bottom + 4,
+        x: targetX, y: targetY,
         loading: true, error: null, noteType: '', tags: [], snippet: '',
       }));
 
@@ -118,34 +150,58 @@ export function useHoverPreview(): [
         if (controller.signal.aborted) return;
         setState(prev => ({ ...prev, loading: false, error: e?.message || 'Failed' }));
       }
-    }, 300);
+    }, 200);
   }, []);
 
   const onHoverEnd = useCallback(() => {
-    if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; }
-    if (cancelRef.current) { cancelRef.current.abort(); cancelRef.current = null; }
-    setState(EMPTY_STATE);
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null; }
+    if (closeTimer.current) { clearTimeout(closeTimer.current); }
+    // 300ms grace period so user can move mouse cursor from link into the card
+    closeTimer.current = setTimeout(() => {
+      if (cancelRef.current) { cancelRef.current.abort(); cancelRef.current = null; }
+      setState(EMPTY_STATE);
+    }, 300);
+  }, []);
+
+  const onCardEnter = useCallback(() => {
+    // User is hovering inside the card: cancel close timer!
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  const onCardLeave = useCallback(() => {
+    // User mouse left the card: start close timer
+    if (closeTimer.current) { clearTimeout(closeTimer.current); }
+    closeTimer.current = setTimeout(() => {
+      if (cancelRef.current) { cancelRef.current.abort(); cancelRef.current = null; }
+      setState(EMPTY_STATE);
+    }, 250);
   }, []);
 
   useEffect(() => {
     return () => {
-      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      clearTimers();
       if (cancelRef.current) cancelRef.current.abort();
     };
   }, []);
 
-  return [state, onHoverStart, onHoverEnd];
+  return [state, onHoverStart, onHoverEnd, onCardEnter, onCardLeave];
 }
 
 /**
  * The floating preview card component. Renders a fixed-position card
  * that shows note metadata and a content snippet.
  */
-export function HoverPreviewCard({ state, onClose }: {
+export function HoverPreviewCard({ state, onClose, onMouseEnter, onMouseLeave }: {
   state: HoverPreviewState;
-  onClose: () => void;
+  onClose?: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }) {
   if (!state.visible) return null;
+  if (state.x <= 0 && state.y <= 4) return null;
 
   const cardWidth = 320;
   const adjustedX = Math.min(state.x, window.innerWidth - cardWidth - 16);
@@ -160,19 +216,20 @@ export function HoverPreviewCard({ state, onClose }: {
         left: Math.max(8, adjustedX),
         top: Math.max(8, adjustedY),
         width: cardWidth,
-        maxHeight: 200,
+        maxHeight: 220,
         overflowY: 'auto',
-        background: 'var(--bg-primary, #ffffff)',
-        border: '1px solid var(--border, #e2e8f0)',
-        borderRadius: 10,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
-        padding: 14,
-        fontFamily: 'var(--font-ui, sans-serif)',
+        background: 'var(--bg-elevated, #ffffff)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        boxShadow: 'var(--shadow-md, 0 4px 20px rgba(0,0,0,0.12))',
+        padding: '12px 14px',
+        fontFamily: 'var(--font-sans, sans-serif)',
         fontSize: 13,
         lineHeight: 1.5,
         pointerEvents: 'auto',
       }}
-      onMouseLeave={onClose}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave || onClose}
     >
       {state.loading ? (
         <div style={{

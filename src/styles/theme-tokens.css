@@ -20,19 +20,19 @@
 :root,
 :root[data-theme="light"] {
   /* Archive paper surfaces */
-  --bg-primary: #F6F0E3;
-  --bg-secondary: #FBF8F0;
-  --bg-tertiary: #EFE8D6;
-  --bg-elevated: #FFFDF7;
-  --bg-glass: rgba(251, 248, 240, 0.9);
-  --bg-hover: #EBE3D0;
-  --bg-active: #E1D8C2;
+  --bg-primary: #F6F3EE;
+  --bg-secondary: #EDE8DF;
+  --bg-tertiary: #E5E0D6;
+  --bg-elevated: #FFFFFF;
+  --bg-glass: rgba(246, 243, 238, 0.92);
+  --bg-hover: #E4DDD1;
+  --bg-active: #D9D1C3;
 
   /* Ink */
-  --text-primary: #1C211E;
-  --text-secondary: #4F574F;
-  --text-tertiary: #878D80;
-  --text-inverse: #FBF8F0;
+  --text-primary: #1A1918;
+  --text-secondary: #4A4845;
+  --text-tertiary: #8A8680;
+  --text-inverse: #F6F3EE;
 
   /* Working hues */
   --accent-primary: #3D6A50;          /* local moss — saved / local / primary confirm */
@@ -67,7 +67,7 @@
   /* Graphite rules */
   --border: #D7CEBB;
   --border-subtle: #E8E1CF;
-  --border-focus: #C74632;
+  --border-focus: #355F9E;
 
   --shadow-sm: 0 1px 2px rgba(58, 48, 30, 0.07);
   --shadow-md: 0 4px 12px rgba(58, 48, 30, 0.1);
@@ -141,18 +141,18 @@
   /* Vault insight severity (AgentPanel) */
   --severity-critical: #B23A28;
   --severity-critical-bg: rgba(199, 70, 50, 0.09);
-  --severity-critical-border: rgba(199, 70, 50, 0.26);
-  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 9%, var(--bg-elevated));
+  --severity-critical-border: var(--border);
+  --severity-critical-surface: var(--bg-elevated, #FFFFFF);
 
   --severity-warning: #A56A1B;
   --severity-warning-bg: rgba(165, 106, 27, 0.1);
-  --severity-warning-border: rgba(165, 106, 27, 0.26);
-  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 10%, var(--bg-elevated));
+  --severity-warning-border: var(--border);
+  --severity-warning-surface: var(--bg-elevated, #FFFFFF);
 
   --severity-info: #355F9E;
   --severity-info-bg: rgba(53, 95, 158, 0.08);
-  --severity-info-border: rgba(53, 95, 158, 0.22);
-  --severity-info-surface: color-mix(in srgb, var(--severity-info) 9%, var(--bg-elevated));
+  --severity-info-border: var(--border);
+  --severity-info-surface: var(--bg-elevated, #FFFFFF);
 
   --insight-chip-bg: var(--bg-tertiary);
   --insight-chip-border: var(--border);
@@ -250,7 +250,7 @@
 
   --border: #3D473E;
   --border-subtle: #29322B;
-  --border-focus: #E36852;
+  --border-focus: #79A6E2;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
@@ -315,18 +315,18 @@
 
   --severity-critical: #E36852;
   --severity-critical-bg: rgba(227, 104, 82, 0.16);
-  --severity-critical-border: rgba(227, 104, 82, 0.4);
-  --severity-critical-surface: color-mix(in srgb, var(--severity-critical) 13%, var(--bg-secondary));
+  --severity-critical-border: var(--border);
+  --severity-critical-surface: var(--bg-elevated);
 
   --severity-warning: #D9A344;
   --severity-warning-bg: rgba(217, 163, 68, 0.14);
-  --severity-warning-border: rgba(217, 163, 68, 0.36);
-  --severity-warning-surface: color-mix(in srgb, var(--severity-warning) 13%, var(--bg-secondary));
+  --severity-warning-border: var(--border);
+  --severity-warning-surface: var(--bg-elevated);
 
   --severity-info: #79A6E2;
   --severity-info-bg: rgba(121, 166, 226, 0.14);
-  --severity-info-border: rgba(121, 166, 226, 0.34);
-  --severity-info-surface: color-mix(in srgb, var(--severity-info) 13%, var(--bg-secondary));
+  --severity-info-border: var(--border);
+  --severity-info-surface: var(--bg-elevated);
 
   --insight-chip-bg: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-primary) 4%);
   --insight-chip-border: var(--border);

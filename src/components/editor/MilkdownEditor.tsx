@@ -79,12 +79,14 @@ function MilkdownInner({ value, onChange }: MilkdownEditorProps) {
   wlAutocompleteRef.current = wlAutocomplete;
 
   // Hover preview for [[wikilinks]]
-  const [hoverState, onHoverStart, onHoverEnd] = useHoverPreview();
+  const [hoverState, onHoverStart, onHoverEnd, onCardEnter, onCardLeave] = useHoverPreview();
 
   // AI Fact-Check Suggestion Layer (Phase 3)
   const {
     suggestions: editorSuggestions,
     isScanning: isSuggestionScanning,
+    hasScanned: hasSuggestionScanned,
+    lastScanTime: suggestionScanTime,
     dismissSuggestion: dismissEditorSuggestion,
     acceptSuggestion,
     resolveReconciliationConflict,
@@ -847,12 +849,19 @@ function MilkdownInner({ value, onChange }: MilkdownEditorProps) {
       )}
 
       {/* Hover preview for wikilinks */}
-      <HoverPreviewCard state={hoverState} onClose={onHoverEnd} />
+      <HoverPreviewCard
+        state={hoverState}
+        onClose={onHoverEnd}
+        onMouseEnter={onCardEnter}
+        onMouseLeave={onCardLeave}
+      />
 
       {/* AI Fact-Check Suggestion Overlay — ProseMirror wave underline + anchored card */}
       <EditorSuggestionOverlay
         suggestions={editorSuggestions}
         isScanning={isSuggestionScanning}
+        hasScanned={hasSuggestionScanned}
+        lastScanTime={suggestionScanTime}
         onDismiss={dismissEditorSuggestion}
         onAccept={handleAcceptSuggestion}
         onNavigateToSource={(path) => {

@@ -263,7 +263,7 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
                   color: 'var(--text-primary)',
                   lineHeight: 1.5,
                 }}>
-                  💡 {action.tip}
+                  {action.tip}
                 </div>
               </div>
             </div>

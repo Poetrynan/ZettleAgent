@@ -37,18 +37,18 @@ export function ActivityRail() {
   const { counts: inboxCounts } = useInboxCounts();
 
   const primary: RailItem[] = [
-    { view: 'dashboard', icon: <IconChart size={18} />, label: t('toolbar.dashboard') },
-    { view: 'note', icon: <IconFile size={18} />, label: t('toolbar.note') },
-    { view: 'graph', icon: <IconNetwork size={18} />, label: t('toolbar.graph') },
-    { view: 'canvas', icon: <IconCanvas size={18} />, label: t('toolbar.canvas') },
-    { view: 'bases', icon: <IconStack size={18} />, label: t('toolbar.bases') },
-    { view: 'calendar', icon: <IconCalendar size={18} />, label: t('toolbar.calendar') },
-    { view: 'review', icon: <IconBrain size={18} />, label: t('review.navTitle') },
-    { view: 'knowledge', icon: <IconDatabase size={18} />, label: t('knowledge.navTitle') },
+    { view: 'dashboard', icon: <IconChart size={18} />, label: `01 · ${t('toolbar.dashboard')}` },
+    { view: 'note', icon: <IconFile size={18} />, label: `02 · ${t('toolbar.note')}` },
+    { view: 'graph', icon: <IconNetwork size={18} />, label: `03 · ${t('toolbar.graph')}` },
+    { view: 'canvas', icon: <IconCanvas size={18} />, label: `04 · ${t('toolbar.canvas')}` },
+    { view: 'bases', icon: <IconStack size={18} />, label: `05 · ${t('toolbar.bases')}` },
+    { view: 'calendar', icon: <IconCalendar size={18} />, label: `06 · ${t('toolbar.calendar')}` },
+    { view: 'review', icon: <IconBrain size={18} />, label: `07 · ${t('review.navTitle')}` },
+    { view: 'knowledge', icon: <IconDatabase size={18} />, label: `08 · ${t('knowledge.navTitle')}` },
   ];
 
   const settings: RailItem = {
-    view: 'settings', icon: <IconSettings size={18} />, label: t('settings.title'),
+    view: 'settings', icon: <IconSettings size={18} />, label: `09 · ${t('settings.title')}`,
   };
 
   const inboxTotal = inboxCounts?.total ?? 0;

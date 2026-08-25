@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './contexts/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { ResizablePanel } from './components/layout/ResizablePanel';
 import { ActivityRail } from './components/layout/ActivityRail';
+import { WorkstageHeader } from './components/layout/WorkstageHeader';
 import { MarkdownViewer } from './components/editor/MarkdownViewer';
 import { SmartChat } from './components/chat/SmartChat';
 import { Dashboard } from './components/dashboard/Dashboard';
@@ -281,8 +282,7 @@ function AppLayout() {
       />
 
       <div className="app-shell">
-      {/* Far left: mode navigation. Outside the resizable panel on purpose —
-          Ctrl+B hides the file tree, not the ability to change views. */}
+      {/* Far left: Single unified mode navigation rail */}
       <ActivityRail />
 
       {/* Left: Sidebar (resizable) */}
@@ -299,39 +299,15 @@ function AppLayout() {
 
       {/* Center: Main content */}
       <div className="app-main">
-        {/* Command strip — names where you are, not a flat pill tray.
-            Primary mode navigation lives in the Archive Rail (left panel). */}
-        <div className="app-toolbar">
-          <div className="app-toolbar-left">
-            <button
-              className={`btn btn-icon-sm app-toolbar-sidebar-btn ${state.isSidebarOpen ? 'active' : ''}`}
-              onClick={toggleSidebar}
-              title={state.lang === 'zh' ? '切换侧边栏 (Ctrl+B)' : 'Toggle Sidebar (Ctrl+B)'}
-            >
-              <IconSidebar size={16} />
-            </button>
-            <div className="context-strip">
-              <span className="context-strip-view">{viewTitles[currentView]}</span>
-              {currentView === 'note' && state.currentFile && (
-                <>
-                  <span className="context-strip-sep" aria-hidden="true">·</span>
-                  <span className="context-strip-file" title={state.currentFile}>
-                    {currentFileName}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="app-toolbar-actions">
-            <button
-              className={`btn btn-icon-sm chat-toggle-btn ${state.isChatOpen ? 'active' : ''}`}
-              onClick={toggleChat}
-              title={t('toolbar.chat')}
-            >
-              <IconChat size={16} />
-            </button>
-          </div>
-        </div>
+        <WorkstageHeader
+          view={currentView}
+          viewTitle={viewTitles[currentView]}
+          currentFileName={currentFileName}
+          toggleSidebar={toggleSidebar}
+          toggleChat={toggleChat}
+          isSidebarOpen={state.isSidebarOpen}
+          isChatOpen={state.isChatOpen}
+        />
 
         <div className="view-host">
           {/* Dashboard is the landing view, so it stays in the startup chunk and

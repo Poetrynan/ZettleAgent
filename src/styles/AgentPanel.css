@@ -6,9 +6,9 @@
   right: 12px;
   bottom: 12px;
   width: 320px;
-  background: var(--bg-elevated);
+  background: var(--bg-elevated, #FFFFFF);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 12px);
+  border-radius: var(--radius-sm, 2px);
   box-shadow: var(--shadow-lg);
   z-index: 150;
   display: flex;
@@ -29,8 +29,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: transparent;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated, #FFFFFF);
   user-select: none;
 }
 
@@ -38,9 +38,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  color: var(--accent-secondary, #2563EB);
+  color: var(--text-primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -49,10 +49,10 @@
   border: none;
   background: none;
   font-size: 16px;
-  color: var(--text-tertiary, #94A3B8);
+  color: var(--text-tertiary);
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -60,8 +60,8 @@
 }
 
 .agent-panel-close:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
-  color: var(--text-primary, #0F172A);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .agent-panel-body {
@@ -73,6 +73,7 @@
   gap: 12px;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  background: var(--bg-primary);
 }
 
 .agent-panel-body::-webkit-scrollbar {
@@ -85,7 +86,7 @@
 
 .agent-panel-body::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm, 2px);
   transition: background var(--duration-fast) ease;
 }
 
@@ -102,27 +103,28 @@
 .agent-section-title {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text-tertiary, #64748B);
+  color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .agent-context-card {
-  background: var(--bg-secondary, rgba(248, 250, 252, 0.7));
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 2px);
   padding: 8px 10px;
   font-size: 12px;
   line-height: 1.4;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   gap: 4px;
+  box-shadow: var(--shadow-sm);
 }
 
 .agent-context-card strong {
   font-weight: 600;
-  color: var(--text-primary, #0F172A);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -131,25 +133,25 @@
 .agent-suggestion-card {
   background: var(--bg-elevated, #FFFFFF);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-sm, 2px);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
 }
 
 .agent-suggestion-card:hover {
-  border-color: var(--accent-secondary, #2563EB);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-0.5px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .agent-suggestion-title {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-primary, #0F172A);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -157,7 +159,7 @@
 
 .agent-suggestion-desc {
   font-size: 11px;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
   line-height: 1.4;
 }
 
@@ -168,53 +170,52 @@
 }
 
 .agent-btn {
-  padding: 5px 10px;
-  font-size: 10px;
+  padding: 4px 8px;
+  font-size: 11px;
   font-weight: 600;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm, 2px);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: transparent;
+  background: var(--bg-elevated, #FFFFFF);
+  color: var(--text-primary);
 }
 
 .agent-btn-primary {
-  background: linear-gradient(135deg, var(--accent-secondary-bg), var(--success-bg));
-  color: var(--accent-secondary);
-  border-color: var(--accent-secondary-border);
+  background: var(--accent, #3B82F6);
+  color: #FFFFFF;
+  border-color: var(--accent, #3B82F6);
 }
 
 .agent-btn-primary:hover {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-secondary) 18%, var(--bg-elevated)), color-mix(in srgb, var(--success) 10%, var(--bg-elevated)));
-  border-color: color-mix(in srgb, var(--accent-secondary) 40%, var(--border));
-  transform: translateY(-0.5px);
+  background: var(--accent-hover, #2563EB);
+  border-color: var(--accent-hover, #2563EB);
 }
 
 .agent-btn-secondary {
-  background: var(--bg-tertiary, rgba(0, 0, 0, 0.03));
-  color: var(--text-secondary, #475569);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   border-color: var(--border);
 }
 
 .agent-btn-secondary:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+  background: var(--bg-hover);
   color: var(--text-primary);
-  transform: translateY(-0.5px);
+  border-color: var(--border-strong);
 }
 
 .agent-btn-sparkle {
-  background: var(--step-export-tint);
-  color: var(--step-export-btn);
-  border-color: var(--step-export-border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border);
 }
 
 .agent-btn-sparkle:hover {
-  background: color-mix(in srgb, var(--step-export-accent) 18%, var(--bg-elevated));
-  border-color: color-mix(in srgb, var(--step-export-accent) 40%, var(--border));
-  transform: translateY(-0.5px);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }
 
 /* Floating toggles for opening AgentPanel */
@@ -227,31 +228,31 @@
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border-radius: var(--radius-md, 8px);
-  background: var(--bg-elevated);
+  border-radius: var(--radius-sm, 2px);
+  background: var(--bg-elevated, #FFFFFF);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
 .agent-floating-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-0.5px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
 }
 
 .agent-floating-toggle.active {
-  border-color: var(--accent-secondary, #2563EB);
-  color: var(--accent-secondary, #2563EB);
+  border-color: var(--accent, #3B82F6);
+  color: var(--accent, #3B82F6);
 }
 
 /* ═══════════════════════════════════════════════════════════════ */
-/* Vault Insights — severity-tinted cards (theme-tokens.css)        */
+/* Vault Insights — Swiss Paper cards                              */
 /* ═══════════════════════════════════════════════════════════════ */
 
 .vault-insights-section {
@@ -283,87 +284,94 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  padding: 3px 8px;
-  border-radius: 5px;
-  border: 1px solid transparent;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 2px);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   transition: background 150ms ease, border-color 150ms ease;
 }
 
 .vault-insight-severity-badge.severity-critical {
-  background: var(--severity-critical-bg);
-  color: var(--severity-critical);
-  border-color: var(--severity-critical-border);
+  background: var(--bg-elevated, #FFFFFF);
+  color: var(--danger, #EF4444);
+  border-color: var(--danger, #EF4444);
 }
 
 .vault-insight-severity-badge.severity-warning {
-  background: var(--severity-warning-bg);
-  color: var(--severity-warning);
-  border-color: var(--severity-warning-border);
+  background: var(--bg-elevated, #FFFFFF);
+  color: var(--warning, #F59E0B);
+  border-color: var(--warning, #F59E0B);
 }
 
 .vault-insight-severity-badge.severity-info {
-  background: var(--severity-info-bg);
-  color: var(--severity-info);
-  border-color: var(--severity-info-border);
+  background: var(--bg-elevated, #FFFFFF);
+  color: var(--accent, #3B82F6);
+  border-color: var(--accent, #3B82F6);
 }
 
 .vault-insight-count {
   font-size: 9px;
   font-weight: 700;
   color: var(--text-secondary);
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
-  padding: 2px 7px;
-  border-radius: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 2px);
   min-width: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
 .vault-insight-card {
-  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elevated, #FFFFFF);
+  border-radius: var(--radius-sm, 2px);
+  border: 1px solid var(--border);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 5px;
   cursor: pointer;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
   box-shadow: var(--shadow-sm);
 }
 
 .vault-insight-card:hover {
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  border-color: var(--border-strong);
 }
 
 .vault-insight-critical .vault-insight-card {
-  background: var(--severity-critical-surface);
-  border: 1px solid var(--severity-critical-border);
-  border-left: 3px solid var(--severity-critical);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger, #EF4444);
 }
 
 .vault-insight-critical .vault-insight-card:hover {
-  border-color: color-mix(in srgb, var(--severity-critical) 55%, var(--border));
+  border-color: var(--border-strong);
+  border-left-color: var(--danger, #EF4444);
 }
 
 .vault-insight-warning .vault-insight-card {
-  background: var(--severity-warning-surface);
-  border: 1px solid var(--severity-warning-border);
-  border-left: 3px solid var(--severity-warning);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning, #F59E0B);
 }
 
 .vault-insight-warning .vault-insight-card:hover {
-  border-color: color-mix(in srgb, var(--severity-warning) 55%, var(--border));
+  border-color: var(--border-strong);
+  border-left-color: var(--warning, #F59E0B);
 }
 
 .vault-insight-info .vault-insight-card {
-  background: var(--severity-info-surface);
-  border: 1px solid var(--severity-info-border);
-  border-left: 3px solid var(--severity-info);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent, #3B82F6);
 }
 
 .vault-insight-info .vault-insight-card:hover {
-  border-color: color-mix(in srgb, var(--severity-info) 55%, var(--border));
+  border-color: var(--border-strong);
+  border-left-color: var(--accent, #3B82F6);
 }
 
 .vault-insight-header {
@@ -403,15 +411,15 @@
 
 .vault-insight-note-chip {
   font-size: 9px;
-  padding: 2px 7px;
-  background: var(--insight-chip-bg);
-  border-radius: 4px;
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm, 2px);
   color: var(--text-secondary);
-  max-width: 96px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid var(--insight-chip-border);
+  border: 1px solid var(--border);
 }
 
 .vault-insight-more {
@@ -447,10 +455,10 @@
 }
 
 .agent-btn-xs {
-  padding: 3px 10px !important;
-  font-size: 9px !important;
+  padding: 3px 8px !important;
+  font-size: 10px !important;
   font-weight: 600 !important;
-  border-radius: 4px !important;
+  border-radius: var(--radius-sm, 2px) !important;
 }
 
 /* ── Context / status utilities (theme-aware) ─────────────────── */

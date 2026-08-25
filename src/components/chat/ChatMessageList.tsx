@@ -7,6 +7,7 @@ import {
   IconClipboard,
   IconSearch,
   IconWarning,
+  IconFile,
 } from '../icons';
 import { t } from '../../lib/i18n';
 import { MarkdownRenderer } from '../editor/MarkdownRenderer';
@@ -18,13 +19,10 @@ import {
   TypingIndicator,
 } from './AgentThoughtStream';
 import { DiffApprovalCard } from './DiffApprovalCard';
+import { DecisionGate } from '../primitives/DecisionGate';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-// Separate chain-of-thought from the final answer ONLY via reliable structured
-// markers (DeepSeek-style <think></think> tags). We do NOT guess by paragraph
-// patterns (e.g. "思考：/Step/Action:"), which is exactly what mixed CoT into the
-// answer — Manus/Genspark keep reasoning in a dedicated channel, never regex-parsed text.
 function extractThinkTags(content: string): { thinking: string; answer: string } {
   const tagRegex = /<think>([\s\S]*?)(?:<\/think>|$)/gi;
   const thinkingParts: string[] = [];
@@ -39,13 +37,8 @@ function extractThinkTags(content: string): { thinking: string; answer: string }
   return { thinking: thinkingParts.join('\n\n'), answer };
 }
 
-// Resolve what goes into the ThinkingBlock vs the MarkdownRenderer for a message.
-// Agent narration (already split off into `thinkingContent` by the streaming layer)
-// takes precedence; otherwise fall back to extracting <think> tags from `content`.
 function resolveThinkingAndAnswer(msg: Message): { thinking: string; answer: string } {
   const hasToolCalls = !!(msg.toolCalls && msg.toolCalls.length > 0);
-  // While an agent step is still streaming, the accumulating text is narration —
-  // don't render it as the answer yet (a typing indicator shows instead).
   if (msg.streaming && msg.isAgentStep && hasToolCalls && !msg.thinkingContent) {
     return { thinking: msg.content, answer: '' };
   }
@@ -100,16 +93,12 @@ export function CopyButton({ content }: { content: string }) {
       className="chat-copy-btn"
       onClick={handleCopy}
       title={copied ? 'Copied!' : 'Copy'}
+      aria-label={copied ? 'Copied' : 'Copy'}
     >
       {copied ? <IconCheck size={13} /> : <IconClipboard size={13} />}
     </button>
   );
 }
-
-// ── Message action buttons ─────────────────────────────────────────
-// Hover-revealed regenerate / edit / retry actions. They share the "reset the
-// conversation to this point and re-run" primitive on the parent — this UI
-// layer just decides which anchor to point at.
 
 function IconRegenerate({ size = 13 }: { size?: number }) {
   return (
@@ -145,11 +134,6 @@ function EditButton({ onClick, label }: { onClick: () => void; label: string }) 
   );
 }
 
-/**
- * Inline editor over a user message. Enter submits, Shift+Enter newlines,
- * Escape cancels. Committing calls `onSubmit` with the trimmed content —
- * parent handles truncation and resend.
- */
 function UserMessageEditor({
   initial, onSubmit, onCancel, isZh,
 }: { initial: string; onSubmit: (v: string) => void; onCancel: () => void; isZh: boolean }) {
@@ -159,16 +143,17 @@ function UserMessageEditor({
     const el = ref.current;
     if (!el) return;
     el.focus();
-    // Place caret at end and auto-grow to fit initial content.
     el.setSelectionRange(el.value.length, el.value.length);
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 300)}px`;
   }, []);
+
   const commit = () => {
     const trimmed = value.trim();
     if (trimmed && trimmed !== initial.trim()) onSubmit(trimmed);
     else onCancel();
   };
+
   return (
     <div className="chat-user-edit">
       <textarea
@@ -219,19 +204,13 @@ interface ChatMessageListProps {
     descriptionZh: string;
   }[];
   onSelectTemplate?: (prompt: string) => void;
-  /** 审批卡片解决回调(approved/rejected 后由父组件移除卡片) */
+  /** 审批卡片解决回调 */
   onApprovalResolved?: (approvalId: string, approved: boolean) => void;
-  /** Redo the AI reply at this index (walks back to its prompting user turn). */
   onRegenerate?: (assistantIndex: number) => void;
-  /** Replace the user message at this index and re-run from there. */
   onEditResend?: (userIndex: number, newContent: string) => void;
-  /** Re-run the turn that produced the failed reply at this index. */
   onRetryError?: (assistantIndex: number) => void;
-  /** Scroll handler on the scrollable message container (drives stick-to-bottom). */
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
-  /** Show the floating scroll-to-bottom button. */
   showScrollToBottom?: boolean;
-  /** Jump back to the newest message. */
   onScrollToBottom?: () => void;
   isZh?: boolean;
 }
@@ -257,29 +236,38 @@ export function ChatMessageList({
   onScrollToBottom,
   isZh = true,
 }: ChatMessageListProps) {
-  // Index of the user message currently being edited inline, if any.
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
   return (
-    <div className="panel-content chat-scroll-area" style={{ padding: 0, position: 'relative' }} onScroll={onScroll}
-      role="log" aria-live="polite" aria-relevant="additions text">
+    <div
+      className="panel-content chat-scroll-area"
+      style={{ padding: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}
+      onScroll={onScroll}
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
       {messages.length === 0 ? (
-        <div className="chat-empty-state">
-          <div className="chat-empty-icon">
-            {mode === 'agent' ? <IconRobot size={24} /> : <IconSearch size={24} />}
-          </div>
-          <div className="chat-empty-title">
-            {t('chat.askAnything')}
-          </div>
-          <div className="chat-empty-desc">
-            {mode === 'agent' ? t('chat.agentDesc') : t('chat.ragDesc')}
+        <div className="chat-empty-desk" style={{ margin: 'auto', maxWidth: '360px', width: '100%', padding: '32px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px' }}>
+          {/* Header Info */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+              {isZh ? '智能助手 · 本地知识库' : 'INTELLIGENT AGENT'}
+            </div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.5, maxWidth: '320px' }}>
+              {isZh 
+                ? '支持自主文件检索、知识图谱推演、笔记批处理与内容重构。随时输入问题或从下方推荐指令开始。'
+                : 'Supports autonomous retrieval, graph reasoning, batch note refactoring and synthesis. Ask a question or pick a command below.'}
+            </div>
           </div>
 
-          {/* Starting points, not decoration: each one is a real prompt that
-              gets loaded into the composer so the user can edit before sending. */}
+          {/* Quick template triggers */}
           {activeTemplates && activeTemplates.length > 0 && (
-            <div className="chat-empty-templates">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginTop: '8px' }}>
+              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                {isZh ? '推荐指令 · COMMANDS' : 'COMMANDS'}
+              </div>
               {activeTemplates.map((tmpl) => {
-                const desc = isZh ? tmpl.descriptionZh : tmpl.description;
                 const prompt = isZh ? tmpl.promptZh : tmpl.prompt;
                 return (
                   <button
@@ -292,9 +280,6 @@ export function ChatMessageList({
                       <span className="chat-empty-template-label">
                         {isZh ? tmpl.labelZh : tmpl.label}
                       </span>
-                      <span className="chat-empty-template-desc">
-                        {desc}
-                      </span>
                     </div>
                   </button>
                 );
@@ -305,176 +290,170 @@ export function ChatMessageList({
       ) : (
         <div className="chat-turn-list">
           {messages.map((msg, idx) => (
-            <div key={msg.id} className={`chat-turn ${msg.role === 'user' ? 'chat-turn-user' : 'chat-turn-agent'}`}>
+            <article
+              key={msg.id}
+              className={`chat-turn ${msg.role === 'user' ? 'chat-turn-user' : 'chat-turn-agent'}`}
+              aria-label={msg.role === 'user' ? 'User Message' : 'Assistant Message'}
+            >
               <div className="chat-turn-col">
-              <div className={`chat-turn-body ${msg.role === 'user' ? 'chat-turn-body-user' : ''}`}>
-                {/* Which sub-agent answered. Only shown when there is one to name,
-                    so the common single-agent case carries no chrome at all. */}
-                {msg.role === 'assistant' && msg.agentName && (
-                  <div className="chat-turn-agent-label">{msg.agentName}</div>
-                )}
-                {/* Agent Work Stream — show from first frame when isAgentStep or timeline exists */}
-                {(msg.isAgentStep || (msg.agentTimeline && msg.agentTimeline.length > 0)) ? (
-                  <AgentThoughtStream
-                    steps={msg.agentThinkingSteps || []}
-                    toolCalls={msg.toolCalls}
-                    isStreaming={msg.streaming || false}
-                    interrupted={!!msg.agentInterrupted}
-                    terminalError={!!msg.isError}
-                    expandedToolCalls={expandedToolCalls}
-                    toggleToolCallExpand={toggleToolCallExpand}
-                    agentTimeline={msg.agentTimeline}
-                    planSteps={msg.agentPlanSteps}
-                  />
-                ) : (
-                  /* Fallback for other sessions that only have toolCalls */
-                  msg.toolCalls && msg.toolCalls.length > 0 && (
-                    <div className="tool-calls-container">
-                      {msg.toolCalls.map(tc => (
-                        <ToolCallBubble
-                          key={tc.id}
-                          tc={tc}
-                          isExpanded={expandedToolCalls.has(tc.id)}
-                          onToggle={() => toggleToolCallExpand(tc.id)}
-                        />
-                      ))}
-                    </div>
-                  )
-                )}
-                {/* Message Content */}
-                {msg.role === 'assistant' ? (
-                  (() => {
-                    if (msg.isApprovalRequest && msg.approvalId) {
-                      return (
-                        <DiffApprovalCard
-                          approvalId={msg.approvalId}
-                          actionDescription={msg.approvalDescription || ''}
-                          diffJson={msg.approvalDiffJson}
-                          onResolved={(approved) => {
-                            // 通知父组件移除/标记该审批卡片
-                            onApprovalResolved?.(msg.approvalId!, approved);
-                          }}
-                          lang={isZh ? 'zh' : 'en'}
-                        />
-                      );
-                    }
-                    if (msg.isError) {
-                      return (
-                        <div className="chat-turn-error" role="alert">
-                          <IconWarning size={14} />
-                          <span>{parseErrorMessage(msg.content, isZh)}</span>
-                        </div>
-                      );
-                    }
-                    const hasTimeline = !!(msg.agentTimeline && msg.agentTimeline.length > 0);
-                    const isAgentLayout = !!(msg.isAgentStep || hasTimeline);
-                    const streamingAnswer = msg.content?.trim() ?? '';
-                    // Agent layout: answer only during explicit synthesis stream (answerStreaming).
-                    // Pre-tool narration lives in AgentThoughtStream — never the plain bubble.
-                    if (isAgentLayout && msg.streaming && streamingAnswer && msg.answerStreaming) {
-                      return (
-                        <>
-                          {msg.thinkingContent && <ThinkingBlock content={msg.thinkingContent} />}
-                          <div className="chat-answer-divider">
-                            <span>{isZh ? '回答' : 'Answer'}</span>
-                          </div>
-                          <MarkdownRenderer content={streamingAnswer} className="chat-markdown" />
-                          <span className="chat-stream-cursor" aria-hidden="true" />
-                        </>
-                      );
-                    }
-                    if (isAgentLayout && msg.streaming) {
-                      return null;
-                    }
-                    const { thinking, answer } = resolveThinkingAndAnswer(msg);
-                    const showThinkingBlock = thinking && !hasTimeline;
-                    // Show divider when there's both thinking/tool content AND a final answer
-                    const showDivider = (hasTimeline || showThinkingBlock) && answer;
-                    return (
-                      <>
-                        {showThinkingBlock && <ThinkingBlock content={thinking} />}
-                        {showDivider && (
-                          <div className="chat-answer-divider">
-                            <span>{isZh ? '回答' : 'Answer'}</span>
-                          </div>
-                        )}
-                        {answer && <MarkdownRenderer content={answer} className="chat-markdown" />}
-                        {/* Blinking caret so "still writing" is visually distinct
-                            from "finished" without reading the trace header. */}
-                        {msg.streaming && answer && <span className="chat-stream-cursor" aria-hidden="true" />}
-                        {msg.streaming && !answer && (
-                          ragProgress && mode === 'rag'
-                            ? <RagProgressIndicator stage={ragProgress} searchMode={searchMode} />
-                            : showTyping ? <TypingIndicator /> : null
-                        )}
-                      </>
-                    );
-                  })()
-                ) : (
-                  editingIndex === idx ? (
-                    <UserMessageEditor
-                      initial={msg.content}
-                      onSubmit={(newContent) => { setEditingIndex(null); onEditResend?.(idx, newContent); }}
-                      onCancel={() => setEditingIndex(null)}
-                      isZh={isZh}
+                <div className={`chat-turn-body ${msg.role === 'user' ? 'chat-turn-body-user' : ''}`}>
+                  {msg.role === 'assistant' && msg.agentName && (
+                    <div className="chat-turn-agent-label">{msg.agentName}</div>
+                  )}
+
+                  {/* Agent Execution Ledger (Thought Stream / Tool Traces) */}
+                  {(msg.isAgentStep || (msg.agentTimeline && msg.agentTimeline.length > 0)) ? (
+                    <AgentThoughtStream
+                      steps={msg.agentThinkingSteps || []}
+                      toolCalls={msg.toolCalls}
+                      isStreaming={msg.streaming || false}
+                      interrupted={!!msg.agentInterrupted}
+                      terminalError={!!msg.isError}
+                      expandedToolCalls={expandedToolCalls}
+                      toggleToolCallExpand={toggleToolCallExpand}
+                      agentTimeline={msg.agentTimeline}
+                      planSteps={msg.agentPlanSteps}
                     />
                   ) : (
-                    /* Full markdown only when the user actually pasted a fenced
-                       code block — running the renderer over ordinary prose
-                       would turn stray `_` / `*` into unintended emphasis.
-                       Everything else just needs newlines preserved. */
-                    /```/.test(msg.content)
-                      ? <MarkdownRenderer content={msg.content} className="chat-markdown" />
-                      : <div className="chat-user-text">{msg.content}</div>
-                  )
+                    msg.toolCalls && msg.toolCalls.length > 0 && (
+                      <div className="tool-calls-container">
+                        {msg.toolCalls.map(tc => (
+                          <ToolCallBubble
+                            key={tc.id}
+                            tc={tc}
+                            isExpanded={expandedToolCalls.has(tc.id)}
+                            onToggle={() => toggleToolCallExpand(tc.id)}
+                          />
+                        ))}
+                      </div>
+                    )
+                  )}
+
+                  {/* Message Content: Primary Answer Surface */}
+                  {msg.role === 'assistant' ? (
+                    (() => {
+                      if (msg.isApprovalRequest && msg.approvalId) {
+                        return (
+                          <DecisionGate
+                            title={isZh ? '写盘操作待审核' : 'Pending Write Operation'}
+                            status="pending"
+                            className="chat-turn-decision-gate"
+                          >
+                            <DiffApprovalCard
+                              approvalId={msg.approvalId}
+                              actionDescription={msg.approvalDescription || ''}
+                              diffJson={msg.approvalDiffJson}
+                              onResolved={(approved) => {
+                                onApprovalResolved?.(msg.approvalId!, approved);
+                              }}
+                              lang={isZh ? 'zh' : 'en'}
+                            />
+                          </DecisionGate>
+                        );
+                      }
+                      if (msg.isError) {
+                        return (
+                          <div className="chat-turn-error" role="alert">
+                            <IconWarning size={14} />
+                            <span>{parseErrorMessage(msg.content, isZh)}</span>
+                          </div>
+                        );
+                      }
+
+                      const hasTimeline = !!(msg.agentTimeline && msg.agentTimeline.length > 0);
+                      const isAgentLayout = !!(msg.isAgentStep || hasTimeline);
+                      const streamingAnswer = msg.content?.trim() ?? '';
+
+                      if (isAgentLayout && msg.streaming && streamingAnswer && msg.answerStreaming) {
+                        return (
+                          <div className="chat-turn-answer-box">
+                            {msg.thinkingContent && <ThinkingBlock content={msg.thinkingContent} />}
+                            <MarkdownRenderer content={streamingAnswer} className="chat-markdown" />
+                            <span className="chat-stream-cursor" aria-hidden="true" />
+                          </div>
+                        );
+                      }
+
+                      if (isAgentLayout && msg.streaming) {
+                        return null;
+                      }
+
+                      const { thinking, answer } = resolveThinkingAndAnswer(msg);
+                      const showThinkingBlock = thinking && !hasTimeline;
+
+                      return (
+                        <div className="chat-turn-answer-box">
+                          {showThinkingBlock && <ThinkingBlock content={thinking} />}
+                          {answer && <MarkdownRenderer content={answer} className="chat-markdown" />}
+                          {msg.streaming && answer && <span className="chat-stream-cursor" aria-hidden="true" />}
+                          {msg.streaming && !answer && (
+                            ragProgress && mode === 'rag'
+                              ? <RagProgressIndicator stage={ragProgress} searchMode={searchMode} />
+                              : showTyping ? <TypingIndicator /> : null
+                          )}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    editingIndex === idx ? (
+                      <UserMessageEditor
+                        initial={msg.content}
+                        onSubmit={(newContent) => { setEditingIndex(null); onEditResend?.(idx, newContent); }}
+                        onCancel={() => setEditingIndex(null)}
+                        isZh={isZh}
+                      />
+                    ) : (
+                      /```/.test(msg.content)
+                        ? <MarkdownRenderer content={msg.content} className="chat-markdown" />
+                        : <div className="chat-user-text">{msg.content}</div>
+                    )
+                  )}
+                </div>
+
+                {/* Turn Actions */}
+                {msg.role === 'user' && editingIndex !== idx && (
+                  <div className="chat-msg-actions user-actions">
+                    <EditButton
+                      onClick={() => setEditingIndex(idx)}
+                      label={isZh ? '编辑' : 'Edit'}
+                    />
+                  </div>
+                )}
+
+                {msg.role === 'assistant' && msg.content && !msg.streaming && !msg.isError && (
+                  <div className="chat-msg-actions">
+                    <CopyButton content={
+                      (msg.agentTimeline && msg.agentTimeline.some(e => e.type === 'thought'))
+                        ? msg.agentTimeline.filter(e => e.type === 'thought').map(e => e.content || '').join('')
+                        : resolveThinkingAndAnswer(msg).answer || msg.content
+                    } />
+                    <RegenerateButton
+                      onClick={() => onRegenerate?.(idx)}
+                      label={isZh ? '重新生成' : 'Regenerate'}
+                    />
+                  </div>
+                )}
+
+                {msg.role === 'assistant' && msg.isError && !msg.streaming && (
+                  <div className="chat-msg-actions">
+                    <button
+                      className="chat-msg-action-btn retry-btn"
+                      onClick={() => onRetryError?.(idx)}
+                      title={isZh ? '重试' : 'Retry'}
+                      aria-label={isZh ? '重试' : 'Retry'}
+                    >
+                      <IconRegenerate size={13} />
+                      <span>{isZh ? '重试' : 'Retry'}</span>
+                    </button>
+                  </div>
                 )}
               </div>
-              {/* Action row — sits OUTSIDE the bubble so buttons never overlap
-                  message text. Row-level hover on .chat-bubble-col reveals it. */}
-              {msg.role === 'user' && editingIndex !== idx && (
-                <div className="chat-msg-actions user-actions">
-                  <EditButton
-                    onClick={() => setEditingIndex(idx)}
-                    label={isZh ? '编辑' : 'Edit'}
-                  />
-                </div>
-              )}
-              {/* Copy Button for AI messages */}
-              {msg.role === 'assistant' && msg.content && !msg.streaming && !msg.isError && (
-                <div className="chat-msg-actions">
-                  <CopyButton content={
-                    (msg.agentTimeline && msg.agentTimeline.some(e => e.type === 'thought'))
-                      ? msg.agentTimeline.filter(e => e.type === 'thought').map(e => e.content || '').join('')
-                      : resolveThinkingAndAnswer(msg).answer || msg.content
-                  } />
-                  <RegenerateButton
-                    onClick={() => onRegenerate?.(idx)}
-                    label={isZh ? '重新生成' : 'Regenerate'}
-                  />
-                </div>
-              )}
-              {/* Retry button for error messages */}
-              {msg.role === 'assistant' && msg.isError && !msg.streaming && (
-                <div className="chat-msg-actions">
-                  <button
-                    className="chat-msg-action-btn retry-btn"
-                    onClick={() => onRetryError?.(idx)}
-                    title={isZh ? '重试' : 'Retry'}
-                    aria-label={isZh ? '重试' : 'Retry'}
-                  >
-                    <IconRegenerate size={13} />
-                    <span>{isZh ? '重试' : 'Retry'}</span>
-                  </button>
-                </div>
-              )}
-              </div>
-            </div>
+            </article>
           ))}
           <div ref={messagesEndRef} />
         </div>
       )}
-      {/* Floating jump-to-newest. Only appears once the user has scrolled away,
-          which is also when auto-follow is suspended. */}
+
       {showScrollToBottom && messages.length > 0 && (
         <button
           className="chat-scroll-bottom-btn"

@@ -5,8 +5,8 @@
 
 :root,
 :root[data-theme="light"] {
-  --viz-surface-bg: #FAFBFC;
-  --viz-surface-grid: #D0D5DD;
+  --viz-surface-bg: var(--bg-primary, #F6F3EE);
+  --viz-surface-grid: color-mix(in srgb, var(--border) 45%, transparent);
   --viz-label-node-fill: #334155;
   --viz-label-node-halo: #FFFFFF;
   --viz-label-edge-fill: #4B5563;
@@ -15,10 +15,10 @@
 
 :root[data-theme="dark"],
 :root.dark-theme {
-  --viz-surface-bg: #0F172A;
-  --viz-surface-grid: #334155;
+  --viz-surface-bg: var(--bg-primary, #151A17);
+  --viz-surface-grid: color-mix(in srgb, var(--border) 35%, transparent);
   --viz-label-node-fill: #E2E8F0;
-  --viz-label-node-halo: #0F172A;
+  --viz-label-node-halo: #151A17;
   --viz-label-edge-fill: #CBD5E1;
   --viz-canvas-default-edge: #94A3B8;
 }

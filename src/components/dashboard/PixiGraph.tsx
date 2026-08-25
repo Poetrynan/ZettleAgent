@@ -327,8 +327,8 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     const applyVizTheme = () => {
       const p = getVizPalette();
       const app = appRef.current;
-      if (app?.renderer) {
-        app.renderer.background.color = hexToPixi(p.surface.bg);
+      if (app?.renderer?.background) {
+        app.renderer.background.alpha = 0;
       }
       for (const t of linkLabelRef.current.values()) {
         t.style.fill = hexToPixi(p.label.edgeFill);
@@ -359,10 +359,12 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     let destroyed = false;
     const mount = async () => {
       const app = new Application();
+      const initW = width > 0 ? width : (containerRef.current?.clientWidth || window.innerWidth);
+      const initH = height > 0 ? height : (containerRef.current?.clientHeight || window.innerHeight);
       await app.init({
-        width,
-        height,
-        background: hexToPixi(getVizPalette().surface.bg),
+        width: initW,
+        height: initH,
+        backgroundAlpha: 0,
         antialias: true,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
@@ -374,7 +376,12 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       }
       appRef.current = app;
       const host = containerRef.current;
-      if (host) host.appendChild(app.canvas);
+      if (host) {
+        app.canvas.style.width = '100%';
+        app.canvas.style.height = '100%';
+        app.canvas.style.display = 'block';
+        host.appendChild(app.canvas);
+      }
 
       // world 容器(相机),用 renderGroup 让平移/缩放在 GPU 做
       const world = new Container({ isRenderGroup: true });

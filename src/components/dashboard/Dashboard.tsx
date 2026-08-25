@@ -263,50 +263,43 @@ export function Dashboard() {
 
   return (
     <div className="panel">
-      <div className="panel-content">
-        {/* ── Now — current state of the vault ────────────────────── */}
+      <div className="panel-content" style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 40px' }}>
+        {/* ── Document Desk Header (Swiss Editorial) ────────────────── */}
         <section className="dash-band dash-band--now animate-enter" aria-label={state.lang === 'zh' ? '当前状态' : 'Current state'}>
-          <div className="dash-band-header">
-            <h1 className="dash-band-title">
-              {t('dashboard.welcome')}{' '}
-              <span className="logo-wordmark" style={{ fontSize: 'inherit' }}>
-                <span className="logo-zettel">Zettel</span>
-                <span className="logo-lambda-wrap"><span className="logo-agent-lambda">Λ</span></span>
-                <span className="logo-agent-rest">gent</span>
+          <div className="doc-desk-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: 'var(--accent, #3B82F6)', fontWeight: 700, fontSize: '14px' }}>—</span>
+              <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent, #3B82F6)' }}>
+                {state.lang === 'zh' ? '知识库概览 · OVERVIEW' : 'VAULT OVERVIEW'}
               </span>
-            </h1>
-            <p className="dash-band-subtitle">{t('app.tagline')}</p>
+            </div>
           </div>
 
-          <div className="animate-enter animate-enter-delay-1 dashboard-stat-grid">
-            <div className="stat-card">
-              <div className="stat-card-icon" style={{ background: 'rgba(61, 106, 80, 0.1)', color: 'var(--moss)' }}>
-                <IconNote size={20} />
-              </div>
-              <div className="stat-card-value">{fileCount}</div>
-              <div className="stat-card-label">{t('dashboard.totalNotes')}</div>
+          <h1 className="doc-desk-title" style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text-primary)', margin: '0 0 6px', lineHeight: 1.25 }}>
+            {state.lang === 'zh' ? '知识库总览' : 'Vault Overview'}
+          </h1>
+          <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: '0 0 20px' }}>
+            {state.lang === 'zh'
+              ? '查看笔记数量、知识图谱关联与索引状态，轻松管理本地知识库。'
+              : 'Monitor your notes, graph connections, and vector index in one unified workspace.'}
+          </p>
+
+          {/* Clean Swiss Stat Grid */}
+          <div className="animate-enter animate-enter-delay-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
+            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
+              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>01 / TOTAL NOTES</div>
+              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>{fileCount}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '卡片与笔记总数' : 'Total notes'}</div>
             </div>
-            <div className="stat-card">
-              <div className="stat-card-icon" style={{ background: state.vaultPath ? 'rgba(61, 106, 80, 0.1)' : 'rgba(120, 120, 128, 0.08)', color: state.vaultPath ? 'var(--moss)' : 'var(--text-tertiary)' }}>
-                <IconDatabase size={20} />
-              </div>
-              <div className="stat-card-value stat-card-value--compact">{state.vaultPath ? t('dashboard.connected') : t('dashboard.none')}</div>
-              <div className="stat-card-label">{t('dashboard.vault')}</div>
+            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
+              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>02 / GRAPH EDGES</div>
+              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--accent, #3B82F6)' }}>{graphLinkCount !== null ? graphLinkCount : 0}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '双向链接关联' : 'Wikilinks & connections'}</div>
             </div>
-            <div className="stat-card">
-              <div
-                className="stat-card-icon"
-                style={{
-                  background: graphLinkCount !== null ? 'rgba(53, 95, 158, 0.1)' : 'rgba(120, 120, 128, 0.08)',
-                  color: graphLinkCount !== null ? 'var(--cobalt)' : 'var(--text-tertiary)',
-                }}
-              >
-                <IconLink size={20} />
-              </div>
-              <div className="stat-card-value">
-                {graphLinkCount !== null ? graphLinkCount : '—'}
-              </div>
-              <div className="stat-card-label">{t('dashboard.graphLinks')}</div>
+            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
+              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>03 / VAULT STATE</div>
+              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--success, #10B981)' }}>{state.vaultPath ? 'ACTIVE' : 'IDLE'}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '本地存储 · 离线可用' : 'Local storage ready'}</div>
             </div>
           </div>
         </section>
@@ -550,8 +543,8 @@ export function Dashboard() {
                   ? 'LLM 分析每篇笔记内容，生成分类、标签、关系类型和 confidence。构建知识图谱的关系边。'
                   : 'LLM analyzes each note to generate classification, tags, relation types and confidence. Builds knowledge graph relation edges.'}
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-quaternary, var(--text-tertiary))', fontStyle: 'italic' }}>
-                {state.lang === 'zh' ? '💡 先构建索引，整理效果更好' : '💡 Build index first for better results'}
+              <div style={{ fontSize: '10px', color: 'var(--text-quaternary, var(--text-tertiary))' }}>
+                {state.lang === 'zh' ? '提示：建议先构建索引，以获得最佳整理效果' : 'Tip: Build index first for better results'}
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', marginTop: 'var(--space-1)' }}>
                 <button

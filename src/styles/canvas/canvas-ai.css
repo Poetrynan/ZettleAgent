@@ -37,12 +37,10 @@
   width: 420px;
   max-width: 90vw;
   max-height: 70vh;
-  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.95));
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid var(--canvas-glass-border, rgba(203, 213, 225, 0.6));
-  border-radius: var(--radius-xl);
-  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(226, 232, 240, 0.3);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -380,11 +378,9 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 90;
-  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.95));
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--canvas-glass-border, rgba(0, 0, 0, 0.08));
-  border-radius: var(--radius-xl);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 12px 20px;
   box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.12);
   animation: agentProgressIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -508,11 +504,9 @@
 }
 
 .canvas-smart-card {
-  background: var(--canvas-glass-bg, rgba(255, 255, 255, 0.92));
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  border: 1px solid var(--canvas-glass-border, rgba(203, 213, 225, 0.6));
-  border-radius: var(--radius-xl);
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.12);
   min-width: 360px;
   overflow: hidden;

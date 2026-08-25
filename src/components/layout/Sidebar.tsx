@@ -30,6 +30,10 @@ import {
   IconTrash,
   IconEdit,
   IconUpload,
+  IconNote,
+  IconNetwork,
+  IconCanvas,
+  IconBrain,
 } from '../icons';
 import { useFileTree } from '../../hooks/useFileTree';
 import { ContextMenu } from '../common/ContextMenu';
@@ -1064,47 +1068,24 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginRight: 'var(--space-4)' }}>
-            <span className="logo-wordmark" style={{ fontSize: 'var(--text-xl)' }}>
-              <span className="logo-zettel">Zettel</span>
-              <span className="logo-lambda-wrap"><span className="logo-agent-lambda">Λ</span></span>
-              <span className="logo-agent-rest">agent</span>
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-1)', flexShrink: 0 }}>
-            <button className="btn btn-ghost btn-icon-sm" onClick={handleSelectVault} title={t('sidebar.selectVault')}>
-              <IconFolder size={16} />
-            </button>
-            <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateNoteInline} title={t('sidebar.newFile')}>
-              <IconFilePlus size={16} />
-            </button>
-            <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateFolderInline} title={t('sidebar.newFolder')}>
-              <IconFolderPlus size={16} />
-            </button>
-
-            <button className="btn btn-ghost btn-icon-sm" onClick={handleImportFiles} disabled={!state.vaultPath || isImporting}
-              title={!state.vaultPath ? t('sidebar.tipNoVault') : (state.lang === 'zh' ? '导入文件 / 附件 (.md, .pdf, .docx 等)' : 'Import files / attachments (.md, .pdf, .docx etc.)')}>
-              <IconUpload size={16} />
-            </button>
-            <button className="btn btn-ghost btn-icon-sm" onClick={async () => {
-              try { const path = await openOrCreateDailyNote(); setCurrentFile(path); setView('note'); await loadDailyTree(); }
-              catch (err) { showToast(String(err), 'error'); }
-            }} title={t('sidebar.dailyNote')}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-            </button>
-          </div>
-
+      {/* Swiss Sidebar Actions Toolbar */}
+      <div className="sidebar-vault-badge" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleSelectVault} title={t('sidebar.selectVault')}>
+            <IconFolder size={14} />
+          </button>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateNoteInline} title={t('sidebar.newFile')}>
+            <IconFilePlus size={14} />
+          </button>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateFolderInline} title={t('sidebar.newFolder')}>
+            <IconFolderPlus size={14} />
+          </button>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleImportFiles} disabled={!state.vaultPath || isImporting}
+            title={!state.vaultPath ? t('sidebar.tipNoVault') : (state.lang === 'zh' ? '导入文件 / 附件' : 'Import files')}>
+            <IconUpload size={14} />
+          </button>
         </div>
       </div>
-
-      {/* Mode navigation lives in the Activity Rail (App.tsx) — a 44px icon
-          column outside this panel. It used to be a stacked label list here,
-          which cost the file tree the top half of the sidebar. */}
 
       {/* Filename Search Input — only filters file tree by name */}
 

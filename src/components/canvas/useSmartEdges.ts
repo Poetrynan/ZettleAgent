@@ -129,7 +129,7 @@ export function useSmartEdges(params: SmartEdgesParams) {
             target: tgtId,
             type: 'default',
             style: { stroke: '#60a5fa', strokeDasharray: '4 6', strokeWidth: 1.5, opacity: 0.5 },
-            label: `💡 ${similarity}%`,
+            label: `${similarity}%`,
             labelStyle: { fontSize: 9, fill: '#60a5fa', fontWeight: 500 },
             data: { _smart: true, _smartType: 'suggestion', similarity },
           });
