@@ -15,35 +15,46 @@ export function ModelDownloadModal() {
   const [progress, setProgress] = useState<EmbeddingProgress | null>(null);
   const [visible, setVisible] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     onEmbeddingProgress((p) => {
       setProgress(p);
 
-      // Show modal when a download starts (progress > 0 and < 100)
+      // Debounce showing modal so fast local loads (<600ms) don't flash popup
       if (p.progress > 0 && p.progress < 100) {
         if (hideTimerRef.current) {
           clearTimeout(hideTimerRef.current);
           hideTimerRef.current = null;
         }
-        setVisible(true);
+        if (!showTimerRef.current && !visible) {
+          showTimerRef.current = setTimeout(() => {
+            setVisible(true);
+            showTimerRef.current = null;
+          }, 600);
+        }
       }
 
       // Auto-hide shortly after reaching 100%
       if (p.progress >= 100) {
+        if (showTimerRef.current) {
+          clearTimeout(showTimerRef.current);
+          showTimerRef.current = null;
+        }
         if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
         hideTimerRef.current = setTimeout(() => {
           setVisible(false);
           setProgress(null);
-        }, 800);
+        }, 500);
       }
     });
 
     return () => {
       onEmbeddingProgress(null);
+      if (showTimerRef.current) clearTimeout(showTimerRef.current);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
-  }, []);
+  }, [visible]);
 
   if (!visible || !progress) return null;
 

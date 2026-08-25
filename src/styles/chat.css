@@ -548,27 +548,7 @@
   background: var(--ochre-tint);
 }
 
-/* Trace items: keep execution visually subordinate to the answer */
-.trace-item {
-  border-left: 3px solid transparent;
-}
 
-.trace-item.trace-item-stage {
-  border-left-color: var(--cobalt-line);
-}
-
-.trace-item.trace-item-tool.status-running {
-  border-left-color: var(--ochre-line);
-}
-
-.trace-item.trace-item-tool.status-done {
-  border-left-color: var(--moss-line);
-}
-
-.trace-item.trace-item-tool.status-error,
-.trace-item.trace-item-tool.status-denied {
-  border-left-color: var(--vermilion-line);
-}
 
 .agent-thought-header {
   display: flex;

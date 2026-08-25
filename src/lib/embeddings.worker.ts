@@ -1,7 +1,8 @@
 import { pipeline, env } from '@huggingface/transformers';
 
 env.allowLocalModels = true;
-env.allowRemoteModels = true;
+env.allowRemoteModels = false;
+env.useBrowserCache = true;
 
 let extractorPromise: Promise<any> | null = null;
 let extractorFailed = false;
@@ -43,24 +44,38 @@ async function getExtractor() {
   }
 
   if (!extractorPromise) {
+    // 1. Try bundled local model first
+    env.allowRemoteModels = false;
     extractorPromise = withTimeout(
       pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
         device: 'wasm',
         dtype: 'q8',
         progress_callback: progressCallback,
       }),
-      300000,
-      'WASM model loading',
+      60000,
+      'Local WASM model loading',
     ).catch((err) => {
-      console.warn('WASM embedding failed, trying WebGPU:', err);
+      console.warn('Local WASM embedding failed, trying WebGPU or fallback:', err);
       return withTimeout(
         pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
           device: 'webgpu',
           dtype: 'q8',
           progress_callback: progressCallback,
         }),
+        60000,
+        'Local WebGPU model loading',
+      );
+    }).catch((err) => {
+      console.warn('Local model loading failed, trying remote with cache:', err);
+      env.allowRemoteModels = true;
+      return withTimeout(
+        pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
+          device: 'wasm',
+          dtype: 'q8',
+          progress_callback: progressCallback,
+        }),
         300000,
-        'WebGPU model loading',
+        'Remote WASM model loading',
       );
     }).catch((err) => {
       console.error('All embedding backends failed:', err);
