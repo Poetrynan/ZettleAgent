@@ -267,17 +267,26 @@ export function Dashboard() {
         <div style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 40px' }}>
         {/* ── Document Desk Header (Swiss Editorial) ────────────────── */}
         <section className="dash-band dash-band--now animate-enter" aria-label={state.lang === 'zh' ? '当前状态' : 'Current state'}>
-          <div className="doc-desk-header" style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: 'var(--accent, #3B82F6)', fontWeight: 700, fontSize: '14px' }}>—</span>
-              <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent, #3B82F6)' }}>
-                {state.lang === 'zh' ? '知识库概览 · OVERVIEW' : 'VAULT OVERVIEW'}
-              </span>
-            </div>
-          </div>
-
-          <h1 className="doc-desk-title" style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text-primary)', margin: '0 0 6px', lineHeight: 1.25 }}>
-            {state.lang === 'zh' ? '知识库总览' : 'Vault Overview'}
+          {/* 原来的小字 kicker 已并入下面的标题：它的破折号、等宽字、大写和字距都搬过来了，
+              字号仍是标题自己的 24px，只有颜色换成品牌红。 */}
+          <h1
+            className="doc-desk-title"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: '24px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--vermilion, #C74632)',
+              margin: '0 0 6px',
+              lineHeight: 1.25,
+            }}
+          >
+            <span aria-hidden="true">—</span>
+            <span>{state.lang === 'zh' ? '知识库总览' : 'Vault Overview'}</span>
           </h1>
           <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: '0 0 20px' }}>
             {state.lang === 'zh'
