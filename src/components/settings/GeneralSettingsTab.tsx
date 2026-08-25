@@ -13,7 +13,7 @@ import { useApp } from '../../contexts/AppContext';
 import {
   IconGraph, IconDatabase, IconFolder, IconEdit, IconCheck, IconNote,
   IconClipboard, IconSearch, IconChevronRight, IconSun, IconMoon, IconSliders,
-  IconTrash, IconWarning,
+  IconTrash, IconWarning, IconGlobe,
 } from '../icons';
 import { AboutSection } from './AboutSection';
 
@@ -46,7 +46,7 @@ export function GeneralSettingsTab({
   isZh, methodology, setMethodology, showToast, dataPath, dbPath, dailyNotePath, setDailyNotePath,
   newFolderDefaultPath, setNewFolderDefaultPath,
 }: GeneralSettingsTabProps) {
-  const { state } = useApp();
+  const { state, setAppLang } = useApp();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [dailyPathSaved, setDailyPathSaved] = useState(false);
@@ -74,6 +74,40 @@ export function GeneralSettingsTab({
 
   return (
     <div className="settings-tab-content">
+      {/* Language */}
+      <div className="settings-section-card">
+        <h2 style={sectionTitle}>
+          <IconGlobe size={18} /> {t('settings.language')}
+        </h2>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
+          {isZh ? '选择应用程序界面的显示语言。' : 'Choose the display language for the application.'}
+        </div>
+        <div className="language-segment-row" role="radiogroup" aria-label={t('settings.language')} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-2)' }}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={state.lang === 'zh'}
+            className={`theme-segment-btn ${state.lang === 'zh' ? 'active' : ''}`}
+            onClick={() => setAppLang('zh')}
+            style={{ flexDirection: 'row', gap: 8, padding: '12px 16px' }}
+          >
+            <IconGlobe size={16} />
+            <span style={{ fontWeight: state.lang === 'zh' ? 700 : 500 }}>简体中文 (Chinese)</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={state.lang === 'en'}
+            className={`theme-segment-btn ${state.lang === 'en' ? 'active' : ''}`}
+            onClick={() => setAppLang('en')}
+            style={{ flexDirection: 'row', gap: 8, padding: '12px 16px' }}
+          >
+            <IconGlobe size={16} />
+            <span style={{ fontWeight: state.lang === 'en' ? 700 : 500 }}>English (英文)</span>
+          </button>
+        </div>
+      </div>
+
       {/* Appearance */}
       <div className="settings-section-card">
         <h2 style={sectionTitle}>

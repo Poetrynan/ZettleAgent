@@ -71,6 +71,7 @@ export function buildCommands(actions: {
   toggleChat: () => void;
   toggleSidebar: () => void;
   findNote: () => void;
+  setAppLang?: (lang: 'zh' | 'en') => void;
 }): PaletteCommand[] {
   const commands: PaletteCommand[] = [];
 
@@ -125,6 +126,23 @@ export function buildCommands(actions: {
     },
   );
 
+  if (actions.setAppLang) {
+    commands.push(
+      {
+        id: 'lang:zh',
+        label: '界面语言：简体中文 (Switch to Chinese)',
+        keywords: 'language lang 语言 中文 简体 chinese',
+        run: () => actions.setAppLang!('zh'),
+      },
+      {
+        id: 'lang:en',
+        label: 'Interface Language: English (切换为英文)',
+        keywords: 'language lang 语言 英文 english',
+        run: () => actions.setAppLang!('en'),
+      },
+    );
+  }
+
   return commands;
 }
 
@@ -160,7 +178,7 @@ function optionId(index: number): string {
 }
 
 export function QuickSwitcher() {
-  const { state, setCurrentFile, setView, toggleChat, toggleSidebar } = useApp();
+  const { state, setCurrentFile, setView, toggleChat, toggleSidebar, setAppLang } = useApp();
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<PaletteMode>('notes');
   const [query, setQuery] = useState('');
@@ -211,8 +229,9 @@ export function QuickSwitcher() {
         toggleChat,
         toggleSidebar,
         findNote: () => open('notes'),
+        setAppLang,
       }),
-    [setView, toggleChat, toggleSidebar, open],
+    [setView, toggleChat, toggleSidebar, open, setAppLang],
   );
 
   const fileName = (path: string) =>
