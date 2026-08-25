@@ -42,35 +42,15 @@ export const DEFAULT_RERANK_TIMEOUT_MS = 6000;
 export const DEFAULT_MAX_SNIPPET_CHARS = 1000;
 
 /**
- * Recommended model: `Xenova/bge-reranker-base` (ONNX export of
- * `BAAI/bge-reranker-base`).
+ * Recommended model: `maidalun1020/bce-reranker-base_v1` (NetEase Youdao BCEmbedding Reranker, ONNX int8).
  *
  * Why this one:
- * - **Chinese is first-class.** XLM-RoBERTa-base backbone with the 250k-token
- *   multilingual vocabulary, and BAAI trained it on Chinese *and* English ranking
- *   data. English-only rerankers (ms-marco-MiniLM et al.) are ~23 MB and very
- *   tempting, but this project's primary users write Chinese notes, so they are
- *   deliberately NOT offered.
- * - **Permissive licence.** MIT, unlike `jina-reranker-v2-base-multilingual`
- *   (CC-BY-NC), which an open-source app cannot ship as a default.
- * - **Cheapest multilingual option.** `bge-reranker-v2-m3` is stronger but ~2x the
- *   parameters; at 568M it is not a reasonable download for a note-taking app.
- *
- * Download cost, measured from the repo (not estimated):
- * - `model_quantized.onnx` (q8/int8) — 266 MB
- * - `tokenizer.json` + `sentencepiece.bpe.model` — 22 MB
- * - **≈ 288 MB total**, vs 1.04 GB for fp32 and 531 MB for fp16.
- *
- * Quantization choice: **q8**. Note that `model_q4.onnx` in this repo is *826 MB*
- * — larger than q8 — because only the matmuls are 4-bit while the 250k × 768
- * embedding table stays fp32, and that table is most of the model. q8 quantizes
- * the embeddings too, which is where the win is. Ranking also tolerates
- * quantization unusually well: only the *relative* order of scores matters, not
- * the absolute logits.
- *
- * ~288 MB is precisely why Tier 1 is the default and this tier is opt-in.
+ * - **Optimized specifically for Chinese-English RAG and QA retrieval.**
+ * - **XLM-RoBERTa backbone with cross-lingual pretraining.**
+ * - **Permissive Apache-2.0 / MIT compatible licence.**
+ * - **Bundled locally in `public/models/maidalun1020/bce-reranker-base_v1/` for 100% offline-first execution.**
  */
-export const CROSS_ENCODER_MODEL = 'Xenova/bge-reranker-base';
+export const CROSS_ENCODER_MODEL = 'maidalun1020/bce-reranker-base_v1';
 
 
 // ── Pure helpers (unit-tested; no model, no worker) ─────────────────────────

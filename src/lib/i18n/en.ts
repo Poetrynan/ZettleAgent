@@ -1049,13 +1049,13 @@ export const en = {
     'settings.rerank.save': 'Save rerank settings',
     'settings.rerank.saved': 'Saved',
     'settings.rerank.backendNotReady': 'This feature is not ready in the backend yet — the setting could not be loaded or saved. Search keeps using the lexical reranker in the meantime.',
-    'settings.rerank.model.title': 'Cross-encoder model',
-    'settings.rerank.model.facts': 'Xenova/bge-reranker-base · about 288 MB · MIT licence · Chinese supported (multilingual XLM-RoBERTa backbone).',
-    'settings.rerank.model.fallback': 'Downloading is optional. Without the model, search automatically falls back to the lexical reranker — it does not error and nothing is lost but a little ranking accuracy.',
-    'settings.rerank.model.download': 'Download model (~288 MB)',
-    'settings.rerank.model.downloading': 'Downloading…',
-    'settings.rerank.model.ready': 'Model loaded and ready in this session.',
-    'settings.rerank.model.failed': 'Download failed — search is still working, using the lexical reranker.',
+    'settings.rerank.model.title': 'Cross-Encoder Neural Reranker',
+    'settings.rerank.model.facts': 'maidalun1020/bce-reranker-base_v1 (NetEase Youdao) · ~270 MB · Apache-2.0 · Fine-tuned for Chinese-English RAG and QA retrieval.',
+    'settings.rerank.model.fallback': 'Pre-bundled with the app for 100% offline usage. Without loading, search gracefully falls back to native Rust lexical reranking.',
+    'settings.rerank.model.download': 'Pre-load & Test Run',
+    'settings.rerank.model.downloading': 'Loading local model…',
+    'settings.rerank.model.ready': 'NetEase Youdao BCE Reranker ready.',
+    'settings.rerank.model.failed': 'Load failed — search is active using native lexical reranker.',
 
     // Which rerank tier actually ordered the results on screen. Shown because a
     // mode that silently reports itself as active while a lower tier does the work

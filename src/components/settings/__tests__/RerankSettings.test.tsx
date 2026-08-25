@@ -106,12 +106,10 @@ describe('RerankSettingsSection', () => {
 
     await waitFor(() => expect(screen.getByTestId('rerank-model-download')).toBeInTheDocument());
 
-    // The three facts a user needs before committing to a 288 MB download.
-    // "288 MB" also appears on the download button, so match the facts line by a
-    // substring unique to it rather than the ambiguous size string.
-    expect(screen.getByText(/about 288 MB · MIT licence · Chinese supported/)).toBeInTheDocument();
-    expect(screen.getByText(/Xenova\/bge-reranker-base/)).toBeInTheDocument();
-    expect(screen.getByText(/Downloading is optional.*falls back to the lexical reranker/)).toBeInTheDocument();
+    // The facts a user needs for the bundled BCE Reranker
+    expect(screen.getByText(/maidalun1020\/bce-reranker-base_v1/)).toBeInTheDocument();
+    expect(screen.getByText(/Apache-2.0/)).toBeInTheDocument();
+    expect(screen.getByText(/Pre-bundled with the app/)).toBeInTheDocument();
   });
 
   it('keeps the tier-3 cost knobs behind the advanced toggle', async () => {

@@ -10,10 +10,10 @@
  */
 import { pipeline, env } from '@huggingface/transformers';
 
-// Reranking is strictly opt-in, so unlike the bundled embedding model this one is
-// allowed to be fetched on demand — but only when the user asked for it.
+// Bundled locally in public/models/maidalun1020/bce-reranker-base_v1/ for 100% offline usage.
 env.allowLocalModels = true;
-env.allowRemoteModels = true;
+env.allowRemoteModels = false;
+env.useBrowserCache = true;
 
 let rankerPromise: Promise<any> | null = null;
 let rankerFailed = false;

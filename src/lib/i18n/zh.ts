@@ -1049,13 +1049,13 @@ export const zh = {
     'settings.rerank.save': '保存重排设置',
     'settings.rerank.saved': '已保存',
     'settings.rerank.backendNotReady': '该功能后端尚未就绪 —— 设置无法读取或保存。在此期间搜索继续使用词法重排。',
-    'settings.rerank.model.title': 'CrossEncoder 模型',
-    'settings.rerank.model.facts': 'Xenova/bge-reranker-base · 约 288 MB · MIT 许可 · 支持中文（多语言 XLM-RoBERTa 骨干）。',
-    'settings.rerank.model.fallback': '下载是可选的。不下载模型，搜索会自动回退到词法重排 —— 不会报错，只是少一点排序精度。',
-    'settings.rerank.model.download': '下载模型（约 288 MB）',
-    'settings.rerank.model.downloading': '下载中…',
-    'settings.rerank.model.ready': '模型已加载，本次会话可用。',
-    'settings.rerank.model.failed': '下载失败 —— 搜索仍然正常，正在使用词法重排。',
+    'settings.rerank.model.title': 'CrossEncoder 神经重排模型',
+    'settings.rerank.model.facts': 'maidalun1020/bce-reranker-base_v1（网易有道）· 约 270 MB · Apache-2.0 许可 · 专为中英双语 RAG 检索问答精排调优。',
+    'settings.rerank.model.fallback': '模型已打包内置在应用资源中，纯本地离线运行。若未加载，系统会自动平滑回退到 Rust 原生词法重排。',
+    'settings.rerank.model.download': '预加载与测试运行',
+    'settings.rerank.model.downloading': '正在加载本地模型…',
+    'settings.rerank.model.ready': '网易有道 BCE Reranker 本地模型已就绪。',
+    'settings.rerank.model.failed': '加载失败 —— 搜索仍然正常，已自动切换为 Rust 词法重排。',
 
     // 当前这批结果究竟是哪一档排出来的。必须显示：一个自称已生效、实际却由更低档
     // 干活的模式，跟 bug 没有区别。
