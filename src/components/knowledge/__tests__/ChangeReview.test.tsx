@@ -80,6 +80,7 @@ function detail(over: Partial<ChangeSetDetail> = {}): ChangeSetDetail {
         affectedObjects: [],
         conflict: null,
         conflictMessage: null,
+        relation: null,
       },
     ],
     undoableEntries: 0,
@@ -238,6 +239,58 @@ describe('ChangeReview', () => {
     // 原位置/新位置各自一行，两侧都写清楚，而不是画一个假的整篇重写。
     const rows = document.querySelectorAll('.kc-diff-move .kc-kv-val');
     expect(Array.from(rows).map(r => r.textContent)).toEqual(['old.md', 'new.md']);
+  });
+
+  it('shows a relation change as an edge, not as a text rewrite', async () => {
+    vi.mocked(getPendingChangeSets).mockResolvedValue([
+      summary({ intent: 'knowledge_graph_plan' }),
+    ]);
+    vi.mocked(getChangeSetDetail).mockResolvedValue(
+      detail({
+        ops: [
+          {
+            ...detail().ops[0],
+            opKind: 'add_relation',
+            path: 'D:\\vault\\a.md',
+            before: null,
+            after: 'a.md --[supports]--> b.md (confidence 0.60)',
+            beforeSource: 'none',
+            relation: {
+              sourcePath: 'D:\\vault\\a.md',
+              targetPath: 'D:\\vault\\b.md',
+              relationType: 'supports',
+              confidence: 0.6,
+              reason: 'Both notes argue the same point.',
+              origin: 'agent_proposed',
+              oldConfidence: null,
+              oldReason: null,
+            },
+          },
+        ],
+      }),
+    );
+
+    render(<ChangeReview />);
+    // 批次意图不是给用户读的内部工具名。
+    expect(await screen.findByText('Graph relation proposals')).toBeInTheDocument();
+    fireEvent.click(await screen.findByText('Review diff'));
+
+    // 方向、类型、来源都摊开：一条边不能只显示一行摘要，也不能画成整篇重写。
+    await waitFor(() => expect(document.querySelector('.kc-diff-move')).not.toBeNull());
+    const rows = document.querySelectorAll('.kc-diff-move .kc-kv-val');
+    expect(Array.from(rows).map(r => r.textContent)).toEqual([
+      'a.md',
+      'supports',
+      'b.md',
+      'inferred by the Agent · confidence 0.60',
+    ]);
+    expect(
+      screen.getByText(
+        'Approving adds this directed edge to the graph. Neither note’s text changes.',
+      ),
+    ).toBeInTheDocument();
+    // 关系操作没有正文，所以不该出现任何 diff 行。
+    expect(document.querySelectorAll('.kc-diff-line').length).toBe(0);
   });
 
   it('has both languages for every state, step and operation kind', () => {

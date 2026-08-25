@@ -176,7 +176,16 @@ function InboxCard({
         </time>
       </header>
 
-      <h3 className="kc-card-title">{item.title}</h3>
+      {/*
+        变更类的标题就是批次的 intent，也就是一个内部工具名（`knowledge_graph_plan`、
+        `propagate_fact_update`…）。图谱与事实传播开始往这里投递提议之后，不翻译的代价
+        是收件箱里出现一行只有开发者看得懂的字。查不到的照原样显示，不猜。
+      */}
+      <h3 className="kc-card-title">
+        {item.kind === 'change'
+          ? translateCode('knowledge.change.intent.', item.title)
+          : item.title}
+      </h3>
 
       {item.kind === 'change' && item.summary && (
         <div className="kc-card-summary">{tf('knowledge.inbox.opCount', item.summary)}</div>

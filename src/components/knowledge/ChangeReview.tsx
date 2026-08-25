@@ -13,7 +13,7 @@ import {
 } from '../../lib/tauri';
 import { collapseUnchanged, diffLines } from '../../lib/diff';
 import { t, tf } from '../../lib/i18n';
-import { KcEmpty, KcFailed, KcLoading, KcPill, KcTone, useAsync } from './states';
+import { KcEmpty, KcFailed, KcLoading, KcPill, KcTone, translateCode, useAsync } from './states';
 
 /**
  * 变更审阅 / one place to review every write the Agent proposed or made.
@@ -64,13 +64,76 @@ function shortPath(path: string | null): string {
 }
 
 /**
+ * 一条边的改动 / one relation change, rendered as an edge.
+ *
+ * 关系操作不能走文本 diff。一条边没有正文，`before` / `after` 里那两行字是给人读的摘
+ * 要——把它们喂进行级 diff 会得到"整行被删、整行新增"这种既正确又毫无信息量的结果。
+ *
+ * 三件事必须显式说出来，因为它们决定用户要不要点批准：
+ *
+ * - **方向**。`A → B` 和 `B → A` 是两条不同的边，图谱上的推理方向也随之相反。
+ * - **来源**。AI 推断的边和用户自己连的边不能长得一样，否则下一次回看时无从分辨
+ *   "这是我连的还是它猜的"。
+ * - **置信度**。0.6 与 0.95 对应的是"值得看一眼"和"基本可以当事实"，混在一起显示等于
+ *   没有显示。
+ */
+function RelationChange({ op }: { op: ChangeOpDetail }) {
+  const rel = op.relation;
+  if (!rel) {
+    // 关系操作却没有载荷：这是数据问题，不是空状态。说出来比画一个空框好。
+    return <p className="kc-warn">{t('knowledge.change.relationPayloadMissing')}</p>;
+  }
+  const removing = op.opKind === 'delete_relation';
+  const confidence = removing ? rel.oldConfidence ?? rel.confidence : rel.confidence;
+
+  return (
+    <div className="kc-diff kc-diff-move">
+      <div className="kc-kv-row">
+        <span className="kc-kv-key">{t('knowledge.change.relationFrom')}</span>
+        <span className="kc-kv-val" title={rel.sourcePath}>
+          {shortPath(rel.sourcePath)}
+        </span>
+      </div>
+      <div className="kc-kv-row">
+        <span className="kc-kv-key">{t('knowledge.change.relationType')}</span>
+        <span className="kc-kv-val">
+          {translateCode('knowledge.change.relationKind.', rel.relationType)}
+        </span>
+      </div>
+      <div className="kc-kv-row">
+        <span className="kc-kv-key">{t('knowledge.change.relationTo')}</span>
+        <span className="kc-kv-val" title={rel.targetPath}>
+          {shortPath(rel.targetPath)}
+        </span>
+      </div>
+      <div className="kc-kv-row">
+        <span className="kc-kv-key">{t('knowledge.change.relationOrigin')}</span>
+        <span className="kc-kv-val">
+          {translateCode('knowledge.change.relationSource.', rel.origin)}
+          {' · '}
+          {tf('knowledge.change.relationConfidence', confidence.toFixed(2))}
+        </span>
+      </div>
+      {rel.reason && <p className="kc-change-op-reason">{rel.reason}</p>}
+      <p className="kc-muted">
+        {t(removing ? 'knowledge.change.relationRemoves' : 'knowledge.change.relationAdds')}
+      </p>
+    </div>
+  );
+}
+
+/**
  * 一步改动的 diff / one operation, rendered as a diff.
  *
- * 三种情况分开说，因为它们对用户的意义不同：新建（没有"改之前"）、删除（没有"改之
- * 后"）、改名（内容没动，位置动了）。把它们都塞进"全行标绿"或"全行标红"是在制造一个
- * 假 diff。
+ * 四种情况分开说，因为它们对用户的意义不同：新建（没有"改之前"）、删除（没有"改之
+ * 后"）、改名（内容没动，位置动了）、关系（压根没有正文）。把它们都塞进"全行标绿"或
+ * "全行标红"是在制造一个假 diff。
  */
 export function ChangeDiff({ op }: { op: ChangeOpDetail }) {
+  if (op.opKind === 'add_relation' || op.opKind === 'delete_relation') {
+    return <RelationChange op={op} />;
+  }
+
   if (op.opKind === 'rename' || op.opKind === 'move') {
     return (
       <div className="kc-diff kc-diff-move">
@@ -435,7 +498,9 @@ export function ChangeReview({ onOpenSource }: { onOpenSource?: (path: string) =
         <article className="kc-card" key={cs.id}>
           <header className="kc-card-head">
             <KcPill tone={changeStateTone(cs.state)} label={changeStateLabel(cs.state)} />
-            <span className="kc-card-title">{cs.intent ?? cs.actor}</span>
+            <span className="kc-card-title">
+              {cs.intent ? translateCode('knowledge.change.intent.', cs.intent) : cs.actor}
+            </span>
             <span className="kc-muted">{tf('knowledge.change.opCount', cs.opCount)}</span>
             <time className="kc-card-time" dateTime={new Date(cs.updatedAtMs).toISOString()}>
               {new Date(cs.updatedAtMs).toLocaleString()}
