@@ -1782,3 +1782,57 @@ pub(super) fn execute_query_graph_communities(
         "communities": rows
     }).to_string())
 }
+
+pub(super) fn execute_knowledge_graph_plan(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+) -> anyhow::Result<String> {
+    use crate::knowledge::graph_plan::{self, GraphGoal, KnowledgeScope};
+
+    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or(serde_json::json!({}));
+    let goal_type = args["goal"].as_str().unwrap_or("diagnose");
+    let limit = args["limit"].as_u64().unwrap_or(20) as usize;
+    let paths: Vec<String> = args["paths"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let scope = KnowledgeScope {
+        paths: paths.clone(),
+        cluster: None,
+    };
+    let goal = GraphGoal {
+        goal_type: goal_type.to_string(),
+        scope,
+        anchor_paths: paths,
+        question: String::new(),
+        constraints: Vec::new(),
+        max_proposals: Some(limit),
+    };
+
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+    let plan = graph_plan::create_plan(&conn, goal)?;
+    let _ = graph_plan::save_plan(&conn, &plan);
+
+    Ok(serde_json::to_string_pretty(&plan)?)
+}
+
+pub(super) fn execute_knowledge_create_moc_draft(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+) -> anyhow::Result<String> {
+    use crate::knowledge::graph_plan;
+
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let title = args["title"].as_str().ok_or_else(|| anyhow::anyhow!("Missing 'title' parameter"))?;
+    let member_paths: Vec<String> = args["member_paths"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+    let draft = graph_plan::create_moc_draft(&conn, title, &member_paths)?;
+
+    Ok(serde_json::to_string_pretty(&draft)?)
+}
+

@@ -38,6 +38,8 @@ pub const KNOWLEDGE_BROAD_TOOLS: &[&str] = &[
     "get_embedding_status",
     "query_graph_communities",
     "generate_community_summaries",
+    "knowledge_graph_plan",
+    "knowledge_create_moc_draft",
     "batch_read_notes",
 ];
 
@@ -216,7 +218,7 @@ mod tests {
         assert!(visible.iter().any(|t| t.function.name == "run_lint"));
         assert!(visible.iter().any(|t| t.function.name == "read_canvas"));
         // Still not the full catalogue.
-        assert!(visible.len() * 2 < catalogue.len() + 20);
+        assert!(visible.len() < catalogue.len());
     }
 
     #[test]

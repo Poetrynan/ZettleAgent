@@ -1435,6 +1435,56 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
+        // Knowledge Graph Plan
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "knowledge_graph_plan".to_string(),
+                description: "Run structured graph planning to diagnose topology issues (orphans, hub overloads, duplicate concepts, bridging opportunities) and generate safe, evidence-backed relation proposals.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "enum": ["diagnose", "bridge", "duplicates"],
+                            "description": "The planning goal: 'diagnose' (full scan), 'bridge' (connect isolated clusters), 'duplicates' (find semantic redundancies)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of proposals to generate (default: 20)"
+                        },
+                        "paths": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional list of note paths to restrict the planning scope to"
+                        }
+                    }
+                }),
+            },
+        },
+        // Knowledge Create MOC Draft
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "knowledge_create_moc_draft".to_string(),
+                description: "Generate an evidence-backed Map of Content (MOC) draft note from a list of member notes with structural summaries without writing to disk.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "required": ["title", "member_paths"],
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the Map of Content (MOC)"
+                        },
+                        "member_paths": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "List of note paths to include in this MOC"
+                        }
+                    }
+                }),
+            },
+        },
     ]
 }
 
@@ -1550,6 +1600,10 @@ pub async fn try_execute(
         // GraphRAG Communities
         "generate_community_summaries" => Some(graph_ops::execute_generate_community_summaries(arguments, db)),
         "query_graph_communities" => Some(graph_ops::execute_query_graph_communities(arguments, db)),
+
+        // Knowledge Graph Planning & MOC
+        "knowledge_graph_plan" => Some(graph_ops::execute_knowledge_graph_plan(arguments, db)),
+        "knowledge_create_moc_draft" => Some(graph_ops::execute_knowledge_create_moc_draft(arguments, db)),
 
         _ => None,
     };
@@ -1803,12 +1857,12 @@ mod tests {
                 "new_content": "Model X has O(N^2) complexity"
             }).to_string();
 
-            // Try executing propagate fact update. Since note1.md has no dependents, it should return success with 0 dependents.
             let res = try_execute("propagate_fact_update", &args, &db, ".", &[], &config).await;
             assert!(res.is_some());
             let result_str = res.unwrap().unwrap();
-            assert!(result_str.contains("\"success\":true"));
-            assert!(result_str.contains("\"dependents_found\":0"));
+            let v: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+            assert_eq!(v["success"], true);
+            assert_eq!(v["dependents_found"], 0);
         });
     }
 }

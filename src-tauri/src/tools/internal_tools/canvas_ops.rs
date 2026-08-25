@@ -421,8 +421,9 @@ pub(super) fn execute_modify_canvas(
                     // Side-effect of canvas file write — go through the shared
                     // relation service so we never silent-IGNORE conflicts and
                     // so origin stays distinguishable from user wikilinks.
+                    let run_id = crate::llm::tool_hooks::current_run_id();
                     let _ = crate::knowledge::relations::add_relation(
-                        &conn, &op, None, None,
+                        &conn, &op, run_id.as_deref(), None,
                     )?;
                 }
 

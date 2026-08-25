@@ -899,11 +899,11 @@ fn current_content(conn: &Connection, op: &ChangeSetOp) -> ObjectResult<Option<S
 fn transition_allowed(from: ChangeSetState, to: ChangeSetState) -> bool {
     use ChangeSetState::*;
     match (from, to) {
-        // 预演可以反复跑（内容或磁盘变了都要重算）。
-        (Proposed | Previewed | Conflicted, Previewed | Conflicted) => true,
+        // 预演可以反复跑（内容或磁盘变了都要重算，或者已批准的批次在落盘前重新校验）。
+        (Proposed | Previewed | Conflicted | Approved, Previewed | Conflicted) => true,
         (Previewed, AwaitingApproval | Approved) => true,
         (AwaitingApproval, Approved | Rejected) => true,
-        (Approved, Committed | Failed | Conflicted) => true,
+        (Approved, Committed | Failed) => true,
         (Committed, RolledBack) => true,
         // 任何还没进终态的批次都可以被用户否掉（`AwaitingApproval` 已在上面覆盖）。
         (Proposed | Previewed | Conflicted, Rejected) => true,

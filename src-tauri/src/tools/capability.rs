@@ -118,7 +118,7 @@ pub fn capability_of(name: &str) -> ToolCapability {
 
     // 只写派生索引：这些表可以从 `.md` 重建，丢了不算丢用户内容。
     // 这份名单与 `approval::requires_approval` 的 Class C 是同一组，理由也一样。
-    if matches!(name, "extract_facts" | "trigger_sync" | "rebuild_semantic_edges") {
+    if matches!(name, "extract_facts" | "trigger_sync" | "rebuild_semantic_edges" | "generate_community_summaries") {
         return ToolCapability {
             effect: Effect::Reindex,
             risk,
@@ -322,21 +322,27 @@ mod tests {
         }
     }
 
-    /// 未登记的核心工具确实落在兜底分支 / the unclassified ones are visibly unclassified.
-    ///
-    /// 单独一条测试把现状写下来：这四个工具还没有真正的风险分级。等有人分级了，
-    /// 这条测试会失败，那正是提醒去更新它的时机。
+    /// Canvas 与 GraphRAG 工具具有明确的风险与能力分级。
     #[test]
-    fn the_canvas_and_graphrag_tools_are_still_unclassified() {
-        for name in [
-            "compile_canvas_to_note",
-            "generate_canvas_from_notes",
-            "query_graph_communities",
-            "generate_community_summaries",
-        ] {
-            let cap = capability_of(name);
-            assert_eq!(cap.risk, RiskLevel::High, "{name}");
-            assert!(cap.requires_changeset, "{name}");
-        }
+    fn the_canvas_and_graphrag_tools_are_explicitly_classified() {
+        let cap_compile = capability_of("compile_canvas_to_note");
+        assert_eq!(cap_compile.effect, Effect::Write);
+        assert_eq!(cap_compile.risk, RiskLevel::Medium);
+        assert!(cap_compile.requires_changeset);
+
+        let cap_gen_canvas = capability_of("generate_canvas_from_notes");
+        assert_eq!(cap_gen_canvas.effect, Effect::Write);
+        assert_eq!(cap_gen_canvas.risk, RiskLevel::Low);
+        assert!(cap_gen_canvas.requires_changeset);
+
+        let cap_communities = capability_of("query_graph_communities");
+        assert_eq!(cap_communities.effect, Effect::Read);
+        assert_eq!(cap_communities.risk, RiskLevel::Low);
+        assert!(!cap_communities.requires_changeset);
+
+        let cap_summaries = capability_of("generate_community_summaries");
+        assert_eq!(cap_summaries.effect, Effect::Reindex);
+        assert_eq!(cap_summaries.risk, RiskLevel::Low);
+        assert!(!cap_summaries.requires_changeset);
     }
 }

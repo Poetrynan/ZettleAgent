@@ -100,6 +100,9 @@ pub fn is_read_only_tool(name: &str) -> bool {
             | "get_global_timeline"     // graph_ops.rs:563
             | "explain_relationship"    // graph_ops.rs:591 → reads + LLM, no write
             | "query_temporal"          // graph_ops.rs:825
+            | "query_graph_communities" // graph_ops.rs:1705 → SELECT from graph_communities
+            | "knowledge_graph_plan"    // graph_ops.rs → structured planning preview, no write
+            | "knowledge_create_moc_draft" // graph_ops.rs → MOC draft preview, no write
             // ── Web (outbound GET only) ──
             | "web_search"              // web_ops.rs:6
             // ── Canvas read ──
@@ -150,7 +153,9 @@ pub fn requires_approval(name: &str) -> bool {
     //     `files`/`chunks`; disk is the source of truth, never written to.
     //   - rebuild_semantic_edges (workspace_ops.rs:925): recomputes the
     //     `semantic_edges` table from existing embeddings.
-    if matches!(name, "extract_facts" | "trigger_sync" | "rebuild_semantic_edges") {
+    //   - generate_community_summaries (graph_ops.rs:1605): recomputes the
+    //     `graph_communities` cluster cache table.
+    if matches!(name, "extract_facts" | "trigger_sync" | "rebuild_semantic_edges" | "generate_community_summaries") {
         return false;
     }
 
@@ -326,13 +331,15 @@ impl RiskLevel {
 /// cheap to undo.
 pub fn base_risk_level(tool_name: &str) -> RiskLevel {
     match tool_name {
-        // Low — additive, overwrites nothing.
-        "create_note" | "create_folder" | "create_canvas" | "append_to_note" => RiskLevel::Low,
+        // Low — additive, overwrites nothing, or read-only/derived-cache generation.
+        "create_note" | "create_folder" | "create_canvas" | "append_to_note"
+        | "generate_canvas_from_notes" | "query_graph_communities" | "generate_community_summaries"
+        | "knowledge_graph_plan" | "knowledge_create_moc_draft" => RiskLevel::Low,
 
         // Medium — rewrites one object; a pre-write snapshot can restore it.
         "edit_note" | "patch_note" | "apply_edit" | "modify_canvas" | "group_canvas_nodes"
         | "arrange_canvas_by" | "add_relation" | "update_memory" | "ocr_image"
-        | "extract_pdf_text" | "fetch_web_content" => RiskLevel::Medium,
+        | "extract_pdf_text" | "fetch_web_content" | "compile_canvas_to_note" => RiskLevel::Medium,
 
         // High — many objects / structural / hard to review one-by-one.
         "rename_note" | "move_note" | "merge_notes" | "batch_link_notes" | "delete_relation"
@@ -989,7 +996,7 @@ mod tests {
     /// Derived-index writers are exempt but must NOT be in the read-only whitelist.
     #[test]
     fn derived_index_writers_are_exempt_but_not_read_only() {
-        for name in ["extract_facts", "trigger_sync", "rebuild_semantic_edges"] {
+        for name in ["extract_facts", "trigger_sync", "rebuild_semantic_edges", "generate_community_summaries"] {
             assert!(!requires_approval(name), "`{}` is class C (exempt)", name);
             assert!(!is_read_only_tool(name), "`{}` is not read-only", name);
         }

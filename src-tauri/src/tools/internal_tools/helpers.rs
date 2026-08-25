@@ -311,13 +311,10 @@ pub(crate) fn resolve_path_multi_vault(
 
     // If not found in any vault, default to primary vault (for new files, etc.)
     if !primary_vault.is_empty() {
-        let full = std::path::PathBuf::from(primary_vault).join(path);
-        let canonical = full.canonicalize().unwrap_or(full.clone());
-        let vc = std::path::Path::new(primary_vault)
-            .canonicalize()
-            .unwrap_or_else(|_| std::path::PathBuf::from(primary_vault));
-        if canonical.starts_with(&vc) || !full.exists() {
-            // For non-existing files (e.g. about to be created), just return the path
+        let full = resolve_for_containment(&std::path::PathBuf::from(primary_vault).join(path));
+        let vc = resolve_for_containment(std::path::Path::new(primary_vault));
+        if full.starts_with(&vc) {
+            // For non-existing files (e.g. about to be created), return the normalized path
             return Ok(full);
         }
     }

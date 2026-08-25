@@ -8,7 +8,7 @@ import {
   IconChart, IconSparkle, IconTimeline, IconContradicted, IconClipboard,
   IconEdit, IconSearch, IconFile, IconX,
 } from '../icons';
-import { t } from '../../lib/i18n';
+import { t, getLang } from '../../lib/i18n';
 
 import { listen } from '@tauri-apps/api/event';
 import { useChatSessions } from './useChatSessions';
@@ -779,6 +779,28 @@ export function SmartChat() {
             return [...prev.slice(0, -1), {
               ...last,
               agentTimeline: [...(last.agentTimeline || []).filter(t => !(t.type === 'thought' && t.isStage)), entry],
+            }];
+          });
+          break;
+        }
+        case 'capability_expanded': {
+          // Domain-aware tool surface expansion — inform user why extra knowledge tools were loaded
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role !== 'assistant' || last.streaming === false) return prev;
+            const toolCount = e.tools?.length ?? 0;
+            const isZh = getLang() === 'zh';
+            const label = e.message || (isZh
+              ? `已为本次任务加载图谱与知识能力（+${toolCount} 工具）`
+              : `Loaded graph and knowledge capabilities (+${toolCount} tools)`);
+            const entry: TimelineEntry = {
+              type: 'system_note',
+              content: label,
+              index: timelineIndexRef.current++,
+            };
+            return [...prev.slice(0, -1), {
+              ...last,
+              agentTimeline: [...(last.agentTimeline || []), entry],
             }];
           });
           break;

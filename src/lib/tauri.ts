@@ -1115,11 +1115,12 @@ export interface PlanStep {
 }
 
 export interface AgentEvent {
-  type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage' | 'batch_progress' | 'context_package_ready';
-message?: string;
-tool_call_id?: string;
-name?: string;
-arguments?: string;
+  type: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_result' | 'tool_call_detected' | 'text_delta' | 'done' | 'role_selected' | 'pipeline_progress' | 'approval_required' | 'approval_resolved' | 'stage' | 'clear_text' | 'plan_update' | 'intent_classified' | 'capability_expanded' | 'tool_blocked' | 'tool_risk_notice' | 'tool_redacted' | 'memory_flushed' | 'run_started' | 'phase' | 'token_usage' | 'batch_progress' | 'context_package_ready';
+  message?: string;
+  tool_call_id?: string;
+  tools?: string[];
+  name?: string;
+  arguments?: string;
 content?: string;
 total_tool_calls?: number;
 answer_source?: string;
