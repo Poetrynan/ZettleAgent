@@ -50,43 +50,31 @@ export function ChatHeader({
   return (
     <header className="chat-header-v2" aria-label="Agent Desk Header">
       <div className="chat-header-row-main">
-        {/* Left: Mode Segmented Switch */}
-        <div className="chat-mode-tabs" role="tablist" aria-label={isZh ? '对话模式' : 'Chat mode'}>
-          <button
-            role="tab"
-            aria-selected={mode === 'agent'}
-            className={`chat-mode-tab ${mode === 'agent' ? 'active' : ''} ${isLoading && mode !== 'agent' ? 'locked' : ''}`}
-            onClick={() => !isLoading && setMode('agent')}
-            disabled={isLoading && mode !== 'agent'}
-            title={isLoading && mode !== 'agent' ? t('chat.modeLockedTip' as any) : t('chat.agentModeTip' as any)}
-          >
-            <IconRobot size={13} />
-            <span className="chat-mode-tab-label">{t('chat.agentMode' as any)}</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={mode === 'rag'}
-            className={`chat-mode-tab ${mode === 'rag' ? 'active' : ''} ${isLoading && mode !== 'rag' ? 'locked' : ''}`}
-            onClick={() => !isLoading && setMode('rag')}
-            disabled={isLoading && mode !== 'rag'}
-            title={isLoading && mode !== 'rag' ? t('chat.modeLockedTip' as any) : t('chat.ragModeTip' as any)}
-          >
-            <IconSearch size={13} />
-            <span className="chat-mode-tab-label">{t('chat.ragMode' as any)}</span>
-          </button>
+        {/* Left: Brand Desk Title & Session Title */}
+        <div className="chat-header-brand-title">
+          <span className="chat-header-brand-icon">
+            <IconRobot size={14} />
+          </span>
+          <span className="chat-header-desk-name">
+            {isZh ? '智能助手' : 'Agent Desk'}
+          </span>
+          {sessionTitle && (
+            <>
+              <span className="chat-header-title-sep">/</span>
+              <span className="chat-header-session-title" title={sessionTitle}>
+                {sessionTitle}
+              </span>
+            </>
+          )}
         </div>
 
-        {/* Center: Status / Title Indicator */}
+        {/* Center: Pending approval badge if any */}
         <div className="chat-header-status-slot">
-          {hasPendingApproval ? (
+          {hasPendingApproval && (
             <StatusStamp variant="pending" size="xs">
               {isZh ? '待决审批' : 'DECISION'}
             </StatusStamp>
-          ) : sessionTitle ? (
-            <span className="chat-header-session-title" title={sessionTitle}>
-              {sessionTitle}
-            </span>
-          ) : null}
+          )}
         </div>
 
         {/* Right: Quick actions */}
@@ -145,31 +133,6 @@ export function ChatHeader({
           </button>
         </div>
       </div>
-
-      {/* RAG Mode search strategy row (compact, stable) */}
-      {mode === 'rag' && (
-        <div className="chat-header-row-sub">
-          <div className="chat-search-modes">
-            <span className="chat-search-modes-label">
-              {isZh ? '检索策略' : 'Strategy'}
-            </span>
-            <div className="chat-search-modes-group" role="tablist" aria-label={isZh ? '检索方式' : 'Retrieval mode'}>
-              {SEARCH_MODES.map(m => (
-                <button
-                  key={m.key}
-                  role="tab"
-                  aria-selected={searchMode === m.key}
-                  className={`chat-search-mode-chip ${searchMode === m.key ? 'active' : ''}`}
-                  onClick={() => setSearchMode(m.key)}
-                  title={t(`search.${m.key}Desc` as any)}
-                >
-                  {isZh ? m.labelZh : m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 }

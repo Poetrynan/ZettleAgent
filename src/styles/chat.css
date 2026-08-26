@@ -1238,6 +1238,37 @@
   white-space: nowrap;
 }
 
+.chat-header-brand-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-header-brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #CF2711);
+  flex-shrink: 0;
+}
+
+.chat-header-desk-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.chat-header-title-sep {
+  color: var(--border-strong, var(--border));
+  font-size: 11px;
+}
+
 .chat-header-session-title {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
@@ -1246,6 +1277,7 @@
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Mode tabs — Swiss Segmented Control */
@@ -1258,6 +1290,270 @@
   padding: 2px;
   gap: 2px;
   align-items: center;
+}
+
+/* ── Cursor / VS Code Style Composer Mode Dropdown ────────────────── */
+.composer-mode-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-mode-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary, #EDE8DC);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.composer-mode-trigger:hover:not(:disabled),
+.composer-mode-trigger.is-open {
+  background: var(--bg-elevated, #FFFFFF);
+  border-color: var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.composer-mode-trigger.locked,
+.composer-mode-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer-mode-trigger-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #CF2711);
+}
+
+.composer-mode-trigger-label {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+.composer-mode-trigger svg:last-child {
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) ease;
+}
+
+.composer-mode-trigger.is-open svg:last-child {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu Popup (Opens upwards directly above trigger) */
+.composer-mode-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 95;
+  width: 256px;
+  padding: 6px;
+  background: var(--bg-elevated, #FFFFFF);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.05);
+  animation: chatDropdownFadeIn 0.15s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.composer-mode-menu-section-title {
+  padding: 4px 6px 2px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.composer-mode-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+  width: 100%;
+}
+
+.composer-mode-menu-item:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.composer-mode-menu-item.is-selected {
+  background: color-mix(in srgb, var(--accent, #CF2711) 8%, var(--bg-primary, #FFFFFF));
+  border-color: color-mix(in srgb, var(--accent, #CF2711) 25%, transparent);
+}
+
+.composer-mode-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary, #EDE8DC);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.composer-mode-menu-item.is-selected .composer-mode-menu-item-icon {
+  background: var(--accent, #CF2711);
+  color: #FFFFFF;
+}
+
+.composer-mode-menu-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-mode-menu-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.composer-mode-menu-item-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.composer-mode-menu-check {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent, #CF2711);
+}
+
+.composer-mode-menu-item-desc {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+
+.composer-mode-menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 3px 2px;
+}
+
+.composer-mode-rag-container {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast) ease;
+}
+
+.composer-mode-rag-container.is-active {
+  background: color-mix(in srgb, var(--accent, #CF2711) 4%, var(--bg-secondary, #EDE8DC));
+}
+
+.composer-mode-strategy-section {
+  padding: 4px 6px 6px;
+  border-top: 1px dashed var(--border-subtle);
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer-mode-strategy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-mode-strategy-title {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.composer-mode-strategy-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-mode-strategy-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated, #FFFFFF);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.composer-mode-strategy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.composer-mode-strategy-btn.is-active {
+  background: var(--bg-elevated, #FFFFFF);
+  border-color: var(--accent, #CF2711);
+  color: var(--text-primary);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(207, 39, 17, 0.12);
+}
+
+.composer-mode-strategy-check {
+  color: var(--accent, #CF2711);
+  font-weight: 700;
+}
+
+.chat-draft-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.chat-draft-clear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent, #CF2711);
 }
 
 .chat-mode-tab {
@@ -3760,6 +4056,32 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.chat-preflight-bar .chat-context-meter {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chat-preflight-bar .chat-context-meter .chat-context-meter-panel {
+  left: auto;
+  right: 0;
+  bottom: calc(100% + 6px);
+}
+
+.chat-preflight-bar .chat-context-meter-chip {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
+  border: 1px solid var(--border-subtle);
+}
+
+.chat-preflight-bar .chat-context-meter-chip:hover,
+.chat-preflight-bar .chat-context-meter-chip.is-open {
+  background: var(--bg-elevated, #FFFFFF);
+  border-color: var(--border);
+  color: var(--text-primary);
 }
 
 /* ── Interactive Deep Link Action Buttons in Markdown ── */

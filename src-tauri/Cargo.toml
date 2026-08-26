@@ -1,6 +1,6 @@
 [package]
 name = "zettelagent"
-version = "0.1.2"
+version = "0.2.0"
 description = "ZettelAgent - AI-Powered Zettelkasten Desktop Application"
 authors = ["you"]
 edition = "2021"
@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "image-png", "image-ico"] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"

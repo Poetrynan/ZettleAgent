@@ -156,6 +156,11 @@ pipeline_log::init(&app_data_dir);
 
             // Dynamic window sizing: adapt to screen resolution
             if let Some(window) = app.get_webview_window("main") {
+                // Set high-resolution window & taskbar icon explicitly to prevent OS blur
+                if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128@2x.png")) {
+                    let _ = window.set_icon(icon);
+                }
+
                 if let Ok(Some(monitor)) = window.current_monitor() {
                     let screen = monitor.size();
                     let scale = monitor.scale_factor();
@@ -171,6 +176,7 @@ pipeline_log::init(&app_data_dir);
                 }
                 // Show window only after sizing is finalized (prevents visible resize jump)
                 let _ = window.show();
+                let _ = window.set_focus();
             }
 
             log::info!("ZettelAgent application started");

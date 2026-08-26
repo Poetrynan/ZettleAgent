@@ -49,6 +49,16 @@ Thumbs.db
 # ── AI / IDE helpers ──────────────────────────────────────────
 .claude
 .claude/
+.agents/
+.agent/
+HANDOFF_PROMPT.md
+RUNBOOK.md
+AGENT_DEV_BASELINE.md
+OPEN_ISSUES.md
+PROGRESS.md
+*.bat
+*.cmd
+.cargo-test*.log
 
 # ── Large RELEASE assets (build-time only, NOT for git) ───────
 # OCR (~20 MB) lives in src-tauri/resources/ocr_models/ and IS committed.

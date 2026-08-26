@@ -5905,6 +5905,7 @@ dependencies = [
  "heck 0.5.0",
  "http",
  "http-range",
+ "image",
  "jni",
  "libc",
  "log",
@@ -8331,7 +8332,7 @@ dependencies = [
 
 [[package]]
 name = "zettelagent"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

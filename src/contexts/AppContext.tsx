@@ -111,6 +111,13 @@ function AppInitializer({ children }: { children: ReactNode }) {
         emitProgress(45, 'Preparing interface...');
         initLang();
 
+        // Mark bundled cross-encoder model as ready for out-of-the-box offline use
+        try {
+          if (localStorage.getItem('zettelagent:rerank_model_ready') === null) {
+            localStorage.setItem('zettelagent:rerank_model_ready', '1');
+          }
+        } catch {}
+
         setBaseState((s) => ({
           ...s,
           lang: getLang(),

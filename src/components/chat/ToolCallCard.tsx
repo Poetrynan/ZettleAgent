@@ -282,6 +282,7 @@ export interface ToolActionItem {
 }
 
 const ALLOWED_ACTION_TYPES = new Set(['open_canvas', 'open_knowledge_center', 'open_note']);
+const ALLOWED_KNOWLEDGE_TABS = new Set(['inbox', 'memory', 'changes', 'tasks', 'health', 'activity', 'gap_analysis']);
 
 export function parseToolActions(result?: string): ToolActionItem[] {
   if (!result) return [];
@@ -291,11 +292,13 @@ export function parseToolActions(result?: string): ToolActionItem[] {
     if (Array.isArray(data.actions)) {
       for (const a of data.actions) {
         if (a && typeof a.type === 'string' && ALLOWED_ACTION_TYPES.has(a.type) && typeof a.label === 'string') {
+          const tab = typeof a.tab === 'string' && a.tab.trim().length > 0 ? a.tab.trim() : undefined;
+          const validTab = tab && ALLOWED_KNOWLEDGE_TABS.has(tab) ? tab : (a.type === 'open_knowledge_center' ? 'gap_analysis' : undefined);
           actions.push({
             type: a.type as ToolActionItem['type'],
             path: typeof a.path === 'string' && a.path.trim().length > 0 ? a.path.trim() : undefined,
             planId: typeof a.planId === 'string' && a.planId.trim().length > 0 ? a.planId.trim() : undefined,
-            tab: typeof a.tab === 'string' && a.tab.trim().length > 0 ? a.tab.trim() : undefined,
+            tab: validTab,
             label: a.label.trim(),
           });
         }
@@ -316,7 +319,8 @@ export function parseToolActions(result?: string): ToolActionItem[] {
           label: zh ? '打开并审查 Canvas 计划' : 'Open & Review Canvas Plan',
         });
       } else if (name === 'open_knowledge_center' || name === 'knowledge_center' || name === 'open_knowledge') {
-        const tab = params.get('tab')?.trim() || 'gap_analysis';
+        const rawTab = params.get('tab')?.trim();
+        const tab = rawTab && ALLOWED_KNOWLEDGE_TABS.has(rawTab) ? rawTab : 'gap_analysis';
         const planId = params.get('planId')?.trim() || undefined;
         actions.push({
           type: 'open_knowledge_center',
@@ -345,9 +349,7 @@ export function ToolActionsBar({ actions }: { actions: ToolActionItem[] }) {
   const handleAction = (action: ToolActionItem, e: React.MouseEvent) => {
     e.stopPropagation();
     if (action.type === 'open_canvas') {
-      if (action.path) {
-        window.dispatchEvent(new CustomEvent('open-canvas', { detail: { path: action.path, planId: action.planId } }));
-      }
+      window.dispatchEvent(new CustomEvent('open-canvas', { detail: { path: action.path, planId: action.planId } }));
       window.dispatchEvent(new CustomEvent('zettel:open-view', { detail: 'canvas' }));
     } else if (action.type === 'open_knowledge_center') {
       window.dispatchEvent(new CustomEvent('open-knowledge-center', { detail: { tab: action.tab, planId: action.planId } }));

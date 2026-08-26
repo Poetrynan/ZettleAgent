@@ -6,7 +6,7 @@ import { useApp } from '../../contexts/AppContext';
 import {
   IconSend, IconGlobe, IconNetwork, IconLink, IconCanvas, IconSliders,
   IconChart, IconSparkle, IconTimeline, IconContradicted, IconClipboard,
-  IconEdit, IconSearch, IconFile, IconX,
+  IconEdit, IconSearch, IconFile, IconX, IconRobot, IconTrash, IconChevronDown,
 } from '../icons';
 import { t, getLang } from '../../lib/i18n';
 
@@ -20,6 +20,12 @@ import { ChatHeader } from './ChatHeader';
 import { ChatMessageList } from './ChatMessageList';
 import { Modal } from '../common/Modal';
 import { pickAgentFinalAnswer, isOrchestrationNoise, stripReportFromTimeline, finalizeAgentTimeline, stripRecoveryEcho, isAgentAnswerStream, initialAgentTimeline } from './agentAnswer';
+
+const SEARCH_MODES: { key: SearchMode; label: string; labelZh: string }[] = [
+  { key: 'hybrid', label: 'Hybrid', labelZh: '混合' },
+  { key: 'vector', label: 'Vector', labelZh: '向量' },
+  { key: 'fts', label: 'FTS', labelZh: '全文' },
+];
 
 /** Turn ended — in_progress steps are done (mark as done). */
 function settlePlanSteps(steps?: PlanStep[]): PlanStep[] | undefined {
@@ -242,6 +248,9 @@ export function SmartChat() {
   const [overheadEstimate, setOverheadEstimate] = useState<AgentContextEstimate | null>(null);
   const usageRef = useRef<HTMLDivElement>(null);
 
+  const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
+  const modeDropdownRef = useRef<HTMLDivElement>(null);
+
   const [webSearch, setWebSearch] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   /** True while the viewport is parked at the bottom and should follow new output. */
@@ -341,6 +350,18 @@ export function SmartChat() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [usageOpen]);
 
+  // 点 Composer 模式下拉菜单外面关闭
+  useEffect(() => {
+    if (!modeDropdownOpen) return;
+    const onDown = (ev: MouseEvent) => {
+      if (!modeDropdownRef.current?.contains(ev.target as Node)) {
+        setModeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [modeDropdownOpen]);
+
   /** 粗估 token：CJK 按 1.8、其余按 0.25 折算，与输入框的预估提示同一把尺。 */
   const estimateTokens = useCallback((text: string) => Math.ceil(
     Array.from(text).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 1.8 : 0.25), 0)
@@ -397,12 +418,16 @@ export function SmartChat() {
   }, [usage, messages, llmConfig.contextWindow, estimateTokens, overheadEstimate]);
 
 
-  /** 万 / k 分级，长数字在 22px 的 chip 里读不出量级。 */
-  const formatTokens = useCallback((n: number) => (
-    isZh
-      ? (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n.toLocaleString())
-      : (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
-  ), [isZh]);
+  /** 统一以 k (千) / M (百万) 为单位，符合 LLM Token 国际通用量级标准 */
+  const formatTokens = useCallback((n: number) => {
+    if (n >= 1_000_000) {
+      return `${(n / 1_000_000).toFixed(1)}M`;
+    }
+    if (n >= 1_000) {
+      return `${(n / 1_000).toFixed(1)}k`;
+    }
+    return String(n);
+  }, []);
 
   // Load sessions on mount
   useEffect(() => { sess.refreshSessions(); }, []);
@@ -1916,13 +1941,80 @@ export function SmartChat() {
           />
 
           <div className="panel-footer">
-            {/* Preflight scope & status strip */}
+            {/* Preflight scope & status strip WITH Context Token Meter (OUTSIDE Composer, adjacent to Composer) */}
             <div className="chat-preflight-bar">
               <div className="chat-preflight-scope">
                 <span className="chat-preflight-dot" />
                 <span>{state.vaultPath ? state.vaultPath.split(/[\\/]/).pop()?.replace(/\s*demo\s*/i, '').trim() || (isZh ? '全库范围' : 'Whole Vault') : (isZh ? '全库范围' : 'Whole Vault')}</span>
                 <span>·</span>
                 <span>{mode === 'agent' ? (isZh ? '自主 Agent 模式' : 'Agent Mode') : `${searchMode.toUpperCase()} 检索`}</span>
+              </div>
+
+              {/* 上下文占用：放在 Composer 外面，紧紧挨着 Composer 顶栏 */}
+              <div className="chat-context-meter" ref={usageRef}>
+                <button
+                  className={`chat-context-meter-chip ${usageOpen ? 'is-open' : ''}`}
+                  onClick={() => setUsageOpen(v => !v)}
+                  aria-expanded={usageOpen}
+                  title={isZh ? '上下文容量与缓存复用' : 'Context capacity & cache reuse'}
+                >
+                  {contextMeter.ratio !== null && (
+                    <span className="chat-context-meter-track" aria-hidden="true">
+                      <span
+                        className="chat-context-meter-fill"
+                        style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
+                      />
+                    </span>
+                  )}
+                  <span>
+                    {!contextMeter.measured && '~'}
+                    {contextMeter.ratio !== null
+                      ? `${(contextMeter.ratio * 100).toFixed(0)}%`
+                      : formatTokens(contextMeter.used)}
+                  </span>
+                </button>
+                {usageOpen && (
+                  <div className="chat-context-meter-panel" role="dialog">
+                    <div className="chat-context-meter-row">
+                      <span className="chat-context-meter-label">
+                        {isZh ? '上下文容量' : 'Context used'}
+                      </span>
+                      <span className="chat-context-meter-value">
+                        {!contextMeter.measured && '~'}
+                        {contextMeter.window > 0
+                          ? `${formatTokens(contextMeter.used)}/${formatTokens(contextMeter.window)} (${(contextMeter.ratio! * 100).toFixed(1)}%)`
+                          : `${formatTokens(contextMeter.used)} tokens`}
+                      </span>
+                    </div>
+                    {contextMeter.ratio !== null && (
+                      <div className="chat-context-meter-track is-wide" aria-hidden="true">
+                        <span
+                          className="chat-context-meter-fill"
+                          style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
+                        />
+                      </div>
+                    )}
+                    {contextMeter.hit !== null && (
+                      <div className="chat-context-meter-row">
+                        <span className="chat-context-meter-label">
+                          {isZh ? '平均缓存命中率' : 'Avg. cache hit rate'}
+                        </span>
+                        <span className="chat-context-meter-value">
+                          {(contextMeter.hit * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    )}
+                    <div className="chat-context-meter-note">
+                      {contextMeter.measured
+                        ? (isZh
+                          ? '容量按最近一轮送进模型的 prompt 计（含缓存复用部分），命中率按本会话 prompt 加权。'
+                          : 'Capacity is the last turn’s prompt (cached part included); hit rate is prompt-weighted across this session.')
+                        : (isZh
+                          ? `估算值（~）：对话约 ${formatTokens(contextMeter.messagesPart)}，系统提示约 ${formatTokens(contextMeter.system ?? 0)}，工具定义约 ${formatTokens(contextMeter.tools ?? 0)}。本轮结算后换成后端的真实计数。`
+                          : `Estimate (~): ~${formatTokens(contextMeter.messagesPart)} from messages, ~${formatTokens(contextMeter.system ?? 0)} system prompt, ~${formatTokens(contextMeter.tools ?? 0)} tool schemas. Replaced by the backend’s real count after this turn settles.`)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1957,7 +2049,7 @@ export function SmartChat() {
               </div>
             )}
 
-            {/* Input container V2 — elevated card */}
+            {/* Input container V2 — elevated card (Composer) */}
             <div className="chat-input-container">
               <textarea
                 ref={inputRef}
@@ -1972,6 +2064,7 @@ export function SmartChat() {
               />
               <div className="chat-input-bar">
                 <div className="chat-input-bar-left">
+                  {/* 1. 联网搜索开关 (位于最左侧) */}
                   <button
                     className={`chat-feature-btn ${webSearch ? 'active-search' : ''}`}
                     onClick={() => setWebSearch(prev => !prev)}
@@ -1980,81 +2073,120 @@ export function SmartChat() {
                     <IconGlobe size={12} />
                     <span>{isZh ? '联网' : 'Web'}</span>
                   </button>
-                  {/* 常驻，不等结算：需要它的时刻是发送前。 */}
-                  <div className="chat-context-meter" ref={usageRef}>
+
+                  {/* 2. Cursor / VS Code 风格模式选择器 */}
+                  <div className="composer-mode-dropdown-wrapper" ref={modeDropdownRef}>
                     <button
-                      className={`chat-context-meter-chip ${usageOpen ? 'is-open' : ''}`}
-                      onClick={() => setUsageOpen(v => !v)}
-                      aria-expanded={usageOpen}
-                      title={isZh ? '上下文容量与缓存复用' : 'Context capacity & cache reuse'}
+                      className={`composer-mode-trigger ${modeDropdownOpen ? 'is-open' : ''} ${isLoading ? 'locked' : ''}`}
+                      onClick={() => !isLoading && setModeDropdownOpen(prev => !prev)}
+                      disabled={isLoading}
+                      title={isZh ? '点击切换对话模式与检索策略' : 'Switch Execution Mode & Strategy'}
+                      aria-haspopup="listbox"
+                      aria-expanded={modeDropdownOpen}
                     >
-                      {contextMeter.ratio !== null && (
-                        <span className="chat-context-meter-track" aria-hidden="true">
-                          <span
-                            className="chat-context-meter-fill"
-                            style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
-                          />
-                        </span>
-                      )}
-                      <span>
-                        {!contextMeter.measured && '~'}
-                        {contextMeter.ratio !== null
-                          ? `${(contextMeter.ratio * 100).toFixed(0)}%`
-                          : formatTokens(contextMeter.used)}
+                      <span className="composer-mode-trigger-icon">
+                        {mode === 'agent' ? <IconRobot size={12} /> : <IconSearch size={12} />}
                       </span>
+                      <span className="composer-mode-trigger-label">
+                        {mode === 'agent'
+                          ? (isZh ? 'Agent 模式' : 'Agent')
+                          : `RAG · ${searchMode === 'hybrid' ? (isZh ? '混合' : 'Hybrid') : searchMode === 'vector' ? (isZh ? '向量' : 'Vector') : (isZh ? '全文' : 'FTS')}`}
+                      </span>
+                      <IconChevronDown size={10} />
                     </button>
-                    {usageOpen && (
-                      <div className="chat-context-meter-panel" role="dialog">
-                        <div className="chat-context-meter-row">
-                          <span className="chat-context-meter-label">
-                            {isZh ? '上下文容量' : 'Context used'}
-                          </span>
-                          <span className="chat-context-meter-value">
-                            {!contextMeter.measured && '~'}
-                            {contextMeter.window > 0
-                              ? `${formatTokens(contextMeter.used)}/${formatTokens(contextMeter.window)} (${(contextMeter.ratio! * 100).toFixed(1)}%)`
-                              : `${formatTokens(contextMeter.used)} tokens`}
-                          </span>
+
+                    {modeDropdownOpen && (
+                      <div className="composer-mode-menu" role="listbox">
+                        <div className="composer-mode-menu-section-title">
+                          {isZh ? '执行模式 · MODE' : 'EXECUTION MODE'}
                         </div>
-                        {contextMeter.ratio !== null && (
-                          <div className="chat-context-meter-track is-wide" aria-hidden="true">
-                            <span
-                              className="chat-context-meter-fill"
-                              style={{ width: `${Math.round(contextMeter.ratio * 100)}%` }}
-                            />
+
+                        {/* Agent Option */}
+                        <button
+                          role="option"
+                          aria-selected={mode === 'agent'}
+                          className={`composer-mode-menu-item ${mode === 'agent' ? 'is-selected' : ''}`}
+                          onClick={() => {
+                            handleModeChange('agent');
+                            setModeDropdownOpen(false);
+                          }}
+                        >
+                          <div className="composer-mode-menu-item-icon agent-icon">
+                            <IconRobot size={14} />
                           </div>
-                        )}
-                        {contextMeter.hit !== null && (
-                          <div className="chat-context-meter-row">
-                            <span className="chat-context-meter-label">
-                              {isZh ? '平均缓存命中率' : 'Avg. cache hit rate'}
-                            </span>
-                            <span className="chat-context-meter-value">
-                              {(contextMeter.hit * 100).toFixed(0)}%
-                            </span>
+                          <div className="composer-mode-menu-item-content">
+                            <div className="composer-mode-menu-item-header">
+                              <span className="composer-mode-menu-item-title">
+                                {isZh ? 'Agent 自主模式' : 'Autonomous Agent'}
+                              </span>
+                              {mode === 'agent' && <span className="composer-mode-menu-check">✓</span>}
+                            </div>
+                            <div className="composer-mode-menu-item-desc">
+                              {isZh ? '自主规划、多步工具调用、图谱推演与笔记编辑' : 'Autonomous planning, tools & note edits'}
+                            </div>
                           </div>
-                        )}
-                        <div className="chat-context-meter-note">
-                          {contextMeter.measured
-                            ? (isZh
-                              ? '容量按最近一轮送进模型的 prompt 计（含缓存复用部分），命中率按本会话 prompt 加权。'
-                              : 'Capacity is the last turn’s prompt (cached part included); hit rate is prompt-weighted across this session.')
-                            : (isZh
-                              ? `估算值（~）：对话约 ${formatTokens(contextMeter.messagesPart)}，系统提示约 ${formatTokens(contextMeter.system ?? 0)}，工具定义约 ${formatTokens(contextMeter.tools ?? 0)}。本轮结算后换成后端的真实计数。`
-                              : `Estimate (~): ~${formatTokens(contextMeter.messagesPart)} from messages, ~${formatTokens(contextMeter.system ?? 0)} system prompt, ~${formatTokens(contextMeter.tools ?? 0)} tool schemas. Replaced by the backend’s real count after this turn settles.`)}
+                        </button>
+
+                        {/* RAG Option Container */}
+                        <div className={`composer-mode-rag-container ${mode === 'rag' ? 'is-active' : ''}`}>
+                          <button
+                            role="option"
+                            aria-selected={mode === 'rag'}
+                            className={`composer-mode-menu-item ${mode === 'rag' ? 'is-selected' : ''}`}
+                            onClick={() => {
+                              handleModeChange('rag');
+                              // Do not close so user can select strategy
+                            }}
+                          >
+                            <div className="composer-mode-menu-item-icon rag-icon">
+                              <IconSearch size={14} />
+                            </div>
+                            <div className="composer-mode-menu-item-content">
+                              <div className="composer-mode-menu-item-header">
+                                <span className="composer-mode-menu-item-title">
+                                  {isZh ? 'RAG 知识检索' : 'RAG Grounding'}
+                                </span>
+                                {mode === 'rag' && <span className="composer-mode-menu-check">✓</span>}
+                              </div>
+                              <div className="composer-mode-menu-item-desc">
+                                {isZh ? '精准检索知识库切片问答，只读无副作用' : 'Read-only context retrieval & Q&A'}
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Strategy selector directly below RAG */}
+                          {mode === 'rag' && (
+                            <div className="composer-mode-strategy-section">
+                              <div className="composer-mode-strategy-header">
+                                <span className="composer-mode-strategy-title">
+                                  {isZh ? '选择检索策略：' : 'Retrieval Strategy:'}
+                                </span>
+                              </div>
+                              <div className="composer-mode-strategy-group" role="tablist">
+                                {SEARCH_MODES.map(m => (
+                                  <button
+                                    key={m.key}
+                                    role="tab"
+                                    aria-selected={searchMode === m.key}
+                                    className={`composer-mode-strategy-btn ${searchMode === m.key ? 'is-active' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSearchMode(m.key);
+                                      setModeDropdownOpen(false);
+                                    }}
+                                    title={t(`search.${m.key}Desc` as any)}
+                                  >
+                                    <span>{isZh ? m.labelZh : m.label}</span>
+                                    {searchMode === m.key && <span className="composer-mode-strategy-check">✓</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
-
-                  {input.trim().length > 0 && (
-                    <span
-                      className="chat-input-token-hint"
-                      title={isZh ? '预计输入 Token 消耗' : 'Estimated input tokens'}
-                    >
-                      ~{estimateTokens(input)} tok
-                    </span>
-                  )}
                 </div>
                 <div className="chat-input-bar-right">
                   {isLoading ? (

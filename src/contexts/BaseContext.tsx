@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, useRef, ReactNode, useCallback } from 'react';
 import { Lang, setLang as setLangInLib } from '../lib/i18n';
 
 export type View = 'note' | 'dashboard' | 'settings' | 'graph' | 'canvas' | 'bases' | 'calendar' | 'review' | 'knowledge';
@@ -249,20 +249,21 @@ export function BaseProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, view }));
   }, []);
 
+  const pendingDeepLinkRef = useRef<PendingDeepLink | null>(null);
+
   const setPendingDeepLink = useCallback((link: PendingDeepLink | null) => {
+    pendingDeepLinkRef.current = link;
     setState((s) => ({ ...s, pendingDeepLink: link }));
   }, []);
 
   const consumePendingDeepLink = useCallback((target: 'canvas' | 'knowledge' | 'note'): PendingDeepLink | null => {
-    let consumed: PendingDeepLink | null = null;
-    setState((s) => {
-      if (s.pendingDeepLink && s.pendingDeepLink.target === target) {
-        consumed = s.pendingDeepLink;
-        return { ...s, pendingDeepLink: null };
-      }
-      return s;
-    });
-    return consumed;
+    const current = pendingDeepLinkRef.current;
+    if (current && current.target === target) {
+      pendingDeepLinkRef.current = null;
+      setState((s) => ({ ...s, pendingDeepLink: null }));
+      return current;
+    }
+    return null;
   }, []);
 
   const setSchedulerLoading = useCallback((loading: boolean) => {

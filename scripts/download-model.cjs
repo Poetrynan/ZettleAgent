@@ -33,6 +33,17 @@ const EMBED_FILES = [
 ];
 const EMBED_BASE = 'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/';
 
+const RERANK_DIR = path.join(RESOURCES, 'embed_models', 'maidalun1020', 'bce-reranker-base_v1');
+const RERANK_BASE = 'https://huggingface.co/keisuke-miyako/bce-reranker-base_v1-onnx-int8/resolve/main/';
+const RERANK_FILES = [
+  { url: RERANK_BASE + 'config.json', dest: 'config.json' },
+  { url: RERANK_BASE + 'tokenizer.json', dest: 'tokenizer.json' },
+  { url: RERANK_BASE + 'tokenizer_config.json', dest: 'tokenizer_config.json' },
+  { url: RERANK_BASE + 'special_tokens_map.json', dest: 'special_tokens_map.json' },
+  { url: RERANK_BASE + 'sentencepiece.bpe.model', dest: 'sentencepiece.bpe.model' },
+  { url: RERANK_BASE + 'model_quantized.onnx', dest: 'onnx/model_quantized.onnx' },
+];
+
 const OCR_DIR = path.join(RESOURCES, 'ocr_models');
 /** Bump when switching OCR pack so stale files are replaced. */
 const OCR_PACK_VERSION = 'ppocrv5-mobile-meko';
@@ -254,6 +265,12 @@ async function prepareEmbedModel() {
     await download(EMBED_BASE + file, path.join(EMBED_DIR, file));
   }
   console.log('\n✓ Embedding model ready (installer resources)\n');
+
+  console.log('=== BCE-Reranker model → resources/embed_models/ ===\n');
+  for (const item of RERANK_FILES) {
+    await download(item.url, path.join(RERANK_DIR, item.dest));
+  }
+  console.log('\n✓ BCE-Reranker model ready (installer resources)\n');
 }
 
 async function prepareWebviewRuntime() {
@@ -352,6 +369,10 @@ function syncIntoPublic() {
   copyDir(EMBED_DIR, publicModels);
   console.log('  → models/nomic-ai/nomic-embed-text-v1.5/');
 
+  const publicReranker = path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1');
+  copyDir(RERANK_DIR, publicReranker);
+  console.log('  → models/maidalun1020/bce-reranker-base_v1/');
+
   for (const f of [
     ...WASM_FILES,
     'pdf.min.mjs',
@@ -382,6 +403,10 @@ function verifyInstallerAssets() {
     path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'onnx', 'model_quantized.onnx'),
     path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'config.json'),
     path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'tokenizer.json'),
+    // Local Reranker (BCEmbedding BCE-Reranker Base v1)
+    path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1', 'onnx', 'model_quantized.onnx'),
+    path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1', 'config.json'),
+    path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1', 'tokenizer.json'),
     // ORT WASM (frontend)
     path.join(PUBLIC_DIR, 'ort-wasm-simd-threaded.asyncify.wasm'),
     path.join(PUBLIC_DIR, 'ort-wasm-simd-threaded.asyncify.mjs'),
