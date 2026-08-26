@@ -51,11 +51,6 @@ Thumbs.db
 .claude/
 .agents/
 .agent/
-HANDOFF_PROMPT.md
-RUNBOOK.md
-AGENT_DEV_BASELINE.md
-OPEN_ISSUES.md
-PROGRESS.md
 *.bat
 *.cmd
 .cargo-test*.log
