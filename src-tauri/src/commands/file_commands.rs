@@ -524,6 +524,9 @@ pub fn clear_data(state: State<'_, AppState>) -> Result<(), ZettelError> {
         "DROP TRIGGER IF EXISTS chunks_ad;",
         "DROP TRIGGER IF EXISTS chunks_au;",
         "DROP TABLE IF EXISTS chunks_fts;",
+        // Must go with `chunks`: chunk ids restart at 1 after the drop, and stale
+        // rowids left here would collide with the new inserts.
+        "DROP TABLE IF EXISTS chunks_fts_seg;",
         "DROP TABLE IF EXISTS chunks_vec;",
         "DROP TABLE IF EXISTS files_vec;",
         "DROP TABLE IF EXISTS card_meta;",
@@ -599,6 +602,7 @@ pub fn clear_data_selective(
                 let _ = conn.execute("DROP TRIGGER IF EXISTS chunks_ad;", []);
                 let _ = conn.execute("DROP TRIGGER IF EXISTS chunks_au;", []);
                 let _ = conn.execute("DROP TABLE IF EXISTS chunks_fts;", []);
+                let _ = conn.execute("DROP TABLE IF EXISTS chunks_fts_seg;", []);
                 let _ = conn.execute("DROP TABLE IF EXISTS chunks_vec;", []);
                 let _ = conn.execute("DELETE FROM chunks", []);
                 // Re-create FTS/vec tables

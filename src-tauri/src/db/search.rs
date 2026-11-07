@@ -115,11 +115,8 @@ pub fn full_text_search(conn: &Connection, query: &str, limit: usize) -> anyhow:
         return Ok(vec![]);
     }
 
-    // Split mixed Chinese+English queries into meaningful terms.
-    // FTS5 unicode61 tokenizer treats each CJK character as a separate token,
-    // so "BERT是什么" would require ALL of (BERT, 是, 什, 么) to match.
-    // Instead, we extract English words and CJK character sequences as separate terms
-    // and join them with OR for broader matching.
+    // Split mixed Chinese+English queries into terms; CJK runs become bigrams that
+    // match the segmented index (see `db::cjk` for why plain unicode61 cannot).
     let fts_query = build_fts_query(&sanitized);
 
     if fts_query.is_empty() {
@@ -128,11 +125,11 @@ pub fn full_text_search(conn: &Connection, query: &str, limit: usize) -> anyhow:
 
     let mut stmt = conn.prepare(
         "SELECT c.id, c.file_path, c.content, c.heading_hierarchy,
-                chunks_fts.rank
-         FROM chunks_fts
-         JOIN chunks c ON c.id = chunks_fts.rowid
-         WHERE chunks_fts MATCH ?1
-         ORDER BY chunks_fts.rank
+                chunks_fts_seg.rank
+         FROM chunks_fts_seg
+         JOIN chunks c ON c.id = chunks_fts_seg.rowid
+         WHERE chunks_fts_seg MATCH ?1
+         ORDER BY chunks_fts_seg.rank
          LIMIT ?2",
     )?;
 
@@ -164,87 +161,113 @@ fn has_indexable_content(term: &str) -> bool {
     term.chars().any(|c| c.is_alphanumeric() || is_cjk_char(c))
 }
 
-/// Build an FTS5 query from mixed Chinese+English input.
-/// Extracts English words (kept whole) and Chinese terms (grouped by consecutive CJK chars).
-/// Joins them with OR for broader matching. Every term is quoted, so an input like
-/// "AI-Agent 是什么" or "C++ 编程" is a valid query instead of an FTS5 syntax error.
+/// Single CJK chars that carry no topic signal on their own.
+const CJK_STOP_CHARS: [char; 29] = ['是', '的', '了', '吗', '呢', '吧', '啊', '在', '有', '和', '与', '或', '不', '也', '都', '就', '把', '被', '给', '让', '对', '从', '到', '为', '着', '过', '得', '地', '么'];
+
+/// Function-word bigrams that questions are full of ("…是什么", "如何…").
+/// They would match almost every chunk, so they are dropped unless nothing else is left.
+const CJK_STOP_BIGRAMS: [&str; 22] = [
+    "什么", "怎么", "如何", "为什", "哪些", "哪个", "是否", "可以", "一个", "这个", "那个",
+    "我们", "你们", "他们", "以及", "因为", "所以", "但是", "如果", "是什", "么是", "的是",
+];
+
+/// One query term before quoting.
+enum QueryTerm {
+    /// Non-CJK word, quoted as-is (FTS5 turns "nomic-embed" into a phrase itself).
+    Plain(String),
+    /// A run of ideographs/kana.
+    Cjk(String),
+}
+
+/// Build an FTS5 query for the segmented index (`chunks_fts_seg`) from mixed input.
+///
+/// - Non-CJK words are kept whole and quoted, so "AI-Agent" or "C++" never become
+///   FTS5 syntax errors.
+/// - A CJK run becomes its bigrams, the same unit `db::cjk::segment_for_index`
+///   indexes: the whole run as one bigram *phrase* (so chunks with the exact word
+///   score highest) plus each bigram alone (so partial overlap still recalls).
+///   A 1-char run matches the indexed unigram.
+/// - Everything is joined with OR; bm25 ranks chunks that match more terms higher.
+///
 /// Examples:
-///   "BERT是什么" → "\"BERT\" OR \"是什么\""
-///   "knowledge graph 知识图谱" → "\"knowledge\" OR \"graph\" OR \"知识图谱\""
+///   "知识图谱" → "\"知识 识图 图谱\" OR \"知识\" OR \"识图\" OR \"图谱\""
+///   "BERT是什么" → "\"BERT\""   (the question bigrams are stop words)
 ///   "Transformer" → "\"Transformer\""
 fn build_fts_query(input: &str) -> String {
-    let mut terms: Vec<String> = Vec::new();
-    let mut current_ascii = String::new();
-    let mut current_cjk = String::new();
+    let mut terms: Vec<QueryTerm> = Vec::new();
+    let mut ascii = String::new();
+    let mut cjk = String::new();
+
+    fn flush_ascii(ascii: &mut String, terms: &mut Vec<QueryTerm>) {
+        let word = ascii.trim();
+        if !word.is_empty() {
+            terms.push(QueryTerm::Plain(word.to_string()));
+        }
+        ascii.clear();
+    }
+    fn flush_cjk(cjk: &mut String, terms: &mut Vec<QueryTerm>) {
+        if !cjk.is_empty() {
+            terms.push(QueryTerm::Cjk(std::mem::take(cjk)));
+        }
+    }
 
     for c in input.chars() {
-        if is_cjk_char(c) {
-            // Flush ASCII word if any
-            if !current_ascii.is_empty() {
-                let word = current_ascii.trim().to_string();
-                if !word.is_empty() {
-                    terms.push(word);
-                }
-                current_ascii.clear();
-            }
-            current_cjk.push(c);
+        if crate::db::cjk::is_cjk_word_char(c) {
+            flush_ascii(&mut ascii, &mut terms);
+            cjk.push(c);
+        } else if is_cjk_char(c) || c.is_whitespace() {
+            // CJK punctuation / fullwidth forms / spaces separate terms.
+            flush_cjk(&mut cjk, &mut terms);
+            flush_ascii(&mut ascii, &mut terms);
         } else {
-            // Flush CJK sequence if any
-            if !current_cjk.is_empty() {
-                terms.push(current_cjk.clone());
-                current_cjk.clear();
-            }
-            if c.is_whitespace() {
-                // Flush ASCII word on space
-                let word = current_ascii.trim().to_string();
-                if !word.is_empty() {
-                    terms.push(word);
+            flush_cjk(&mut cjk, &mut terms);
+            ascii.push(c);
+        }
+    }
+    flush_ascii(&mut ascii, &mut terms);
+    flush_cjk(&mut cjk, &mut terms);
+
+    // Expand into quoted FTS5 clauses. `strong` excludes stop words; `all` keeps
+    // them as a fallback for queries made only of stop words ("是什么").
+    let mut strong: Vec<String> = Vec::new();
+    let mut all: Vec<String> = Vec::new();
+    let mut push = |clause: String, is_stop: bool| {
+        if !all.contains(&clause) {
+            all.push(clause.clone());
+        }
+        if !is_stop && !strong.contains(&clause) {
+            strong.push(clause);
+        }
+    };
+
+    for term in &terms {
+        match term {
+            QueryTerm::Plain(w) => {
+                if has_indexable_content(w) {
+                    push(fts_quote(w), false);
                 }
-                current_ascii.clear();
-            } else {
-                current_ascii.push(c);
+            }
+            QueryTerm::Cjk(run) => {
+                let grams = crate::db::cjk::query_bigrams(run);
+                if grams.len() == 1 && run.chars().count() == 1 {
+                    let c = run.chars().next().unwrap();
+                    push(fts_quote(run), CJK_STOP_CHARS.contains(&c));
+                    continue;
+                }
+                let is_stop = |g: &str| CJK_STOP_BIGRAMS.contains(&g);
+                let content: Vec<&String> = grams.iter().filter(|g| !is_stop(g)).collect();
+                if grams.len() > 1 {
+                    // Whole-run phrase: only "strong" if the run has real content.
+                    push(fts_quote(&grams.join(" ")), content.is_empty());
+                }
+                for g in &grams {
+                    push(fts_quote(g), is_stop(g));
+                }
             }
         }
     }
 
-    // Flush remaining
-    if !current_ascii.is_empty() {
-        let word = current_ascii.trim().to_string();
-        if !word.is_empty() {
-            terms.push(word);
-        }
-    }
-    if !current_cjk.is_empty() {
-        terms.push(current_cjk);
-    }
-
-    // Deduplicate
-    terms.dedup();
-
-    // Drop terms the tokenizer would index as nothing (e.g. a bare "-" or "...").
-    terms.retain(|t| has_indexable_content(t));
-
-    // Filter out very short CJK stop-word-like terms (single chars like 是, 的, 了, 吗)
-    let stop_chars = ['是', '的', '了', '吗', '呢', '吧', '啊', '在', '有', '和', '与', '或', '不', '也', '都', '就', '把', '被', '给', '让', '对', '从', '到', '为', '着', '过', '得', '地', '么'];
-    let meaningful_terms: Vec<&String> = terms.iter().filter(|t| {
-        // Keep all ASCII terms
-        if t.chars().all(|c| !is_cjk_char(c)) {
-            return true;
-        }
-        // For CJK, filter out single stop chars
-        if t.chars().count() == 1 && stop_chars.contains(&t.chars().next().unwrap()) {
-            return false;
-        }
-        true
-    }).collect();
-
-    // Every term is quoted so operator characters cannot break the query syntax.
-    if meaningful_terms.is_empty() {
-        // Fallback: use all terms
-        terms.iter().map(|t| fts_quote(t)).collect::<Vec<_>>().join(" OR ")
-    } else {
-        meaningful_terms.iter().map(|t| fts_quote(t)).collect::<Vec<_>>().join(" OR ")
-    }
+    if strong.is_empty() { all } else { strong }.join(" OR ")
 }
 
 /// Check if a character is CJK (Chinese/Japanese/Korean)
@@ -1945,6 +1968,115 @@ mod fts_query_tests {
         // "---" has nothing indexable; result must stay a syntactically valid (possibly empty) query.
         let q = build_fts_query("---");
         assert!(q.is_empty() || q.starts_with('"'));
+    }
+
+    #[test]
+    fn cjk_run_becomes_phrase_plus_bigrams() {
+        assert_eq!(
+            build_fts_query("知识图谱"),
+            "\"知识 识图 图谱\" OR \"知识\" OR \"识图\" OR \"图谱\""
+        );
+    }
+
+    #[test]
+    fn question_words_are_dropped_when_content_remains() {
+        assert_eq!(build_fts_query("BERT是什么"), "\"BERT\"");
+        // Only stop words: fall back to them rather than returning nothing.
+        assert!(!build_fts_query("是什么").is_empty());
+    }
+
+    #[test]
+    fn cjk_punctuation_separates_terms() {
+        assert_eq!(build_fts_query("知识，图谱"), "\"知识\" OR \"图谱\"");
+    }
+
+    #[test]
+    fn single_char_stop_word_is_dropped() {
+        assert_eq!(build_fts_query("猫 的"), "\"猫\"");
+    }
+}
+
+/// End-to-end: real schema, real triggers, real FTS5 — the cases plain unicode61 failed.
+#[cfg(test)]
+mod cjk_search_tests {
+    use super::full_text_search;
+    use rusqlite::{params, Connection};
+
+    fn db_with(notes: &[(&str, &str)]) -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        for (i, (path, content)) in notes.iter().enumerate() {
+            conn.execute("INSERT OR IGNORE INTO files (path, hash) VALUES (?1, 'h')", params![path]).unwrap();
+            conn.execute(
+                "INSERT INTO chunks (file_path, chunk_index, content) VALUES (?1, ?2, ?3)",
+                params![path, i as i64, content],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    fn paths(conn: &Connection, q: &str) -> Vec<String> {
+        full_text_search(conn, q, 10).unwrap().into_iter().map(|r| r.file_path).collect()
+    }
+
+    #[test]
+    fn finds_word_inside_chinese_sentence() {
+        let conn = db_with(&[("a.md", "我们正在构建知识图谱系统，用于检索。"), ("b.md", "今天天气不错。")]);
+        assert_eq!(paths(&conn, "知识图谱"), vec!["a.md"]);
+        assert_eq!(paths(&conn, "检索"), vec!["a.md"]);
+    }
+
+    #[test]
+    fn finds_english_word_glued_to_chinese() {
+        let conn = db_with(&[("a.md", "使用BERT模型进行文本分类"), ("b.md", "unrelated")]);
+        assert_eq!(paths(&conn, "BERT"), vec!["a.md"]);
+        assert_eq!(paths(&conn, "BERT是什么"), vec!["a.md"]);
+    }
+
+    #[test]
+    fn exact_phrase_outranks_scattered_bigrams() {
+        let conn = db_with(&[
+            ("scattered.md", "知识管理很重要。图谱可视化也很好看。识图软件。"),
+            ("exact.md", "知识图谱把实体和关系组织成网络。"),
+        ]);
+        assert_eq!(paths(&conn, "知识图谱")[0], "exact.md");
+    }
+
+    #[test]
+    fn single_char_query_matches_inside_run() {
+        let conn = db_with(&[("a.md", "我家的小猫很可爱"), ("b.md", "小狗")]);
+        assert_eq!(paths(&conn, "猫"), vec!["a.md"]);
+    }
+
+    #[test]
+    fn index_follows_update_and_delete() {
+        let conn = db_with(&[("a.md", "原来的内容讲向量检索")]);
+        assert_eq!(paths(&conn, "向量检索"), vec!["a.md"]);
+
+        conn.execute("UPDATE chunks SET content = '现在改成讲知识图谱'", []).unwrap();
+        assert!(paths(&conn, "向量检索").is_empty());
+        assert_eq!(paths(&conn, "知识图谱"), vec!["a.md"]);
+
+        conn.execute("DELETE FROM chunks", []).unwrap();
+        assert!(paths(&conn, "知识图谱").is_empty());
+    }
+
+    #[test]
+    fn english_search_still_works() {
+        let conn = db_with(&[("a.md", "The knowledge graph links notes."), ("b.md", "nomic-embed v1.5 model")]);
+        assert_eq!(paths(&conn, "knowledge graph"), vec!["a.md"]);
+        assert_eq!(paths(&conn, "nomic-embed"), vec!["b.md"]);
+    }
+
+    #[test]
+    fn existing_chunks_are_backfilled_when_index_is_created() {
+        // Simulate a pre-upgrade database: chunks exist, segmented index does not.
+        let conn = db_with(&[("a.md", "旧数据库里的知识图谱笔记")]);
+        conn.execute_batch("DROP TABLE chunks_fts_seg;").unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        assert_eq!(paths(&conn, "知识图谱"), vec!["a.md"]);
     }
 }
 

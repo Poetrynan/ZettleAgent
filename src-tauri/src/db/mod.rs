@@ -1,3 +1,4 @@
+pub mod cjk;
 pub mod schema;
 pub mod sync;
 pub mod search;

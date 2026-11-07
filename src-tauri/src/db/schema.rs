@@ -1,6 +1,10 @@
 use rusqlite::{Connection, Result};
 
 pub fn setup_database_schema(conn: &Connection) -> Result<()> {
+    // The segmented-FTS triggers call `zettel_cjk_segment()`, which is a per-connection
+    // Rust function. Register it before anything can write `chunks`.
+    crate::db::cjk::register_functions(conn)?;
+
     // Enable foreign key support
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
@@ -76,6 +80,8 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
         END;",
         [],
     )?;
+
+    setup_segmented_fts(conn)?;
 
     // Create vector table using vec0 virtual table
     // 768 dimensions matches nomic-embed-text-v1.5 embedding model
@@ -602,6 +608,58 @@ pub fn migrate_vec_dimensions(conn: &Connection) -> Result<bool> {
     }
 }
 
+/// The CJK-aware full-text index that `full_text_search` queries.
+///
+/// `chunks_fts` (plain `unicode61`) indexes a CJK run as one giant token, so it
+/// cannot find words inside Chinese/Japanese sentences. `chunks_fts_seg` indexes
+/// `zettel_cjk_segment(content)` instead (bigrams + unigrams, see `db::cjk`).
+///
+/// It is *contentless* (the segmented text is never read back, results join
+/// `chunks` by rowid) with `contentless_delete=1`, so the delete/update triggers
+/// can remove a row by rowid without recomputing the old segmented text.
+///
+/// Existing databases are backfilled once, when the table is first created. If
+/// the segmentation scheme ever changes, give the table a new name so it is
+/// rebuilt rather than mixing two schemes in one index.
+fn setup_segmented_fts(conn: &Connection) -> Result<()> {
+    let existed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='chunks_fts_seg')",
+        [],
+        |row| row.get(0),
+    )?;
+
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_seg USING fts5(
+            content,
+            content='',
+            contentless_delete=1,
+            tokenize='unicode61'
+        );
+        CREATE TRIGGER IF NOT EXISTS chunks_seg_ai AFTER INSERT ON chunks BEGIN
+            INSERT INTO chunks_fts_seg(rowid, content) VALUES (new.id, zettel_cjk_segment(new.content));
+        END;
+        CREATE TRIGGER IF NOT EXISTS chunks_seg_ad AFTER DELETE ON chunks BEGIN
+            DELETE FROM chunks_fts_seg WHERE rowid = old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS chunks_seg_au AFTER UPDATE OF content ON chunks BEGIN
+            DELETE FROM chunks_fts_seg WHERE rowid = old.id;
+            INSERT INTO chunks_fts_seg(rowid, content) VALUES (new.id, zettel_cjk_segment(new.content));
+        END;",
+    )?;
+
+    if !existed {
+        let n = conn.execute(
+            "INSERT INTO chunks_fts_seg(rowid, content)
+             SELECT id, zettel_cjk_segment(content) FROM chunks",
+            [],
+        )?;
+        if n > 0 {
+            log::info!("Built CJK-segmented FTS index for {} existing chunks", n);
+        }
+    }
+    Ok(())
+}
+
 /// Migrate existing tables to add ON UPDATE CASCADE.
 /// SQLite can't ALTER constraints, so we recreate affected tables.
 /// Safe to call on every startup — skips if already migrated.
@@ -655,6 +713,9 @@ pub fn migrate_add_update_cascade(conn: &Connection) -> Result<()> {
             INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
         END;
     ")?;
+    // Dropping `chunks` also dropped the segmented-FTS triggers. Row ids were copied
+    // verbatim, so the existing index stays valid; only the triggers need restoring.
+    setup_segmented_fts(conn)?;
 
     // ── card_meta ──
     conn.execute_batch("
