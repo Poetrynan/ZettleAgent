@@ -410,8 +410,8 @@
   font-weight: 600;
   color: var(--text-tertiary);
   margin: 0 0 var(--space-3);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .onboarding-welcome-title {
@@ -454,8 +454,8 @@
   font-family: 'Outfit', var(--font-sans), sans-serif;
   font-size: clamp(var(--text-xs), 1vw, var(--text-base));
   font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-secondary);
   margin: 0;
 }
@@ -732,8 +732,8 @@
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .onboarding-input {
@@ -914,8 +914,8 @@
   font-size: clamp(var(--text-xs), 1.1vw, var(--text-sm));
   font-weight: 500;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .onboarding-embed-hint {
@@ -1188,4 +1188,69 @@
   .onboarding-methodology-card {
     transition: none !important;
   }
+}
+
+
+/* ══ macOS pass (onboarding / setup assistant) ═════════════════════ */
+.onboarding-step-dot {
+  border: none;
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.onboarding-step-dot.active {
+  color: #fff;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.onboarding-step-dot.done {
+  color: var(--accent-primary);
+  background: var(--accent-tint);
+  border-color: transparent;
+}
+
+.onboarding-step-line {
+  height: 1px;
+  background: var(--hairline);
+}
+
+.onboarding-step-line.done {
+  background: var(--accent-primary);
+}
+
+.onboarding-nav {
+  border-top: 0.5px solid var(--hairline);
+}
+
+.onboarding-btn {
+  min-height: var(--control-height);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: default;
+}
+
+.onboarding-btn-primary {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 500;
+  box-shadow: var(--shadow-control);
+}
+
+.onboarding-btn-primary:hover {
+  background: var(--accent-primary-hover);
+  border-color: transparent;
+  color: #fff;
+}
+
+.onboarding-btn-lg {
+  min-height: 34px;
+  padding: 0 28px;
+  font-size: var(--text-base);
+  border-radius: 8px;
+}
+
+.onboarding-check {
+  background: var(--accent-primary) !important;
 }

@@ -83,7 +83,7 @@ export function NoteSelectorModal({
                           borderRadius: 'var(--radius-full)',
                           fontSize: '9px',
                           fontWeight: 600,
-                          textTransform: 'uppercase',
+                          textTransform: 'none',
                           letterSpacing: '0.5px',
                           flexShrink: 0,
                         }}>{ext}</span>

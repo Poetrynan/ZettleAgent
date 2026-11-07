@@ -245,7 +245,7 @@ export function ReviewSession() {
           <IconBrain size={16} /> {t('review.navTitle')}
         </span>
         <span data-testid="review-progress" style={{
-          fontFamily: 'var(--font-mono, monospace)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)',
+          fontVariantNumeric: 'tabular-nums', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)',
         }}>
           {tf('review.progress', index + 1, session.length)}
         </span>
@@ -324,7 +324,7 @@ export function ReviewSession() {
             <div data-testid="review-prompt" style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)',
               padding: 'var(--space-6) var(--space-4)',
-              border: '1px dashed var(--border)',
+              border: 'none', background: 'var(--bg-secondary)',
               borderRadius: 'var(--radius-md)',
               color: 'var(--text-tertiary)',
               textAlign: 'center',
@@ -378,7 +378,7 @@ export function ReviewSession() {
               {/* The interval has to be visible *before* the click, or the four
                   buttons are indistinguishable guesses. */}
               <span data-testid={`review-interval-${grade}`} style={{
-                fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono, monospace)', opacity: 0.85,
+                fontSize: 'var(--text-xs)', fontVariantNumeric: 'tabular-nums', opacity: 0.85,
               }}>
                 {formatInterval(previewFor.get(grade))}
               </span>

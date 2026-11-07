@@ -157,7 +157,7 @@
 
 .smart-canvas-search-btn:hover:not(:disabled) {
   filter: brightness(1.1);
-  transform: scale(1.05);
+  transform: none;
 }
 
 .smart-canvas-search-btn:active {
@@ -324,7 +324,7 @@
 
 .smart-canvas-add-btn:hover:not(:disabled) {
   filter: brightness(1.1);
-  transform: translateY(-1px);
+  transform: none;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
 }
 
@@ -613,14 +613,14 @@
 
 .canvas-smart-bar-wrap {
   height: 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   overflow: hidden;
 }
 
 .canvas-smart-bar-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--accent-secondary), #06b6d4);
   transition: width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;

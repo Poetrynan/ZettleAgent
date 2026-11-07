@@ -1,128 +1,145 @@
-/* ── Button ──────────────────────────────────────────────────────── */
-/* Only two states: hover = gray, active/selected = frosted glass blue */
+/* ── Button (macOS push buttons) ──────────────────────────────────── */
+/* Default = bordered push button (white raised pill in light mode).
+   .btn-primary = the one default action in a view, filled with the accent.
+   .btn-ghost / .btn-icon = borderless toolbar-style buttons.
+   No lifts, no scale bounces: macOS buttons darken when pressed. */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 0 12px;
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 500;
   line-height: 1;
-  border: 1px solid transparent;
+  border: none;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  cursor: default;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
   white-space: nowrap;
   user-select: none;
-  background: transparent;
-  color: var(--text-secondary);
+  background: var(--dash-btn-bg);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-control);
   position: relative;
 }
 
 .btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.45;
+  cursor: default;
 }
 
-.btn:active:not(:disabled) {
-  transform: scale(0.97);
+.btn:hover:not(:disabled):not(.active):not(.btn-primary):not(.btn-danger):not(.btn-success) {
+  background: var(--dash-btn-hover);
 }
 
-.btn-primary:active:not(:disabled) {
-  transform: scale(0.96);
+.btn:active:not(:disabled):not(.btn-primary):not(.btn-danger):not(.btn-success) {
+  background: var(--dash-btn-active);
 }
 
-.btn-icon:active:not(:disabled) {
-  transform: scale(0.92);
+/* Selected state for toggle-like buttons */
+.btn.active {
+  background: var(--accent-tint);
+  color: var(--accent-primary);
+  box-shadow: none;
 }
 
-/* Hover: subtle surface lift */
-.btn:hover:not(:disabled):not(.active):not(.btn-primary) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+.btn.active:hover {
+  background: var(--accent-tint-strong);
 }
 
-/* Active / Selected: subtle neutral effect (no blue) */
-.btn.active,
+/* Default (prominent) action */
 .btn.btn-primary {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--border);
-  font-weight: 600;
+  background: var(--accent-primary);
+  color: #fff;
+  font-weight: 500;
+  box-shadow: var(--shadow-control);
 }
 
-.btn.active:hover,
 .btn.btn-primary:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-  transform: translateY(-1px);
+  background: var(--accent-primary-hover);
+}
+
+.btn.btn-primary:active:not(:disabled) {
+  background: var(--accent-primary-pressed);
 }
 
 .btn-secondary {
-  background: var(--bg-tertiary);
+  background: var(--dash-btn-bg);
   color: var(--text-primary);
-  border-color: var(--border);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
 }
 
 .btn-danger {
   background: var(--danger);
-  color: white;
-  border-color: var(--danger);
+  color: #fff;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: hsl(0, 75%, 50%);
+  background: color-mix(in srgb, var(--danger) 88%, #000);
 }
 
 .btn-sm {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
+  min-height: var(--control-height-sm);
+  padding: 0 8px;
+  font-size: var(--text-sm);
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 4px;
+  border-radius: 5px;
 }
 
 .btn-lg {
-  padding: var(--space-3) var(--space-6);
+  min-height: 34px;
+  padding: 0 18px;
   font-size: var(--text-base);
+  border-radius: 8px;
 }
 
 .btn-icon {
-  padding: var(--space-2);
-  width: 32px;
-  height: 32px;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
 }
 
 .btn-icon-sm {
-  padding: var(--space-1);
-  width: 24px;
-  height: 24px;
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+.btn-icon:hover:not(:disabled),
+.btn-icon-sm:hover:not(:disabled) {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary);
 }
 
 .chat-toggle-btn {
-  transition: all var(--duration-fast) var(--ease-out) !important;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out) !important;
   position: relative;
 }
 
 .chat-toggle-btn:hover {
-  transform: scale(1.08);
   background: var(--bg-hover) !important;
   color: var(--text-primary) !important;
 }
 
 .chat-toggle-btn.active {
-  background: var(--bg-hover) !important;
+  background: var(--bg-active) !important;
   color: var(--text-primary) !important;
-  border-color: var(--border) !important;
-  transform: scale(1.04);
 }
 
 
@@ -130,21 +147,20 @@
 
 .btn-success {
   background: var(--success);
-  color: white;
-  border-color: var(--success);
+  color: #fff;
 }
 
 .btn-success:hover:not(:disabled) {
-  background: hsl(142, 71%, 50%);
+  background: color-mix(in srgb, var(--success) 88%, #000);
 }
 
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
-  border-color: transparent;
+  box-shadow: none;
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--bg-hover) !important;
   color: var(--text-primary);
 }

@@ -12,38 +12,29 @@
   display: none; /* replaced by Settings Atlas rail */
 }
 
-.settings-content-wrapper {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-6) var(--space-8);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  min-width: 0;
-}
-
 /* ── Settings Atlas — persistent left rail ───────────────────────── */
 /* Replaces the horizontal tab tray. Same tabs, same handlers, same
    i18n keys — just a stable spine so context travels with you. */
 
+/* System Settings: a source list on the window material */
 .settings-atlas-rail {
   flex-shrink: 0;
-  width: 180px;
-  padding: var(--space-3) var(--space-2) var(--space-4);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
+  width: 210px;
+  padding: 14px 10px 16px;
+  border-right: 0.5px solid var(--hairline);
+  background: var(--material-sidebar);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
 
 .settings-atlas-rail-title {
-  font-family: var(--font-serif);
-  font-size: 16px;
+  font-family: var(--font-display);
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
-  padding: 2px 10px 10px;
-  letter-spacing: -0.01em;
+  padding: 2px 8px 10px;
+  letter-spacing: 0;
 }
 
 .settings-atlas-items {
@@ -58,24 +49,25 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 6px 10px 6px 14px;
+  min-height: var(--row-height);
+  padding: 0 8px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.3;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .settings-atlas-item svg {
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   transition: color var(--duration-fast) var(--ease-out);
 }
 
@@ -92,24 +84,24 @@
   transform: none;
 }
 
-/* Vermilion index mark: current section */
+/* Selection is the rounded row fill; no side marker. */
 .settings-atlas-item::before {
-  content: '';
+  content: none;
   position: absolute;
   left: 5px;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
   height: 0;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--vermilion);
   transition: height var(--duration-fast) var(--ease-out);
 }
 
 .settings-atlas-item.active {
-  background: var(--bg-hover);
+  background: var(--bg-active);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .settings-atlas-item.active svg {
@@ -189,14 +181,16 @@
   font-weight: 600;
 }
 
+/* Content: a centred grouped-form column on the grouped background */
 .settings-content-wrapper {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-6) var(--space-8);
+  padding: 28px max(32px, calc((100% - 680px) / 2)) 48px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: 20px;
   min-width: 0;
+  background: var(--bg-secondary);
 }
 
 .settings-tab-content {
@@ -219,10 +213,10 @@
 
 .settings-section-card {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  border: 0.5px solid var(--hairline);
   border-radius: var(--radius-lg);
-  padding: var(--space-5);
-  box-shadow: var(--shadow-sm);
+  padding: 16px 18px;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -231,8 +225,8 @@
 .settings-number-input-wrapper {
   display: flex;
   align-items: center;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: 2px 4px;
   width: 120px;
@@ -240,8 +234,8 @@
 }
 
 .settings-number-input-wrapper:focus-within {
-  border-color: var(--vermilion-line) !important;
-  box-shadow: 0 0 0 3px var(--vermilion-tint) !important;
+  border-color: var(--accent-primary) !important;
+  box-shadow: var(--focus-ring) !important;
 }
 
 
@@ -252,30 +246,22 @@
   transition: all 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.storage-card:hover {
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.04),
-    0 4px 16px rgba(0, 0, 0, 0.06);
-}
+
 
 .storage-path-display {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.025);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bg-secondary);
+  border: none;
   border-radius: 8px;
   margin-bottom: 12px;
   transition: all 150ms ease;
   overflow: hidden;
 }
 
-.storage-path-display:hover {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.1);
-}
+
 
 .storage-path-display.compact {
   padding: 6px 10px;
@@ -345,7 +331,7 @@
   background: var(--accent-primary);
   color: white;
   border-color: var(--accent-primary);
-  transform: translateY(-1px);
+  transform: none;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
 }
 
@@ -370,7 +356,7 @@
 }
 
 .storage-actions .btn:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .storage-actions .btn:active {
@@ -420,8 +406,8 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .storage-info-label svg {
@@ -749,8 +735,8 @@
 .editor-suggestion-quote-label {
   font-size: 9px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
   margin-bottom: 4px;
 }
@@ -835,7 +821,7 @@
 .provider-card:hover {
   border-color: var(--border);
   background: var(--bg-hover);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .provider-card.active {
@@ -852,10 +838,10 @@
 
 .provider-id-tag {
   font-size: 9px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .model-tag-group {
@@ -948,7 +934,7 @@
 .methodology-card:hover {
   border-color: var(--border);
   background: var(--bg-hover);
-  transform: translateY(-2px);
+  transform: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
@@ -1254,8 +1240,8 @@
   font-weight: 700;
   color: var(--accent-primary);
   margin: 0 0 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .shortcuts-list {
@@ -1409,8 +1395,8 @@
   margin: 0 0 var(--space-2);
   font-size: var(--text-xs);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
 }
 
@@ -1778,9 +1764,9 @@
 .stage-label {
   color: var(--text-tertiary);
   font-weight: 500;
-  text-transform: uppercase;
+  text-transform: none;
   font-size: 10px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 
 .stage-value {
@@ -1863,4 +1849,227 @@
 @keyframes progressStripe {
   from { background-position: 0 0; }
   to { background-position: 40px 0; }
+}
+
+
+/* ══ macOS control pass (settings) ═════════════════════════════════ */
+
+/* Switch rows: a plain form row; the switch is the only colour */
+.settings-toggle-row {
+  min-height: 32px;
+  padding: 4px 2px;
+  border-radius: 0;
+  cursor: default;
+}
+
+.settings-toggle-row:hover {
+  background: transparent;
+}
+
+.settings-toggle-label {
+  font-size: var(--text-base);
+  font-weight: 400;
+}
+
+.settings-toggle-track {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--bg-active);
+  cursor: default;
+}
+
+.settings-toggle-track.active {
+  background: var(--accent-primary);
+}
+
+.settings-toggle-thumb {
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.settings-toggle-track.active .settings-toggle-thumb {
+  transform: translateX(14px);
+}
+
+[data-theme="dark"] .settings-toggle-thumb {
+  background: #fff;
+}
+
+/* Selectable cards (providers, methodologies, appearance): flat tiles,
+   the selected one gets an accent ring — like System Settings pickers */
+.provider-card,
+.methodology-card,
+.theme-segment-btn {
+  border: 0.5px solid var(--hairline);
+  background: var(--bg-elevated);
+  box-shadow: none;
+  cursor: default;
+  transition: box-shadow var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
+}
+
+.provider-card:hover,
+.methodology-card:hover,
+.theme-segment-btn:hover {
+  border-color: var(--hairline);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.provider-card.active,
+.methodology-card.active,
+.theme-segment-btn.active {
+  border-color: transparent !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: 0 0 0 2px var(--accent-primary) !important;
+  color: var(--text-primary);
+}
+
+.methodology-card.active .methodology-title {
+  color: var(--text-primary);
+}
+
+.methodology-card.active .methodology-audience-badge {
+  background: var(--accent-tint);
+  color: var(--accent-primary);
+}
+
+.theme-segment-btn.active svg {
+  color: var(--accent-primary);
+}
+
+/* Model chips: a segmented row */
+.model-tag-btn {
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.model-tag-btn:hover {
+  background: var(--bg-active);
+  border-color: transparent;
+}
+
+.model-tag-btn.active {
+  background: var(--accent-primary) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: none;
+}
+
+.config-summary-card {
+  border: none;
+  background: var(--bg-secondary);
+}
+
+.summary-status-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--sys-green);
+  box-shadow: none;
+}
+
+/* Capsule language switcher → segmented control */
+.settings-lang-switcher {
+  padding: 2px;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 7px;
+}
+
+.settings-lang-switcher .lang-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  border-radius: 5px;
+  cursor: default;
+}
+
+.settings-lang-switcher .lang-btn:hover {
+  background: var(--bg-hover);
+}
+
+.settings-lang-switcher .lang-btn.active {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-control);
+}
+
+[data-theme="dark"] .settings-lang-switcher .lang-btn.active {
+  background: #5A5A5E !important;
+}
+
+/* Sliders */
+.slider-value-badge {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 5px;
+}
+
+.range-slider-track {
+  height: 4px;
+  background: var(--dash-progress-track);
+}
+
+.range-slider-fill {
+  height: 4px;
+}
+
+.range-slider-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--slider-thumb-bg);
+  border: 0.5px solid var(--slider-thumb-border);
+  box-shadow: var(--slider-thumb-shadow);
+}
+
+.range-slider-input:hover ~ .range-slider-thumb {
+  transform: translate(-50%, -50%);
+  box-shadow: var(--slider-thumb-shadow);
+}
+
+.range-slider-input:active ~ .range-slider-thumb {
+  transform: translate(-50%, -50%);
+  background: var(--slider-thumb-bg);
+  border-color: var(--slider-thumb-border);
+  box-shadow: var(--slider-thumb-shadow), var(--focus-ring);
+}
+
+.agent-memory-textarea {
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.agent-memory-textarea:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-elevated);
+  box-shadow: var(--focus-ring);
+}
+
+.agent-memory-path-chip,
+.mcp-link-pill {
+  border: none;
+  background: var(--bg-tertiary);
+  border-radius: 5px;
+}
+
+.mcp-add-dashed-btn {
+  border-style: solid !important;
+  border-color: var(--hairline) !important;
+}
+.settings-number-input-wrapper input:focus-visible {
+  box-shadow: none !important;
 }

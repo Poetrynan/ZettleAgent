@@ -154,7 +154,7 @@
 .canvas-toolbar-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
-  transform: translateY(-0.5px);
+  transform: none;
 }
 
 .canvas-toolbar-btn:active {
@@ -201,7 +201,7 @@
   color: #9333ea;
   border-color: var(--canvas-accent-border);
   box-shadow: var(--elevation-1);
-  transform: translateY(-1px);
+  transform: none;
 }
 .canvas-toolbar-btn.canvas-discuss-btn:active {
   transform: translateY(0) scale(0.96);
@@ -315,7 +315,7 @@
   transition: border-color 0.12s, transform 0.12s;
 }
 .canvas-pen-color-swatch:hover {
-  transform: scale(1.18);
+  transform: none;
 }
 .canvas-pen-color-swatch.active {
   border-color: var(--text-primary);
@@ -439,7 +439,7 @@
   font-size: 9px;
   opacity: 0.5;
   border: 1px solid currentColor;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 1px 4px;
 }
 
@@ -526,7 +526,7 @@
 }
 
 .react-flow__handle:hover {
-  transform: scale(1.3);
+  transform: none;
   opacity: 1 !important;
   background-color: rgba(255, 255, 255, 0.95);
   border-color: rgba(147, 197, 253, 0.8);
@@ -545,7 +545,7 @@
 }
 
 .note-node-card:hover {
-  transform: translateY(-2px);
+  transform: none;
   box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
@@ -1055,4 +1055,47 @@
 .canvas-find-close-btn:hover {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+
+/* ══ macOS pass (canvas chrome) ════════════════════════════════════ */
+.canvas-toolbar,
+.canvas-controls,
+.react-flow__minimap {
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.canvas-toolbar-btn,
+.canvas-controls-btn {
+  border-radius: var(--radius-md) !important;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.canvas-toolbar-btn:hover,
+.canvas-controls-btn:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary);
+  transform: none !important;
+}
+
+.canvas-toolbar-btn.active,
+.canvas-toolbar-btn[aria-pressed="true"] {
+  background: var(--accent-tint) !important;
+  color: var(--accent-primary) !important;
+}
+
+.canvas-toolbar-divider,
+.canvas-controls-divider {
+  background: var(--hairline) !important;
+}
+
+.canvas-controls-zoom {
+  font-family: var(--font-sans) !important;
+  font-variant-numeric: tabular-nums;
 }

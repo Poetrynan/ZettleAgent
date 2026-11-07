@@ -208,8 +208,8 @@ export function CanvasExport({ isOpen, onClose }: CanvasExportProps) {
               fontWeight: 600,
               color: 'var(--text-secondary)',
               marginBottom: 'var(--space-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
+              textTransform: 'none',
+              letterSpacing: 0,
             }}>
               {isZh ? '拓扑布局算法' : 'Layout Algorithm'}
             </div>

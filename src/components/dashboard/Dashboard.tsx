@@ -193,52 +193,37 @@ export function Dashboard() {
   return (
     <div className="panel">
       <div className="panel-content" style={{ padding: 0 }}>
-        <div style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 40px' }}>
-        {/* ── Document Desk Header (Swiss Editorial) ────────────────── */}
+        <div className="dash-page">
+        {/* ── Overview header ───────────────────────────────────────── */}
         <section className="dash-band dash-band--now animate-enter" aria-label={state.lang === 'zh' ? '当前状态' : 'Current state'}>
-          {/* 原来的小字 kicker 已并入下面的标题：它的破折号、等宽字、大写和字距都搬过来了，
-              字号仍是标题自己的 24px，只有颜色换成品牌红。 */}
-          <h1
-            className="doc-desk-title"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontFamily: 'var(--font-mono, monospace)',
-              fontSize: '24px',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--vermilion, #C74632)',
-              margin: '0 0 6px',
-              lineHeight: 1.25,
-            }}
-          >
-            <span aria-hidden="true">—</span>
-            <span>{state.lang === 'zh' ? '知识库总览' : 'Vault Overview'}</span>
-          </h1>
-          <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: '0 0 20px' }}>
+          <h1 className="dash-page-title">{state.lang === 'zh' ? '知识库总览' : 'Vault Overview'}</h1>
+          <p className="dash-page-subtitle">
             {state.lang === 'zh'
               ? '查看笔记数量、知识图谱关联与索引状态，轻松管理本地知识库。'
               : 'Monitor your notes, graph connections, and vector index in one unified workspace.'}
           </p>
 
-          {/* Clean Swiss Stat Grid */}
-          <div className="animate-enter animate-enter-delay-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
-            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
-              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>01 / TOTAL NOTES</div>
-              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>{fileCount}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '卡片与笔记总数' : 'Total notes'}</div>
+          {/* Summary: one grouped row of three figures */}
+          <div className="dash-summary animate-enter animate-enter-delay-1">
+            <div className="dash-summary-item">
+              <div className="dash-summary-label">{state.lang === 'zh' ? '笔记' : 'Notes'}</div>
+              <div className="dash-summary-value">{fileCount}</div>
+              <div className="dash-summary-caption">{state.lang === 'zh' ? '卡片与笔记总数' : 'Total notes'}</div>
             </div>
-            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
-              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>02 / GRAPH EDGES</div>
-              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--accent, #3B82F6)' }}>{graphLinkCount !== null ? graphLinkCount : 0}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '双向链接关联' : 'Wikilinks & connections'}</div>
+            <div className="dash-summary-item">
+              <div className="dash-summary-label">{state.lang === 'zh' ? '图谱关联' : 'Graph Links'}</div>
+              <div className="dash-summary-value">{graphLinkCount !== null ? graphLinkCount : 0}</div>
+              <div className="dash-summary-caption">{state.lang === 'zh' ? '双向链接关联' : 'Wikilinks & connections'}</div>
             </div>
-            <div style={{ background: 'var(--bg-elevated, #FFFFFF)', border: '1px solid var(--border)', padding: '14px', borderRadius: 'var(--radius-sm, 2px)' }}>
-              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '0.08em', marginBottom: '4px' }}>03 / VAULT STATE</div>
-              <div style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', fontWeight: 700, color: 'var(--success, #10B981)' }}>{state.vaultPath ? 'ACTIVE' : 'IDLE'}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{state.lang === 'zh' ? '本地存储 · 离线可用' : 'Local storage ready'}</div>
+            <div className="dash-summary-item">
+              <div className="dash-summary-label">{state.lang === 'zh' ? '知识库' : 'Vault'}</div>
+              <div className="dash-summary-value dash-summary-value--status">
+                <span className={`dash-status-dot ${state.vaultPath ? 'on' : ''}`} aria-hidden="true" />
+                {state.vaultPath
+                  ? (state.lang === 'zh' ? '已连接' : 'Connected')
+                  : (state.lang === 'zh' ? '未连接' : 'Not Connected')}
+              </div>
+              <div className="dash-summary-caption">{state.lang === 'zh' ? '本地存储 · 离线可用' : 'Local storage ready'}</div>
             </div>
           </div>
         </section>
@@ -248,25 +233,10 @@ export function Dashboard() {
           <div className="dash-section-header">
             <h2 className="dash-section-title">{state.lang === 'zh' ? '构建' : 'Build'}</h2>
             <button
-              className="btn btn-ghost btn-icon-sm"
+              className="mac-help-btn"
               onClick={() => setShowHelpModal(true)}
               title={t('dashboard.quickActions')}
-              style={{
-                width: '18px',
-                height: '18px',
-                borderRadius: '50%',
-                border: '1px solid var(--border)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '10px',
-                fontWeight: 600,
-                color: 'var(--text-tertiary)',
-                padding: 0,
-                lineHeight: 1,
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
+              aria-label={t('dashboard.quickActions')}
             >
               ?
             </button>
@@ -281,7 +251,7 @@ export function Dashboard() {
           }}>
             <div className="step-card step-card--export">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="step-badge step-badge--export">①</span>
+                <span className="step-badge step-badge--export">1</span>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {state.lang === 'zh' ? '导出知识图谱' : 'Export Knowledge Graph'}
                 </span>
@@ -293,15 +263,7 @@ export function Dashboard() {
               </div>
               <button
                 className="btn btn-sm"
-                style={{
-                  alignSelf: 'flex-start',
-                  fontSize: 'var(--text-xs)',
-                  marginTop: 'var(--space-1)',
-                  fontWeight: 600,
-                  gap: 6,
-                  borderRadius: 'var(--radius-md)',
-                  padding: '6px 14px',
-                }}
+                style={{ alignSelf: 'flex-start', marginTop: 'var(--space-1)' }}
                 disabled={!state.vaultPath || fileCount === 0}
                 title={!state.vaultPath ? t('dashboard.tipNoVault') : fileCount === 0 ? t('dashboard.tipNoNotes') : undefined}
                 onClick={() => setShowCanvasExport(true)}
@@ -312,7 +274,7 @@ export function Dashboard() {
 
             <div className="step-card step-card--health">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="step-badge step-badge--health">②</span>
+                <span className="step-badge step-badge--health">2</span>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {state.lang === 'zh' ? '健康检查' : 'Health Check'}
                 </span>
@@ -324,15 +286,7 @@ export function Dashboard() {
               </div>
               <button
                 className="btn btn-sm"
-                style={{
-                  alignSelf: 'flex-start',
-                  fontSize: 'var(--text-xs)',
-                  marginTop: 'var(--space-1)',
-                  fontWeight: 600,
-                  gap: 6,
-                  borderRadius: 'var(--radius-md)',
-                  padding: '6px 14px',
-                }}
+                style={{ alignSelf: 'flex-start', marginTop: 'var(--space-1)' }}
                 disabled={!state.vaultPath}
                 title={!state.vaultPath ? t('dashboard.tipNoVault') : undefined}
                 onClick={() => setShowLintModal(true)}
@@ -354,7 +308,7 @@ export function Dashboard() {
             {/* Step 1: Sync Knowledge Base */}
             <div className="step-card step-card--sync">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="step-badge step-badge--sync">①</span>
+                <span className="step-badge step-badge--sync">1</span>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {state.lang === 'zh' ? '同步知识库' : 'Sync Knowledge Base'}
                 </span>
@@ -366,15 +320,7 @@ export function Dashboard() {
               </div>
               <button
                 className="btn btn-sm"
-                style={{
-                  alignSelf: 'flex-start',
-                  fontSize: 'var(--text-xs)',
-                  marginTop: 'var(--space-1)',
-                  fontWeight: 600,
-                  gap: 6,
-                  borderRadius: 'var(--radius-md)',
-                  padding: '6px 14px',
-                }}
+                style={{ alignSelf: 'flex-start', marginTop: 'var(--space-1)' }}
                 disabled={!state.vaultPath || state.isSyncing}
                 title={!state.vaultPath ? t('dashboard.tipNoVault') : undefined}
                 onClick={async () => {
@@ -418,7 +364,7 @@ export function Dashboard() {
             <div className="step-card step-card--index">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="step-badge step-badge--index">②</span>
+                  <span className="step-badge step-badge--index">2</span>
                   <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {state.lang === 'zh' ? '构建向量索引' : 'Build Vector Index'}
                   </span>
@@ -472,7 +418,7 @@ export function Dashboard() {
             {/* Step 3: Smart Organize */}
             <div className="step-card step-card--organize">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="step-badge step-badge--organize">③</span>
+                <span className="step-badge step-badge--organize">3</span>
                 <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                   {state.lang === 'zh' ? '智能整理' : 'Smart Organize'}
                 </span>
@@ -488,13 +434,6 @@ export function Dashboard() {
               <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', marginTop: 'var(--space-1)' }}>
                 <button
                   className="btn btn-sm btn-organize"
-                  style={{
-                    fontWeight: 600,
-                    fontSize: 'var(--text-xs)',
-                    gap: 6,
-                    borderRadius: 'var(--radius-md)',
-                    padding: '6px 14px',
-                  }}
                   disabled={!state.vaultPath || schedulerLoading}
                   title={!state.vaultPath ? t('dashboard.tipNoVault') : schedulerLoading ? t('dashboard.tipProcessing') : undefined}
                   aria-label={schedulerLoading ? 'AI organizing notes' : t('dashboard.runNow')}

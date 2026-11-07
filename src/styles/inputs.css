@@ -1,14 +1,17 @@
 /* ── Input ───────────────────────────────────────────────────────── */
 
+/* macOS text field: hairline inset border, focus = accent ring. */
 .input {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  min-height: var(--control-height);
+  padding: 4px 8px;
   font-family: var(--font-sans);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-primary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 0.5px 1px rgba(0, 0, 0, 0.06);
   transition:
     border-color var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out);
@@ -19,15 +22,11 @@
   color: var(--text-tertiary);
 }
 
-.input:hover:not(:focus):not(:focus-visible) {
-  border-color: color-mix(in srgb, var(--text-tertiary) 45%, var(--border-subtle));
-}
-
 .input:focus,
 .input:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  border-color: var(--accent-primary);
+  box-shadow: var(--focus-ring);
 }
 
 
@@ -51,8 +50,8 @@
 }
 
 .badge-primary {
-  background: rgba(59, 130, 246, 0.12);
-  color: var(--accent-secondary);
+  background: var(--accent-tint);
+  color: var(--accent-primary);
 }
 
 .badge-success {
@@ -108,29 +107,30 @@
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: var(--accent-secondary);
+  accent-color: var(--accent-primary);
 }
 
 
 
 /* ── Custom Range Slider ─────────────────────────────────────────── */
 
+/* macOS slider: thin grey track, white round knob. */
 .settings-section-card input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: #CBD5E1;
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--dash-progress-track);
   outline: none;
-  cursor: pointer;
+  cursor: default;
 }
 
 /* WebKit track (Chrome, Safari, Edge) */
 .settings-section-card input[type="range"]::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: #CBD5E1;
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--dash-progress-track);
 }
 
 /* WebKit thumb */
@@ -140,58 +140,47 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--accent-primary, #16a34a);
-  border: 2px solid #FFFFFF;
-  cursor: pointer;
-  margin-top: -6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
-}
-
-.settings-section-card input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.35);
+  background: var(--slider-thumb-bg);
+  border: 0.5px solid var(--slider-thumb-border);
+  cursor: default;
+  margin-top: -7px;
+  box-shadow: var(--slider-thumb-shadow);
+  transition: box-shadow var(--duration-fast) ease-out;
 }
 
 .settings-section-card input[type="range"]:active::-webkit-slider-thumb {
-  transform: scale(1.05);
+  box-shadow: var(--slider-thumb-shadow), var(--focus-ring);
 }
 
 /* Firefox track */
 .settings-section-card input[type="range"]::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: #CBD5E1;
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--dash-progress-track);
   border: none;
 }
 
 /* Firefox progress (filled portion) */
 .settings-section-card input[type="range"]::-moz-range-progress {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--accent-primary, #16a34a);
+  height: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
 }
 
 /* Firefox thumb */
 .settings-section-card input[type="range"]::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--accent-primary, #16a34a);
-  border: 2px solid #FFFFFF;
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
-}
-
-.settings-section-card input[type="range"]::-moz-range-thumb:hover {
-  transform: scale(1.15);
-  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.35);
+  background: var(--slider-thumb-bg);
+  border: 0.5px solid var(--slider-thumb-border);
+  cursor: default;
+  box-shadow: var(--slider-thumb-shadow);
 }
 
 .settings-section-card input[type="range"]:focus-visible {
-  outline: 2px solid var(--accent-primary, #16a34a);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 @media (prefers-reduced-motion: reduce) {

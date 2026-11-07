@@ -151,8 +151,8 @@
 .kg-tips-title {
   font-weight: 600;
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   margin-bottom: 2px;
   color: var(--kg-text-muted);
 }
@@ -225,8 +225,8 @@
   font-weight: 600;
   font-size: 10px;
   color: var(--kg-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* ── Collapsible Body ───────────────────────────────────────────────── */
@@ -282,8 +282,8 @@
   color: var(--kg-text-muted);
   border-right: 1px solid var(--kg-divider);
   padding-right: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -441,7 +441,7 @@
   font-size: 9px;
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -564,7 +564,7 @@
 }
 
 .kg-time-input::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
+  transform: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
@@ -644,7 +644,7 @@
   color: var(--kg-text-faint);
   background: var(--kg-badge-inactive-bg);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   margin-left: 2px;
 }
 
@@ -654,8 +654,8 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--kg-text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: none;
+  letter-spacing: 0;
   user-select: none;
 }
 
@@ -820,7 +820,7 @@
 .kg-folder-checkbox {
   width: 14px;
   height: 14px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -903,7 +903,7 @@
 }
 
 .kg-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
+  transform: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
@@ -1009,7 +1009,7 @@
   left: 8px;
   bottom: 14px;
   width: 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(13, 124, 94, 0.45);
 }
 
@@ -1044,8 +1044,8 @@
   font-size: 11px;
   font-weight: 700;
   color: #0D7C5E;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .kg-ai-summary-close {
@@ -1079,8 +1079,8 @@
   flex-shrink: 0;
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 2px 7px;
   border-radius: 6px;
   line-height: 1.5;
@@ -1303,8 +1303,8 @@
   font-size: 11px;
   font-weight: 700;
   color: var(--kg-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   border-bottom: 1px solid var(--kg-divider);
   padding-bottom: 6px;
   margin-bottom: 2px;
@@ -1320,8 +1320,8 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--kg-text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .kg-settings-chip {
@@ -1567,8 +1567,8 @@
   padding: 0 4px 6px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--kg-text-muted);
 }
 
@@ -1823,4 +1823,119 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+/* ══ macOS pass (graph) ════════════════════════════════════════════
+ * Every floating HUD element is a popover-material panel: translucent,
+ * blurred, hairline edge, 10px corners, soft shadow.
+ * ═══════════════════════════════════════════════════════════════════ */
+.kg-tips,
+.kg-bottom-panel,
+.kg-hover-card,
+.kg-context-menu,
+.kg-time-slider,
+.kg-folder-picker-dropdown,
+.kg-folder-dropdown,
+.kg-settings-popover,
+.kg-cluster-popover,
+.kg-help-popover,
+.kg-ai-summary-bubble,
+[data-theme="dark"] .kg-context-menu,
+[data-theme="dark"] .kg-time-slider,
+[data-theme="dark"] .kg-hover-card {
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline) !important;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.kg-context-menu {
+  padding: 5px;
+  box-shadow: var(--shadow-lg);
+}
+
+.kg-context-menu-item {
+  border-radius: 5px;
+  cursor: default;
+}
+
+.kg-context-menu-item:hover {
+  background: var(--accent-primary) !important;
+  color: #fff !important;
+}
+
+/* HUD buttons: bordered push buttons on the material */
+.kg-fit-btn,
+.kg-folder-picker-btn,
+.kg-ai-explain-btn,
+.kg-settings-trigger,
+.kg-cluster-trigger,
+.kg-help-btn {
+  border: none !important;
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-control), var(--shadow-sm) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.kg-fit-btn:hover,
+.kg-folder-picker-btn:hover,
+.kg-ai-explain-btn:hover,
+.kg-settings-trigger:hover,
+.kg-cluster-trigger:hover,
+.kg-help-btn:hover {
+  background: var(--bg-elevated) !important;
+}
+
+.kg-settings-trigger.active,
+.kg-help-btn.active,
+.kg-folder-picker-btn.active {
+  color: var(--accent-primary) !important;
+}
+
+.kg-chip,
+.kg-depth-chip,
+.kg-settings-chip {
+  border: none !important;
+  background: var(--bg-tertiary) !important;
+  border-radius: var(--radius-full);
+  cursor: default;
+}
+
+.kg-settings-tab-btn {
+  border-radius: 5px !important;
+  cursor: default;
+}
+
+/* Switch */
+.kg-toggle-switch {
+  width: 32px !important;
+  height: 18px !important;
+  border: none !important;
+  border-radius: 9px !important;
+  background: var(--bg-active) !important;
+}
+
+.kg-toggle-switch.active,
+.kg-toggle-switch.active:hover {
+  background: var(--accent-primary) !important;
+}
+
+.kg-toggle-thumb {
+  top: 1px !important;
+  left: 1px !important;
+  width: 16px !important;
+  height: 16px !important;
+  background: #fff !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.06) !important;
+}
+
+.kg-toggle-switch.active .kg-toggle-thumb {
+  transform: translateX(14px) !important;
 }

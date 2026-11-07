@@ -9,8 +9,9 @@
 }
 
 .panel-header {
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
+  min-height: 44px;
+  padding: 8px 16px;
+  border-bottom: 0.5px solid var(--hairline);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -28,18 +29,18 @@
 
 .panel-footer {
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
+  border-top: 0.5px solid var(--hairline);
   flex-shrink: 0;
   background: var(--bg-primary);
 }
 
 
-/* ── Resize Handle ───────────────────────────────────────────────── */
+/* ── Resize Handle (split-view divider: a hairline, wide hit area) ── */
 
 .resize-handle {
-  width: 3px;
+  width: 1px;
   cursor: col-resize;
-  background: var(--border-subtle);
+  background: var(--hairline);
   transition: background var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
   position: relative;
@@ -48,7 +49,7 @@
 
 .resize-handle:hover,
 .resize-handle.dragging {
-  background: var(--accent-primary);
+  background: var(--border-strong);
 }
 
 .resize-handle::after {
@@ -62,57 +63,53 @@
 }
 
 
-/* ── Search Mode Switcher (Sliding Pill) ─────────────────────────── */
+/* ── Search Mode Switcher (segmented control) ────────────────────── */
 
 .search-mode-group {
   display: inline-flex;
   position: relative;
-  background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  padding: 3px;
-  gap: 1px;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
   align-items: center;
   flex-shrink: 0;
-  height: 34px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 0 rgba(255, 255, 255, 0.5);
+  height: 28px;
+  box-shadow: none;
 }
 
-/* Sliding pill indicator */
+/* Sliding thumb: the selected segment */
 .search-mode-pill {
   position: absolute;
   top: 2px;
-  border-radius: var(--radius-full);
+  border-radius: 5px;
   background: var(--bg-elevated);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
-  transition: left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-              width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: var(--shadow-control);
+  transition: left var(--duration-normal) var(--ease-out),
+              width var(--duration-normal) var(--ease-out);
   z-index: 0;
   pointer-events: none;
-  animation: searchPillSquish 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-@keyframes searchPillSquish {
-  0% { transform: scaleX(0.85) scaleY(1.08); }
-  40% { transform: scaleX(1.08) scaleY(0.92); }
-  70% { transform: scaleX(0.97) scaleY(1.02); }
-  100% { transform: scaleX(1) scaleY(1); }
+:root[data-theme="dark"] .search-mode-pill {
+  background: #5A5A5E;
 }
 
 .search-mode-btn {
   position: relative;
   z-index: 1;
-  height: 26px;
-  width: 26px;
+  height: 24px;
+  width: 28px;
   border: none;
-  border-radius: var(--radius-full);
+  border-radius: 5px;
   background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
+  color: var(--text-secondary);
+  cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.25s ease;
+  transition: color var(--duration-fast) ease;
 }
 
 .search-mode-btn:hover:not(.active) {
@@ -120,12 +117,8 @@
   background: transparent !important;
 }
 
-.search-mode-btn:active {
-  transform: scale(0.95);
-}
-
 .search-mode-btn.active {
-  color: var(--success) !important;
+  color: var(--text-primary) !important;
   background: transparent !important;
   box-shadow: none;
 }
@@ -133,62 +126,70 @@
 .search-mode-btn:focus,
 .search-mode-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  box-shadow: var(--focus-ring);
 }
 
 
-/* ── Context Menu ────────────────────────────────────────────────── */
+/* ── Context Menu (macOS menu) ───────────────────────────────────── */
 
 .ctx-menu {
   position: fixed;
-  background: var(--bg-elevated, #FFFFFF);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 0;
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 5px;
   z-index: 1000;
-  min-width: 160px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
-  animation: ctxMenuIn 120ms cubic-bezier(0.2, 0, 0.13, 1);
+  min-width: 180px;
+  box-shadow: var(--shadow-lg);
+  animation: ctxMenuIn 100ms ease-out;
   transform-origin: top left;
 }
 
 @keyframes ctxMenuIn {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .ctx-menu-item {
-  padding: 6px 14px;
-  cursor: pointer;
-  font-size: var(--text-sm);
-  color: var(--text-primary, #334155);
-  transition: background 120ms ease;
+  min-height: 22px;
+  padding: 2px 10px;
+  border-radius: 5px;
+  cursor: default;
+  font-size: var(--text-base);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
 }
 
 .ctx-menu-item:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.ctx-menu-item:hover svg {
+  color: #fff;
 }
 
 .ctx-menu-item:active {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.08));
+  background: var(--accent-primary-pressed);
 }
 
 .ctx-menu-item.ctx-menu-danger {
-  color: var(--danger, #EF4444);
+  color: var(--danger);
 }
 
 .ctx-menu-item.ctx-menu-danger:hover {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger);
+  color: #fff;
 }
 
 .ctx-menu-separator {
-  height: 1px;
-  background: var(--border-subtle, rgba(0, 0, 0, 0.06));
-  margin: 4px 8px;
+  height: 0.5px;
+  background: var(--hairline);
+  margin: 5px 10px;
 }
-
 
 /* ── Split Editor Layout ──────────────────────────────────────────── */
 
@@ -238,10 +239,10 @@
 }
 
 .split-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  border: 1px solid var(--border-subtle);
+  border: none;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -257,11 +258,12 @@
 }
 
 .split-close-text-btn {
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
+  border: none;
+  background: var(--dash-btn-bg);
+  box-shadow: var(--shadow-control);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
   padding: 4px 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -282,9 +284,9 @@
 
 /* Divider between panes */
 .split-editor-divider {
-  width: 4px;
+  width: 1px;
   flex-shrink: 0;
-  background: var(--border-subtle);
+  background: var(--hairline);
   cursor: col-resize;
   position: relative;
   transition: background 150ms ease;
@@ -293,7 +295,7 @@
 
 .split-editor-divider:hover,
 .split-editor-divider.dragging {
-  background: var(--accent-primary);
+  background: var(--border-strong);
 }
 
 .split-editor-divider::after {
@@ -304,7 +306,7 @@
   transform: translate(-50%, -50%);
   width: 2px;
   height: 32px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--text-quaternary);
   opacity: 0;
   transition: opacity 150ms ease;
@@ -376,8 +378,8 @@
   border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.08));
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-secondary, #666);
 }
 
@@ -436,8 +438,8 @@
   padding: 6px 12px 2px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary, #999);
 }
 
@@ -460,7 +462,7 @@
 }
 
 .timeline-entry.selected {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--bg-active);
 }
 
 .timeline-entry.selected .timeline-entry-dot {
@@ -503,7 +505,7 @@
   font-size: 9px;
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--accent-primary, #6366f1);
   color: #fff;
   margin-top: 2px;
@@ -570,17 +572,17 @@
   font-size: 10px;
   font-weight: 600;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .diff-stat-additions {
-  background: rgba(34, 197, 94, 0.12);
-  color: #16a34a;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .diff-stat-deletions {
-  background: rgba(239, 68, 68, 0.12);
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .diff-stat-unchanged {
@@ -617,8 +619,8 @@
   padding: 4px 12px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary, #999);
   border-bottom: 1px solid var(--border-subtle, rgba(0,0,0,0.04));
   background: var(--bg-secondary, #f8f9fa);
@@ -628,7 +630,7 @@
 .diff-editor-pane-body {
   flex: 1;
   overflow-y: auto;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -657,7 +659,7 @@
 .diff-line {
   display: flex;
   align-items: flex-start;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -693,19 +695,19 @@
 }
 
 .diff-line-added {
-  background: rgba(34, 197, 94, 0.08);
+  background: var(--success-bg);
 }
 
 .diff-line-added .diff-line-prefix {
-  color: #16a34a;
+  color: var(--success);
 }
 
 .diff-line-removed {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-bg);
 }
 
 .diff-line-removed .diff-line-prefix {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .diff-line-unchanged {
@@ -716,41 +718,33 @@
   color: transparent;
 }
 
-.btn-success {
-  background: #16a34a !important;
-  color: #fff !important;
-  border-color: #16a34a !important;
-}
 
-.btn-success:hover {
-  background: #15803d !important;
-}
 
 /* Dark mode adjustments for diff */
 @media (prefers-color-scheme: dark) {
   .diff-stat-additions {
     background: rgba(34, 197, 94, 0.18);
-    color: #4ade80;
+    color: var(--success);
   }
   
   .diff-stat-deletions {
     background: rgba(239, 68, 68, 0.18);
-    color: #f87171;
+    color: var(--danger);
   }
   
   .diff-line-added {
-    background: rgba(34, 197, 94, 0.12);
+    background: var(--success-bg);
   }
   
   .diff-line-added .diff-line-prefix {
-    color: #4ade80;
+    color: var(--success);
   }
   
   .diff-line-removed {
-    background: rgba(239, 68, 68, 0.12);
+    background: var(--danger-bg);
   }
   
   .diff-line-removed .diff-line-prefix {
-    color: #f87171;
+    color: var(--danger);
   }
 }

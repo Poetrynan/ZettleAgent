@@ -1,8 +1,8 @@
-/* ── Viewer Document Container (Obsidian Style Full Width) ────── */
+/* ── Viewer Document Container (centred reading column) ───────── */
 .viewer-document-container {
-  max-width: 100%;
-  margin: 0;
-  padding: 0 var(--space-4) 0 var(--space-10);
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 40px;
   width: 100%;
 }
 
@@ -10,7 +10,7 @@
 /* ── Outline Panel ─────────────────────────────────────────────── */
 
 .outline-panel {
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 0.5px solid var(--hairline);
   padding-bottom: var(--space-4);
   margin-bottom: var(--space-6);
 }
@@ -20,13 +20,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-2) var(--space-2) var(--space-2);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 700;
+  font-size: var(--text-sm);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-3);
+  border-bottom: none;
+  margin-bottom: var(--space-1);
   user-select: none;
 }
 
@@ -42,13 +42,12 @@
 }
 
 .outline-count-badge {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 400;
+  padding: 0;
+  border: none;
 }
 
 .outline-list {
@@ -108,16 +107,9 @@
   opacity: 0.7;
 }
 
-/* Tree Guide Lines */
+/* Tree Guide Lines — off: indentation alone carries the hierarchy */
 .outline-item:not(.outline-level-1)::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--border);
-  opacity: 0.65;
-  pointer-events: none;
+  content: none;
 }
 
 .outline-item.outline-level-2::before {
@@ -145,8 +137,18 @@
 }
 
 .outline-item:hover {
-  background: var(--bg-secondary);
-  color: var(--accent-primary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.outline-item {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  cursor: default;
+}
+
+.outline-bullet {
+  display: none !important;
 }
 
 .outline-item:active {
@@ -165,7 +167,7 @@
 .outline-level-1 .outline-bullet {
   width: 3px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--accent-primary);
   margin-left: 1px;
   margin-right: 4px;
@@ -205,7 +207,7 @@
 .outline-item:hover .outline-bullet {
   background: var(--accent-primary) !important;
   border-color: var(--accent-primary) !important;
-  transform: scale(1.15);
+  transform: none;
 }
 
 .outline-text {
@@ -245,10 +247,6 @@
 .org-guide-modal {
   width: min(560px, 95vw);
   max-height: min(88vh, 720px);
-  border: 1px solid var(--border-subtle);
-  box-shadow:
-    0 24px 64px rgba(15, 23, 42, 0.16),
-    0 0 0 1px color-mix(in srgb, var(--accent-primary) 8%, transparent);
 }
 
 .org-guide-header {
@@ -257,12 +255,8 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-5);
-  border-bottom: 1px solid var(--border-subtle);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent-primary) 8%, var(--bg-secondary)),
-    var(--bg-secondary)
-  );
+  border-bottom: 0.5px solid var(--hairline);
+  background: transparent;
 }
 
 .org-guide-header-main {

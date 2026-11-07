@@ -1,0 +1,285 @@
+/* ── macOS native-looking control defaults ─────────────────────────
+ * Everything here is wrapped in :where() so it has zero specificity:
+ * component classes always win, and bare elements get a native look
+ * instead of browser defaults.
+ * Reusable primitives (.mac-segmented, .mac-switch, .mac-popover,
+ * .mac-sheet, .mac-group, .mac-section-title) live at the bottom.
+ * ─────────────────────────────────────────────────────────────────── */
+
+:where(button, input, select, textarea) {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+:where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--accent-primary);
+}
+
+/* Text fields */
+:where(
+  input[type="text"],
+  input[type="search"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input:not([type]),
+  textarea
+) {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+  outline: none;
+  transition: box-shadow var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+:where(
+  input[type="text"],
+  input[type="search"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input:not([type]),
+  textarea
+):focus-visible {
+  border-color: var(--accent-primary);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+:where(input, textarea)::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Pop-up button (select) */
+:where(select) {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 24px;
+  padding: 2px 26px 2px 9px;
+  color: var(--text-primary);
+  background-color: var(--dash-btn-bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='12' viewBox='0 0 8 12'%3E%3Cpath d='M1 4.5 4 1.5l3 3M1 7.5l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-control);
+  outline: none;
+}
+
+:where(select):focus-visible {
+  box-shadow: var(--shadow-control), var(--focus-ring);
+}
+
+:where(select) option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+:where(hr) {
+  border: none;
+  border-top: 0.5px solid var(--hairline);
+}
+
+:where(kbd) {
+  font-family: var(--font-sans);
+  font-size: 0.92em;
+  color: var(--text-secondary);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+}
+
+/* ── Segmented control ─────────────────────────────────────────── */
+.mac-segmented {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+}
+
+.mac-segmented > button,
+.mac-segmented > [role="tab"],
+.mac-segmented > [role="radio"] {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.mac-segmented > :is(button, [role="tab"], [role="radio"]):hover:not(.active):not([aria-selected="true"]):not([aria-checked="true"]) {
+  background: var(--bg-hover);
+}
+
+.mac-segmented > :is(.active, [aria-selected="true"], [aria-checked="true"]) {
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-control);
+}
+
+:root[data-theme="dark"] .mac-segmented > :is(.active, [aria-selected="true"], [aria-checked="true"]) {
+  background: #5A5A5E;
+}
+
+/* ── Switch ────────────────────────────────────────────────────── */
+.mac-switch {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--bg-active);
+  transition: background-color var(--duration-normal) var(--ease-out);
+}
+
+.mac-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.mac-switch.on,
+.mac-switch[aria-checked="true"] {
+  background: var(--accent-primary);
+}
+
+.mac-switch.on::after,
+.mac-switch[aria-checked="true"]::after {
+  transform: translateX(14px);
+}
+
+/* ── Popover / menu material ───────────────────────────────────── */
+.mac-popover {
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Sheet ─────────────────────────────────────────────────────── */
+.mac-sheet {
+  background: var(--material-sheet);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: macSheetIn var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes macSheetIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Grouped form (System Settings style) ──────────────────────── */
+.mac-group {
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.mac-group > * + * {
+  border-top: 0.5px solid var(--hairline);
+}
+
+.mac-section-title {
+  margin: 0 0 6px 2px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-primary);
+}
+
+/* ── Alert (NSAlert) ───────────────────────────────────────────── */
+.mac-alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg);
+  animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+.mac-alert {
+  width: min(300px, calc(100% - 32px));
+  padding: 20px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: var(--material-sheet);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: macSheetIn var(--duration-slow) var(--ease-out) both;
+}
+
+.mac-alert-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mac-alert-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.mac-alert-message {
+  margin: 0 0 16px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.mac-alert-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.mac-alert-actions > .btn {
+  flex: 1 1 0;
+}

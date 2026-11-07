@@ -25,7 +25,7 @@
 .canvas-template-card:hover {
   border-color: var(--accent-primary, #3b82f6);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .canvas-template-card:active {

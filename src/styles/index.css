@@ -1,33 +1,41 @@
-/* ── ZettelAgent Design System (UI/UX Pro Max) ──────────────────── */
+/* ── ZettelAgent Design System (macOS / Apple HIG) ────────────────── */
 
 @import url('./tabs.css');
 @import url('./theme-dark.css');
 @import url('./theme-tokens.css');
 @import url('./viz-tokens.css');
+@import url('./mac-controls.css');
 
 :root {
   /* ── Typography ───────────────────────────────────────────────── */
-  /* Offline-only stacks: system UI sans for body, local serifs for
-     editorial headings, local monos for paths/metrics/shortcuts. */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Fira Sans', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
-  --font-serif: 'Playfair Display', 'Newsreader', 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
-  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  /* System font first: SF Pro on macOS, Segoe UI Variable on Windows,
+     PingFang / YaHei for CJK. All offline. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Helvetica Neue', 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro', 'Helvetica Neue', 'Segoe UI Variable Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', sans-serif;
+  /* Kept for compatibility: UI headings that used the editorial serif now
+     use the system display face, the way Mac apps title their windows. */
+  --font-serif: var(--font-display);
+  --font-reading-serif: 'New York', ui-serif, 'Iowan Old Style', Georgia, 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
 
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg: 1.0625rem;
-  --text-xl: 1.1875rem;
-  --text-2xl: 1.4375rem;
-  --text-3xl: 1.875rem;
+  /* macOS text styles: body 13, callout 12, subheadline 11,
+     title3 15, title2 17, title1 22, large title 26. */
+  --text-xs: 0.6875rem;   /* 11 */
+  --text-sm: 0.75rem;     /* 12 */
+  --text-base: 0.8125rem; /* 13 */
+  --text-lg: 0.9375rem;   /* 15 */
+  --text-xl: 1.0625rem;   /* 17 */
+  --text-2xl: 1.375rem;   /* 22 */
+  --text-3xl: 1.625rem;   /* 26 */
+  --text-reading: 0.9375rem; /* note body */
 
-  --leading-tight: 1.3;
-  --leading-normal: 1.6;
-  --leading-relaxed: 1.8;
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.65;
 
-  --tracking-tight: -0.015em;
+  --tracking-tight: -0.01em;
   --tracking-normal: 0;
-  --tracking-wide: 0.025em;
+  --tracking-wide: 0.01em;
 
   /* ── Spacing ──────────────────────────────────────────────────── */
   --space-1: 0.25rem;
@@ -40,25 +48,25 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* ── Radius (Swiss Architectural Precision) ──────────────────── */
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
+  /* ── Radius (macOS: controls 6, cards 10, windows/sheets 12) ── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
   --radius-full: 9999px;
 
   /* ── Transitions ──────────────────────────────────────────────── */
-  /* Four transition speeds, deliberately few. Anything that felt like it
-     needed 200ms/300ms/400ms is snapped to the nearest step — the visual
-     difference is imperceptible and the consistency is worth more. */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --ease-bounce: cubic-bezier(0.68, -0.6, 0.32, 1.6);
+  /* Short and quiet. Frequent interactions get no motion beyond color;
+     sheets and popovers ease in. The spring/bounce names are kept but
+     softened — macOS controls do not overshoot. */
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.3, 1.05);
+  --ease-bounce: cubic-bezier(0.2, 0.9, 0.3, 1.05);
   --duration-instant: 50ms;   /* press feedback — must beat perception */
-  --duration-fast: 150ms;     /* hover, color, small state changes */
-  --duration-normal: 250ms;   /* enter/exit of small elements */
-  --duration-slow: 350ms;     /* panels, sheets, layout-scale moves */
+  --duration-fast: 120ms;     /* hover, color, small state changes */
+  --duration-normal: 200ms;   /* enter/exit of small elements */
+  --duration-slow: 280ms;     /* panels, sheets, layout-scale moves */
 
   /* Ambient loops are a separate category from transitions: they run
      forever and communicate "working", not "something changed". */
@@ -67,10 +75,21 @@
   --duration-ambient-slow: 2s;
 
   /* ── Layout ───────────────────────────────────────────────────── */
-  --sidebar-width: 280px;
+  --sidebar-width: 260px;
   --chat-width: 360px;
-  --header-height: 48px;
-  --toolbar-height: 40px;
+  --header-height: 52px;   /* unified title bar + toolbar */
+  --toolbar-height: 38px;
+  --control-height: 28px;  /* regular push button / field */
+  --control-height-sm: 22px;
+  --row-height: 28px;      /* sidebar / list rows */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 /* ── Reset ──────────────────────────────────────────────────────── */
@@ -117,7 +136,8 @@ body {
   height: 100vh;
   overflow: hidden;
   position: relative;
-  background: var(--bg-primary);
+  /* The window material the sidebar and rail sit on. */
+  background: var(--bg-secondary);
 }
 
 .app-main {
@@ -180,36 +200,43 @@ body {
 
 /* ── Scrollbar ──────────────────────────────────────────────────── */
 
+/* macOS overlay-style scrollbars: a thin pill, no track. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
   border-radius: var(--radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: color-mix(in srgb, var(--text-primary) 38%, transparent);
+  border: 2.5px solid transparent;
+  background-clip: padding-box;
 }
 
 /* ── Selection ──────────────────────────────────────────────────── */
 
 ::selection {
-  background: var(--moss-tint);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 26%, transparent);
+  color: inherit;
 }
 
 /* ── Focus ──────────────────────────────────────────────────────── */
 
+/* macOS keyboard focus: a soft accent ring hugging the control. */
 :focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+  outline: 3px solid color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  outline-offset: 1px;
 }
 
 /* ── Links ──────────────────────────────────────────────────────── */
@@ -303,8 +330,8 @@ pre code {
 }
 
 @keyframes glow {
-  0%, 100% { box-shadow: 0 0 5px rgba(61, 106, 80, 0.18); }
-  50% { box-shadow: 0 0 20px rgba(61, 106, 80, 0.36); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-primary) 20%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 20%, transparent); }
 }
 
 @keyframes breathe {
@@ -376,7 +403,7 @@ pre code {
 }
 
 .logo-zettel {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.01em;
@@ -403,7 +430,7 @@ pre code {
   line-height: 1;
   padding: 0.16em 0.04em 0.06em;
   /* Archive vermilion — the index mark of the brand, nothing else */
-  background: linear-gradient(145deg, var(--vermilion) 0%, var(--vermilion-strong) 100%);
+  background: linear-gradient(145deg, var(--brand-red) 0%, var(--brand-red) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -434,7 +461,7 @@ pre code {
 .logo-agent {
   font-family: 'Outfit', var(--font-sans), sans-serif;
   font-weight: 600;
-  background: linear-gradient(135deg, var(--vermilion) 0%, var(--accent-secondary) 100%);
+  background: linear-gradient(135deg, var(--brand-red) 0%, var(--brand-red) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -482,30 +509,24 @@ input[type="range"] {
   border-radius: 4px;
   outline: none;
   cursor: pointer;
+  accent-color: var(--accent-primary);
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--slider-thumb-bg);
-  border: 1.5px solid var(--slider-thumb-border);
+  border: 0.5px solid var(--slider-thumb-border);
   box-shadow: var(--slider-thumb-shadow);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-}
-
-input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-  border-color: var(--accent-secondary);
-  box-shadow: 0 2px 8px rgba(53, 95, 158, 0.25), 0 0 0 2px rgba(53, 95, 158, 0.1);
+  transition: box-shadow var(--duration-fast) ease;
 }
 
 input[type="range"]:active::-webkit-slider-thumb {
-  border-color: var(--accent-secondary);
-  box-shadow: 0 0 0 3px rgba(53, 95, 158, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--slider-thumb-shadow), var(--focus-ring);
 }
 
 input[type="range"]::-moz-range-thumb {
@@ -550,18 +571,18 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .app-error-boundary-btn {
-  padding: 8px 20px;
-  border-radius: 8px;
+  height: var(--control-height);
+  padding: 0 16px;
+  border-radius: var(--radius-md);
   border: none;
-  background: var(--accent-gradient);
-  color: var(--text-inverse);
-  font-size: 14px;
-  font-weight: 600;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: var(--text-base);
+  font-weight: 500;
   cursor: pointer;
-  transition: opacity 150ms ease, transform 150ms ease;
+  box-shadow: var(--shadow-control);
 }
 
 .app-error-boundary-btn:hover {
-  opacity: 0.92;
-  transform: translateY(-1px);
+  background: var(--accent-primary-hover);
 }

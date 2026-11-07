@@ -14,22 +14,13 @@ interface WorkstageHeaderProps {
   actions?: React.ReactNode;
 }
 
-const VIEW_CODES: Record<View, string> = {
-  dashboard: '01 DASH',
-  note: '02 NOTE',
-  graph: '03 ATLAS',
-  canvas: '04 CANVAS',
-  bases: '05 BASES',
-  calendar: '06 CAL',
-  review: '07 REVIEW',
-  knowledge: '08 KC',
-  settings: '09 SETTINGS',
-};
-
 /**
- * WorkstageHeader — Pure Swiss Editorial Top Header.
- * Displays system meta strip on top, and Document Desk title with [⌘K] and SAVED LOCALLY stamps.
- * No duplicate workspace tabs — workspace switching lives definitively in the left WORKSPACES panel.
+ * WorkstageHeader — the unified title bar / toolbar of the main window.
+ *
+ * macOS layout: sidebar toggle on the leading edge, a bold window title with
+ * the open document as a quiet subtitle, and toolbar items on the trailing
+ * edge. The bar sits on a translucent toolbar material so content scrolling
+ * beneath it stays faintly visible.
  */
 export function WorkstageHeader({
   view,
@@ -45,12 +36,11 @@ export function WorkstageHeader({
   const isZh = state.lang === 'zh';
 
   const docContext = currentFileName || (state.currentFile ? state.currentFile.split(/[\\/]/).pop() : null);
-  const modeCode = VIEW_CODES[view] || '00 WORK';
+  const showDoc = Boolean(docContext && view === 'note');
 
   return (
     <div className="swiss-header-root">
-      {/* Main Document Desk Bar */}
-      <header className="swiss-workstage-bar" aria-label="Document Desk Header">
+      <header className="swiss-workstage-bar mac-toolbar" aria-label={isZh ? '工具栏' : 'Toolbar'}>
         <div className="swiss-workstage-bar__left">
           <button
             type="button"
@@ -58,22 +48,14 @@ export function WorkstageHeader({
             onClick={toggleSidebar}
             title={isZh ? '切换侧边栏 (Ctrl+B)' : 'Toggle Sidebar (Ctrl+B)'}
             aria-label="Toggle Sidebar"
+            aria-pressed={isSidebarOpen}
           >
-            <IconSidebar size={15} />
+            <IconSidebar size={16} />
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              {viewTitle}
-            </span>
-            {docContext && view === 'note' && (
-              <>
-                <span style={{ color: 'var(--border)', fontSize: '12px' }}>/</span>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {docContext}
-                </span>
-              </>
-            )}
+          <div className="mac-toolbar-title">
+            <span className="mac-toolbar-title__main">{showDoc ? docContext : viewTitle}</span>
+            {showDoc && <span className="mac-toolbar-title__sub">{viewTitle}</span>}
           </div>
         </div>
 
@@ -87,8 +69,9 @@ export function WorkstageHeader({
             onClick={toggleChat}
             title={t('toolbar.chat')}
             aria-label={t('toolbar.chat')}
+            aria-pressed={isChatOpen}
           >
-            <IconChat size={15} />
+            <IconChat size={16} />
           </button>
         </div>
       </header>

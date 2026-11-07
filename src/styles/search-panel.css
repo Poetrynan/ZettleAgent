@@ -61,7 +61,7 @@
   border: none;
   background: transparent;
   color: var(--text-tertiary);
-  cursor: pointer;
+  cursor: default;
   border-radius: var(--radius-sm);
   transition: all 150ms ease;
 }
@@ -127,7 +127,7 @@
   border: none;
   background: transparent;
   color: var(--text-tertiary);
-  cursor: pointer;
+  cursor: default;
   border-radius: var(--radius-sm);
   transition: all 0.1s;
 }
@@ -147,7 +147,7 @@
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
-  cursor: pointer;
+  cursor: default;
   transition: all 0.12s;
   flex-shrink: 0;
 }
@@ -179,7 +179,7 @@
 }
 .search-panel-results::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* Loading / Empty / Hint states */
@@ -240,7 +240,7 @@
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  cursor: pointer;
+  cursor: default;
   border-radius: var(--radius-sm);
   transition: background 0.1s;
   user-select: none;
@@ -274,7 +274,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+  cursor: default;
 }
 
 .search-group-name:hover {
@@ -305,7 +305,7 @@
   padding: 5px 10px;
   border: none;
   background: transparent;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
   border-radius: var(--radius-sm);
   transition: background 0.1s;
@@ -329,9 +329,9 @@
 }
 
 .search-match-snippet mark.search-highlight {
-  background: rgba(250, 204, 21, 0.35);
+  background: rgba(255, 214, 10, 0.45);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0 1px;
 }
 

@@ -74,8 +74,8 @@
   font-size: 10px;
   font-weight: 700;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   margin-right: var(--space-1, 4px);
   white-space: nowrap;
 }
@@ -274,7 +274,7 @@
 }
 .overview-settings-group { display: flex; flex-direction: column; gap: 6px; }
 .overview-settings-title {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: 0; text-transform: none;
   color: var(--text-tertiary);
 }
 .overview-settings-desc { font-size: 10px; line-height: 1.5; color: var(--text-secondary); }
@@ -387,8 +387,8 @@
   text-align: left;
   font-weight: 700;
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-tertiary);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -543,7 +543,7 @@
 .overview-modal-header h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-primary); }
 .overview-modal-body { padding: var(--space-4); overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .overview-modal-count { margin: 0; font-size: 11px; color: var(--text-secondary); }
-.overview-modal-label { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.03em; }
+.overview-modal-label { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: none; letter-spacing: 0; }
 .overview-modal-textarea {
   width: 100%; padding: 8px 10px; resize: vertical;
   background: var(--bg-primary); border: 1px solid var(--border);
@@ -621,3 +621,104 @@
 
 
 
+
+
+/* ══ macOS pass (Bases / overview table) ═══════════════════════════ */
+.overview-head {
+  background: var(--bg-primary) !important;
+  border-bottom: none !important;
+  padding-top: 20px !important;
+}
+
+.overview-head-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+.overview-lenses,
+.overview-toolbar {
+  background: transparent !important;
+  border-bottom: none !important;
+}
+
+.overview-chip-btn,
+.overview-refresh-btn,
+.overview-ai-btn {
+  border: none !important;
+  background: var(--dash-btn-bg) !important;
+  box-shadow: var(--shadow-control) !important;
+  border-radius: var(--radius-md) !important;
+  color: var(--text-primary) !important;
+  cursor: default;
+}
+
+.overview-chip-btn:hover,
+.overview-refresh-btn:hover,
+.overview-ai-btn:hover {
+  background: var(--dash-btn-hover) !important;
+}
+
+.overview-lens-badge,
+.overview-head-count {
+  border: none !important;
+  background: var(--bg-tertiary) !important;
+  color: var(--text-secondary) !important;
+  border-radius: var(--radius-full) !important;
+}
+
+.overview-search {
+  border: none !important;
+  background: var(--bg-tertiary) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.overview-search:focus,
+.overview-search:focus-within {
+  box-shadow: var(--focus-ring) !important;
+}
+
+/* Table: macOS list — hairline rows, sticky quiet header, alternating tint */
+.overview-th {
+  background: var(--bg-primary) !important;
+  color: var(--text-secondary) !important;
+  font-weight: 500 !important;
+  border-bottom: 0.5px solid var(--hairline) !important;
+}
+
+.overview-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+}
+
+.overview-td {
+  border-bottom: none !important;
+}
+
+.overview-table tbody tr:hover {
+  background: var(--bg-hover) !important;
+}
+
+.overview-type-badge,
+.overview-tag {
+  border: none !important;
+  border-radius: var(--radius-full) !important;
+  background: var(--bg-tertiary) !important;
+  color: var(--text-secondary) !important;
+  font-weight: 500;
+}
+
+.overview-modal,
+.overview-columns-menu {
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.overview-modal {
+  border-radius: var(--radius-xl) !important;
+}

@@ -36,8 +36,8 @@
   font-size: 10px;
   font-weight: 600;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   border-bottom: 1px solid rgba(226, 232, 240, 0.4);
   user-select: none;
   flex-shrink: 0;
@@ -116,7 +116,7 @@
   font-size: 11.5px;
   background: rgba(0, 0, 0, 0.06);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .text-node-markdown pre {
@@ -521,7 +521,7 @@
 }
 
 .react-flow__handle:hover {
-  transform: scale(1.35);
+  transform: none;
   background-color: rgba(255, 255, 255, 1) !important;
   border-color: rgba(99, 102, 241, 0.7) !important;
   opacity: 1 !important;
@@ -551,7 +551,7 @@
 
 .react-flow__resize-control.handle:hover {
   opacity: 1 !important;
-  transform: scale(1.5);
+  transform: none;
   background: rgba(255, 255, 255, 1) !important;
   border-color: rgba(99, 102, 241, 0.7) !important;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
@@ -667,7 +667,7 @@
 }
 
 .sticky-color-dot:hover {
-  transform: scale(1.2);
+  transform: none;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 0 2px rgba(0, 0, 0, 0.06);
 }
 
@@ -754,8 +754,8 @@
   padding: 6px 12px 3px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
 }
 
@@ -779,7 +779,7 @@
 }
 
 .canvas-context-color-dot:hover {
-  transform: scale(1.15);
+  transform: none;
 }
 
 .canvas-context-color-dot.active {
@@ -886,8 +886,8 @@
   padding: 8px 12px 6px;
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--accent-secondary);
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 2px;
@@ -1056,7 +1056,7 @@
   background: rgba(34, 197, 94, 0.25);
   border-color: rgba(34, 197, 94, 0.6);
   box-shadow: 0 0 12px -2px rgba(34, 197, 94, 0.3);
-  transform: scale(1.12);
+  transform: none;
 }
 
 /* Reject button — red */
@@ -1070,7 +1070,7 @@
   background: rgba(239, 68, 68, 0.2);
   border-color: rgba(239, 68, 68, 0.5);
   box-shadow: 0 0 12px -2px rgba(239, 68, 68, 0.25);
-  transform: scale(1.12);
+  transform: none;
 }
 
 

@@ -598,11 +598,10 @@ function NumberInputCard({
               fontSize: 9,
               fontWeight: 600,
               color: 'var(--accent-primary)',
-              background: 'rgba(16, 185, 129, 0.08)',
+              background: 'var(--accent-tint)',
               padding: '1px 6px',
               borderRadius: 'var(--radius-full)',
-              textTransform: 'uppercase' as const,
-              letterSpacing: '0.5px',
+              textTransform: 'none' as const,
             }}>
               {t('settings.modified')}
             </span>
@@ -618,7 +617,7 @@ function NumberInputCard({
         <span style={{
           fontSize: 10,
           color: 'var(--text-muted)',
-          fontFamily: 'var(--font-mono, monospace)',
+          fontVariantNumeric: 'tabular-nums',
           marginTop: 2,
         }}>
           {isZh ? '范围' : 'Range'}: {f.format ? f.format(f.min) : f.min} – {f.format ? f.format(f.max) : f.max}
@@ -667,7 +666,7 @@ function NumberInputCard({
               fontWeight: 600,
               outline: 'none',
               padding: 0,
-              fontFamily: 'var(--font-mono, monospace)',
+              fontVariantNumeric: 'tabular-nums',
             }}
           />
           <button
@@ -847,7 +846,7 @@ function OrganizeSettingsTab({ isZh }: { isZh: boolean }) {
               width: 28,
               height: 28,
               borderRadius: 'var(--radius-md)',
-              background: 'rgba(16, 185, 129, 0.08)',
+              background: 'var(--accent-tint)',
               flexShrink: 0,
             }}>
               <IconNote size={16} />

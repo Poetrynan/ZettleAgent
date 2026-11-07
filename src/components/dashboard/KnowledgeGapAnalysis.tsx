@@ -842,7 +842,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                             textAnchor="middle"
                             dominantBaseline="middle"
                             className="gap-health-gauge-label"
-                            style={{ fill: 'var(--text-tertiary)', fontSize: '8px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                            style={{ fill: 'var(--text-tertiary)', fontSize: '8px', fontWeight: '700', textTransform: 'none', letterSpacing: 0 }}
                           >
                             {state.lang === 'zh' ? '健康度' : 'HEALTH'}
                           </text>

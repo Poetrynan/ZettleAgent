@@ -251,8 +251,8 @@ export function ChatMessageList({
         <div className="chat-empty-desk" style={{ margin: 'auto', maxWidth: '360px', width: '100%', padding: '32px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px' }}>
           {/* Header Info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
-            <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
-              {isZh ? '智能助手 · 本地知识库' : 'INTELLIGENT AGENT'}
+            <div className="chat-empty-title">
+              {isZh ? '智能助手' : 'Assistant'}
             </div>
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.5, maxWidth: '320px' }}>
               {isZh 
@@ -264,8 +264,8 @@ export function ChatMessageList({
           {/* Quick template triggers */}
           {activeTemplates && activeTemplates.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginTop: '8px' }}>
-              <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
-                {isZh ? '推荐指令 · COMMANDS' : 'COMMANDS'}
+              <div className="chat-empty-section-label">
+                {isZh ? '推荐指令' : 'Suggestions'}
               </div>
               {activeTemplates.map((tmpl) => {
                 const prompt = isZh ? tmpl.promptZh : tmpl.prompt;

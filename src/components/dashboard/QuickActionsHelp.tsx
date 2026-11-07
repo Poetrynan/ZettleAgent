@@ -343,7 +343,7 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
                       border: '1px solid var(--border-subtle, var(--border))',
                       fontSize: '11px',
                     }}>
-                      <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', marginRight: 6 }}>FTS5</span>
+                      <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'none', marginRight: 6 }}>FTS5</span>
                       <span style={{ color: 'var(--text-primary)' }}>{act.ftsStatus}</span>
                     </div>
                     <div style={{
@@ -353,7 +353,7 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
                       border: '1px solid var(--border-subtle, var(--border))',
                       fontSize: '11px',
                     }}>
-                      <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', marginRight: 6 }}>Vector</span>
+                      <span style={{ color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'none', marginRight: 6 }}>Vector</span>
                       <span style={{ color: 'var(--text-primary)' }}>{act.embStatus}</span>
                     </div>
                   </div>

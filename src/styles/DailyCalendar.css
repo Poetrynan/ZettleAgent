@@ -332,8 +332,8 @@
   font-weight: 700;
   font-size: var(--text-xs);
   color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  text-transform: none;
+  letter-spacing: 0;
   padding: var(--space-2) 0;
   min-width: 0;
   overflow: hidden;
@@ -458,8 +458,8 @@
   font-size: 10px;
   color: var(--text-tertiary);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   overflow-wrap: anywhere;
 }
 
@@ -638,7 +638,7 @@
 .preview-secondary-btn:hover {
   background: var(--bg-hover);
   border-color: var(--accent-primary);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 /* Additional animations */
@@ -658,7 +658,7 @@
 
 .preview-content::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .preview-content::-webkit-scrollbar-thumb:hover {
@@ -681,4 +681,186 @@
 
 .calendar-main::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+
+/* ══ macOS pass (Calendar) ═════════════════════════════════════════
+ * Month view like Calendar.app: a single hairline grid, plain day
+ * numbers, today as a filled accent circle, selection as a soft tint.
+ * ═══════════════════════════════════════════════════════════════════ */
+.calendar-container {
+  background: var(--bg-primary);
+}
+
+.calendar-header,
+.calendar-grid-wrapper {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.calendar-icon-wrapper {
+  display: none;
+}
+
+.calendar-title-section h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-3xl);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--text-primary);
+}
+
+.calendar-week-days {
+  gap: 0;
+  margin-bottom: 0;
+  padding-bottom: 6px;
+}
+
+.calendar-week-day {
+  font-weight: 500;
+  font-size: 12px;
+  text-align: right;
+  padding-right: 10px;
+}
+
+.calendar-grid {
+  gap: 0;
+  border-top: 0.5px solid var(--hairline);
+  border-left: 0.5px solid var(--hairline);
+}
+
+.calendar-day-cell {
+  background: transparent;
+  border: none;
+  border-right: 0.5px solid var(--hairline);
+  border-bottom: 0.5px solid var(--hairline);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 6px 8px;
+  cursor: default;
+  align-items: flex-end;
+}
+
+.calendar-day-cell:hover:not(:active):not(.other-month) {
+  background: var(--bg-hover);
+  border-color: var(--hairline);
+}
+
+.calendar-day-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.calendar-day-cell.other-month {
+  background: transparent;
+  opacity: 1;
+}
+
+.calendar-day-cell.other-month .calendar-day-num {
+  color: var(--text-quaternary);
+}
+
+.calendar-day-cell.today:not(.selected),
+.calendar-day-cell.today {
+  border-color: var(--hairline);
+  border-left: none;
+}
+
+.calendar-day-cell.today .calendar-day-num {
+  background: var(--sys-red);
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.calendar-day-cell.selected {
+  border-color: var(--hairline);
+  background: var(--accent-tint);
+}
+
+/* Writing activity: a quiet green wash, stronger with more words */
+.calendar-day-cell.level-1 { background: color-mix(in srgb, var(--sys-green) 8%, transparent); }
+.calendar-day-cell.level-2 { background: color-mix(in srgb, var(--sys-green) 15%, transparent); }
+.calendar-day-cell.level-3 { background: color-mix(in srgb, var(--sys-green) 24%, transparent); }
+.calendar-day-cell.level-4 { background: color-mix(in srgb, var(--sys-green) 34%, transparent); }
+
+.calendar-legend-box.l0 { background: var(--bg-tertiary); }
+.calendar-legend-box.l1 { background: color-mix(in srgb, var(--sys-green) 15%, transparent); }
+.calendar-legend-box.l2 { background: color-mix(in srgb, var(--sys-green) 35%, transparent); }
+.calendar-legend-box.l3 { background: color-mix(in srgb, var(--sys-green) 60%, transparent); }
+.calendar-legend-box.l4 { background: var(--sys-green); }
+
+.calendar-cell-words {
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  font-weight: 500;
+}
+
+.calendar-stat-card {
+  background: var(--bg-secondary) !important;
+  border: none !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: none !important;
+}
+
+.calendar-bottom-bar {
+  background: transparent !important;
+  border: none !important;
+}
+
+.calendar-picker-trigger,
+.calendar-today-btn,
+.calendar-nav-btn {
+  border: none !important;
+  background: var(--dash-btn-bg) !important;
+  box-shadow: var(--shadow-control) !important;
+  border-radius: var(--radius-md) !important;
+  cursor: default;
+}
+
+.calendar-nav-buttons {
+  border: none !important;
+  background: transparent !important;
+  gap: 4px;
+}
+
+.calendar-picker-menu {
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border: 0.5px solid var(--hairline) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 5px !important;
+}
+
+.calendar-picker-option {
+  border-radius: 5px !important;
+}
+
+.calendar-picker-option.active {
+  background: var(--accent-primary) !important;
+  color: #fff !important;
+}
+
+.calendar-preview-panel {
+  background: var(--bg-secondary) !important;
+  border-left: 0.5px solid var(--hairline) !important;
+}
+
+@container calendar (max-width: 860px) {
+  .calendar-preview-panel {
+    border-top: 0.5px solid var(--hairline) !important;
+  }
 }

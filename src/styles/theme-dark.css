@@ -85,13 +85,7 @@
 }
 
 [data-theme="dark"] .stat-card:hover {
-  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent-primary) 12%, transparent),
-              var(--shadow-sm);
-  border-color: color-mix(in srgb, var(--accent-primary) 25%, transparent);
-}
-
-[data-theme="dark"] .step-card:hover {
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
 }
 
 [data-theme="dark"] .agent-status-card.running .agent-mini-stat-value {
@@ -186,8 +180,8 @@
 .dark-theme [class*="milkdown"] div,
 .dark-theme [class*="crepe"] div,
 .dark-theme [class*="editor"] div {
-  --crepe-color-background: #1e293b;
-  --crepe-color-surface: #334155;
+  --crepe-color-background: var(--bg-elevated);
+  --crepe-color-surface: var(--bg-tertiary);
 }
 
 /* Nuclear option: override ANY div with light inline bg in dark mode */
@@ -232,37 +226,40 @@
   color: var(--crepe-color-on-surface) !important;
 }
 
-/* Toolbar & menu items in Crepe */
-[data-theme="dark"] [class*="toolbar"],
-[data-theme="dark"] [class*="Toolbar"],
-[data-theme="dark"] [class*="menu"],
-[data-theme="dark"] [class*="Menu"],
-[data-theme="dark"] [class*="bubble"],
-[data-theme="dark"] [class*="Bubble"] {
-  background: var(--bg-elevated) !important;
-  border-color: var(--border) !important;
+/* Toolbar & menu items in Crepe — scoped to the editor so app chrome
+   (the translucent window toolbar, sidebar blocks, menus) keeps its own
+   materials. Crepe mounts its floating UI as `milkdown-*` elements. */
+[data-theme="dark"] .milkdown [class*="toolbar"],
+[data-theme="dark"] .milkdown [class*="menu"],
+[data-theme="dark"] .milkdown [class*="bubble"],
+[data-theme="dark"] .crepe [class*="toolbar"],
+[data-theme="dark"] .crepe [class*="menu"],
+[data-theme="dark"] .milkdown-toolbar,
+[data-theme="dark"] .milkdown-slash-menu,
+[data-theme="dark"] .milkdown-link-preview,
+[data-theme="dark"] .milkdown-link-edit {
+  background: var(--material-popover) !important;
+  border-color: var(--hairline) !important;
   color: var(--text-primary) !important;
 }
 
 /* Block type selector popup specifically */
-[data-theme="dark"] div[class*="block"],
-[data-theme="dark"] div[class*="Block"] {
+[data-theme="dark"] .milkdown-block-handle {
   background: var(--bg-elevated) !important;
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror code {
   background: var(--bg-tertiary);
-  color: var(--accent-secondary);
+  color: var(--text-primary);
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror pre {
-  background: var(--bg-tertiary);
-  border-color: var(--border);
+  background: var(--bg-secondary);
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror blockquote {
-  border-left-color: var(--accent-primary);
-  color: var(--text-tertiary);
+  border-left-color: var(--border-strong);
+  color: var(--text-secondary);
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror hr {
@@ -274,7 +271,7 @@
 }
 
 [data-theme="dark"] .milkdown-editor-container .ProseMirror ::selection {
-  background: rgba(121, 179, 138, 0.25);
+  background: rgba(10, 132, 255, 0.35);
 }
 
 [data-theme="dark"] .milkdown-editor-container,

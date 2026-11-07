@@ -1,3 +1,95 @@
+/* ── Dashboard page frame ─────────────────────────────────────── */
+
+.dash-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 36px 40px 56px;
+}
+
+.dash-page-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.dash-page-subtitle {
+  margin: 0 0 22px;
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Summary: one grouped container, three columns split by hairlines */
+.dash-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 28px;
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.dash-summary-item {
+  padding: 14px 18px 16px;
+}
+
+.dash-summary-item + .dash-summary-item {
+  border-left: 0.5px solid var(--hairline);
+}
+
+.dash-summary-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.dash-summary-value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.dash-summary-value--status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  line-height: 30px;
+}
+
+.dash-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-quaternary);
+}
+
+.dash-status-dot.on {
+  background: var(--sys-green);
+}
+
+.dash-summary-caption {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .dash-page { padding: 24px 20px 40px; }
+  .dash-summary { grid-template-columns: 1fr; }
+  .dash-summary-item + .dash-summary-item { border-left: none; border-top: 0.5px solid var(--hairline); }
+}
+
 /* ── Dashboard Now / Build / Observe bands ─────────────────────── */
 
 .dash-band {
@@ -25,7 +117,7 @@ hr.dash-divider + .dash-band {
 }
 
 .dash-band-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 700;
   color: var(--text-primary);
@@ -45,9 +137,8 @@ hr.dash-divider + .dash-band {
 }
 
 .dash-band--build {
-  /* Work surface: slightly recessed, rule-separated */
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--border-subtle);
+  padding-top: 0;
+  border-top: none;
 }
 
 .dash-band--observe {
@@ -60,13 +151,13 @@ hr.dash-divider + .dash-band {
 .dash-embed-progress-track {
   height: 3px;
   background: var(--dash-progress-track);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 .dash-embed-progress-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   transition: width 0.5s ease;
 }
 
@@ -81,58 +172,40 @@ hr.dash-divider + .dash-band {
 .dash-scheduler-progress-panel {
   margin-top: var(--space-4);
   padding: var(--space-4);
-  background: linear-gradient(
-    135deg,
-    var(--dash-scheduler-tint-a),
-    var(--dash-scheduler-tint-b),
-    var(--bg-secondary)
-  );
+  background: var(--bg-elevated);
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  border: 0.5px solid var(--hairline);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  box-shadow: 0 2px 12px color-mix(in srgb, var(--accent-primary) 6%, transparent);
-  animation: organizeProgressIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-sm);
+  animation: organizeProgressIn var(--duration-slow) var(--ease-out);
 }
 
+/* macOS progress bar: thin rounded track, solid accent fill */
 .dash-progress-track {
   height: 6px;
   width: 100%;
   background: var(--dash-progress-track);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   position: relative;
-  box-shadow: var(--dash-progress-inset);
+  box-shadow: none;
 }
 
 .dash-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
-  background-size: 200% 100%;
-  border-radius: 10px;
+  background: var(--accent-primary);
+  border-radius: var(--radius-sm);
   position: absolute;
   top: 0;
   left: 0;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
-  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: none;
+  transition: width var(--duration-slow) var(--ease-out);
 }
 
 .dash-progress-fill--stripe {
-  background-image: 
-    linear-gradient(
-      45deg,
-      rgba(255, 255, 255, 0.15) 25%,
-      transparent 25%,
-      transparent 50%,
-      rgba(255, 255, 255, 0.15) 50%,
-      rgba(255, 255, 255, 0.15) 75%,
-      transparent 75%,
-      transparent
-    ),
-    linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
-  background-size: 1rem 1rem, 200% 100%;
-  animation: progress-bar-stripes 1s linear infinite;
+  background: var(--accent-primary);
 }
 
 @keyframes progress-bar-stripes {
@@ -234,12 +307,7 @@ hr.dash-divider + .dash-band {
    no shadow. Just a pale blue glyph. */
 .empty-state > svg,
 .empty-state-badge {
-  color: #60A5FA;
-}
-
-.dark .empty-state > svg,
-.dark .empty-state-badge {
-  color: #93C5FD;
+  color: var(--text-quaternary);
 }
 
 .empty-state-title {
@@ -342,9 +410,9 @@ hr.dash-divider + .dash-band {
 /* ── Dashboard Section Divider ───────────────────────────────────── */
 
 .dash-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border), transparent);
-  margin: var(--space-5) 0;
+  height: 0;
+  background: none;
+  margin: var(--space-6) 0 var(--space-2);
   border: none;
 }
 
@@ -412,21 +480,8 @@ hr.dash-divider + .dash-band {
   pointer-events: none;
 }
 
-.btn-organize:hover:not(:disabled) {
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 4px 18px rgba(16, 185, 129, 0.35),
-              0 0 0 1px rgba(16, 185, 129, 0.15);
-  filter: brightness(1.08);
-}
-
-.btn-organize:hover:not(:disabled)::before {
-  opacity: 1;
-}
-
-.btn-organize:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
-  transition-duration: 100ms;
+.btn-organize::before {
+  display: none;
 }
 
 .btn-organize:disabled {
@@ -470,73 +525,34 @@ hr.dash-divider + .dash-band {
 }
 
 
-/* ── Step Card Glassmorphism Buttons ─────────────────────────────── */
-.step-card .btn {
-  background: var(--dash-btn-bg) !important;
-  border: 1px solid var(--dash-btn-border) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05),
-              var(--dash-btn-inset);
-  transition: all 240ms cubic-bezier(0.16, 1, 0.3, 1);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-.step-card .btn:hover:not(:disabled) {
-  background: var(--dash-btn-hover) !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1),
-              var(--dash-btn-inset);
-  transform: translateY(-2px);
-}
-.step-card .btn:active:not(:disabled) {
-  transform: translateY(0);
-  background: var(--dash-btn-active) !important;
-}
-
-/* Organize CTA pulse glow */
-.step-card--organize .btn:not(:disabled) {
-  animation: organizeBtnGlow 3s ease-in-out infinite;
-}
-@keyframes organizeBtnGlow {
-  0%, 100% { box-shadow: 0 2px 8px rgba(16,185,129,0.1), var(--dash-btn-inset); }
-  50% { box-shadow: 0 2px 18px rgba(16,185,129,0.25), 0 0 0 2px rgba(16,185,129,0.08), var(--dash-btn-inset); }
-}
-
-/* Preserve readable text on step buttons */
-.step-card--sync .btn { color: var(--step-sync-btn) !important; }
-.step-card--index .btn { color: var(--step-index-btn) !important; }
-.step-card--organize .btn { color: var(--step-organize-btn) !important; }
-.step-card--export .btn { color: var(--step-export-btn) !important; }
-.step-card--health .btn { color: var(--step-health-btn) !important; }
+/* Step buttons are ordinary push buttons; the primary one stays filled. */
 .step-card .btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  animation: none;
+  opacity: 0.45;
+  cursor: default;
 }
 
+/* Step badge: a small tinted rounded square carrying the step number */
 .step-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 2px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-primary);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
-.step-badge--sync,
-.step-badge--index,
-.step-badge--organize,
-.step-badge--export,
-.step-badge--health {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-}
+.step-badge--sync { background: var(--step-sync-tint); color: var(--step-sync-accent); }
+.step-badge--index { background: var(--step-index-tint); color: var(--step-index-accent); }
+.step-badge--organize { background: var(--step-organize-tint-a); color: var(--step-organize-accent); }
+.step-badge--export { background: var(--step-export-tint); color: var(--step-export-accent); }
+.step-badge--health { background: var(--step-health-tint); color: var(--step-health-accent); }
 
 .step-tag {
   font-size: 10px;
@@ -1021,7 +1037,7 @@ hr.dash-divider + .dash-band {
 .agent-mini-stat:hover {
   background: var(--dash-glass-surface-hover);
   border-color: var(--dash-glass-surface-border-hover);
-  transform: translateY(-2px);
+  transform: none;
   box-shadow: var(--shadow-sm);
 }
 
@@ -1664,8 +1680,8 @@ hr.dash-divider + .dash-band {
   border-radius: var(--radius-sm, 2px);
   border: 1px solid;
   flex-shrink: 0;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .gap-insight-desc {
@@ -1966,7 +1982,7 @@ hr.dash-divider + .dash-band {
 
 .gap-terminal-body::-webkit-scrollbar-thumb {
   background: #232c3f;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .gap-terminal-line {
@@ -2097,8 +2113,8 @@ hr.dash-divider + .dash-band {
   font-size: 10px;
   color: var(--text-tertiary);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .timeline-color-created {
@@ -2201,8 +2217,8 @@ hr.dash-divider + .dash-band {
   color: var(--text-tertiary);
   margin-top: 10px;
   margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -2399,8 +2415,8 @@ hr.dash-divider + .dash-band {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .props-editor-count {
@@ -2773,8 +2789,8 @@ hr.dash-divider + .dash-band {
 .gap-plan-label {
   font-size: var(--text-xs);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--text-tertiary);
 }
 
@@ -2905,3 +2921,205 @@ hr.dash-divider + .dash-band {
   overflow-y: auto;
 }
 
+
+
+/* ══ macOS surface pass ════════════════════════════════════════════
+ * One card language for the whole dashboard: elevated white (or dark
+ * grey) surface, hairline edge, 10px corners, a soft short shadow.
+ * Cards do not change border on hover and do not lift.
+ * ═══════════════════════════════════════════════════════════════════ */
+.step-card,
+.step-card--sync,
+.step-card--index,
+.step-card--organize,
+.step-card--export,
+.step-card--health,
+.agent-auto-card,
+.gap-analysis-card,
+.agent-status-card {
+  background: var(--bg-elevated);
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.step-card { padding: 16px; gap: 8px; }
+
+.step-card:hover,
+.agent-auto-card:hover,
+.gap-analysis-card:hover,
+.agent-status-card:hover {
+  border-color: var(--hairline);
+  box-shadow: var(--shadow-sm);
+}
+
+.step-arrow {
+  font-size: 15px;
+  opacity: 1;
+  color: var(--text-quaternary);
+}
+
+/* Inner tiles sit on the grouped background, not on another card */
+.agent-auto-stat,
+.agent-auto-stat--hero,
+.agent-auto-stat--blue,
+.agent-auto-stat--green,
+.agent-auto-stat--amber,
+.agent-mini-stat,
+.timeline-stat-card {
+  background: var(--bg-secondary);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+.agent-auto-stat:hover,
+.agent-mini-stat:hover {
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+:root[data-theme="dark"] .agent-auto-card {
+  border-color: var(--hairline);
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-theme="dark"] .agent-auto-stat,
+:root[data-theme="dark"] .agent-auto-stat--hero,
+:root[data-theme="dark"] .agent-auto-stat--blue,
+:root[data-theme="dark"] .agent-auto-stat--amber {
+  border-color: transparent !important;
+  background: var(--bg-tertiary);
+}
+
+.agent-auto-icon-wrap,
+.agent-auto-stat-icon {
+  border: none;
+  border-radius: 7px;
+  background: var(--accent-tint);
+  color: var(--accent-primary);
+}
+
+.agent-auto-stat-icon {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.agent-auto-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.agent-auto-stat-label {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.agent-auto-stat-value {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The auto-organize toggle becomes a plain row with a macOS switch */
+.agent-auto-toggle {
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: none;
+  cursor: default;
+}
+
+.agent-auto-toggle:hover:not(:disabled) {
+  border-color: var(--hairline);
+}
+
+.agent-auto-toggle-track {
+  width: 32px;
+  height: 18px;
+  border: none;
+  background: var(--bg-active);
+}
+
+.agent-auto-toggle--on .agent-auto-toggle-track {
+  background: var(--accent-primary);
+  border-color: transparent;
+}
+
+.agent-auto-toggle-thumb {
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+.agent-auto-toggle--on .agent-auto-toggle-thumb {
+  transform: translateX(14px);
+}
+
+.agent-auto-footer {
+  border-top: 0.5px solid var(--hairline);
+}
+
+.agent-auto-errors {
+  border: none;
+}
+
+.dash-section-header {
+  margin-bottom: 10px;
+}
+
+.dash-section-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Help "?" button — the macOS round help button */
+.mac-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--dash-btn-bg);
+  box-shadow: var(--shadow-control);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.mac-help-btn:hover {
+  color: var(--text-primary);
+}
+/* Narrow workstage (sidebar + chat open): stack the step rows */
+.dash-page {
+  container-type: inline-size;
+}
+
+@container (max-width: 680px) {
+  .dash-band--build div:has(> .step-card) {
+    flex-direction: column;
+  }
+
+  .dash-band--build .step-arrow {
+    display: none;
+  }
+
+  .dash-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-summary-item + .dash-summary-item {
+    border-left: none;
+    border-top: 0.5px solid var(--hairline);
+  }
+}

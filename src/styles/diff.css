@@ -378,7 +378,7 @@
 }
 
 .diff-line-removed {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
