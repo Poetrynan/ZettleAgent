@@ -67,7 +67,7 @@
   border: none;
   background: transparent;
   color: var(--text-tertiary);
-  cursor: default;
+  cursor: pointer;
   border-radius: 50%;
   transition: background-color var(--duration-fast) ease;
   flex-shrink: 0;
@@ -302,7 +302,7 @@
   text-transform: none;
   letter-spacing: 0;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--accent-primary);
   color: white;
   flex-shrink: 0;
@@ -365,7 +365,7 @@
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-variant-numeric: tabular-nums;
 }
 

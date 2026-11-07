@@ -10,6 +10,7 @@ import { listMarkdownFiles, resolveWikilink } from '../../lib/tauri';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { renderMermaid } from './mermaidLoader';
 import { useHoverPreview, HoverPreviewCard } from './HoverPreview';
+import { IconNote, IconInspect, IconSparkle, IconCheck, IconWarning, IconClose, IconClipboard, IconChat, IconTool, IconFile } from '../icons';
 
 
 interface MarkdownRendererProps {
@@ -157,7 +158,7 @@ export function MermaidRenderer({ content }: MermaidRendererProps) {
         fontSize: '14px',
         padding: '0.5rem',
         background: 'var(--danger-bg, rgba(220,38,38,0.1))',
-        borderRadius: '4px',
+        borderRadius: 'var(--radius-md)',
         fontFamily: 'monospace',
         whiteSpace: 'pre-wrap',
         border: '1px solid var(--danger, #dc2626)',
@@ -341,27 +342,28 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
                 const titleOverride = calloutMatch[3]?.trim();
                 const calloutTitle = titleOverride || calloutType.charAt(0).toUpperCase() + calloutType.slice(1);
 
-                // Map types to icon + color
-                const typeMap: Record<string, { icon: string; color: string }> = {
-                  note:      { icon: '📝', color: 'var(--accent, #3b82f6)' },
-                  info:      { icon: 'ℹ️', color: 'var(--accent, #3b82f6)' },
-                  tip:       { icon: '💡', color: '#10b981' },
-                  success:   { icon: '✅', color: '#10b981' },
-                  warning:   { icon: '⚠️', color: '#f59e0b' },
-                  caution:   { icon: '🔥', color: '#ef4444' },
-                  danger:    { icon: '⚡', color: '#ef4444' },
-                  error:     { icon: '❌', color: '#ef4444' },
-                  important: { icon: '❗', color: '#a855f7' },
-                  example:   { icon: '📋', color: '#8b5cf6' },
-                  quote:     { icon: '💬', color: '#6b7280' },
-                  bug:       { icon: '🐛', color: '#ef4444' },
-                  failure:   { icon: '❌', color: '#ef4444' },
-                  question:  { icon: '❓', color: '#f59e0b' },
-                  abstract:  { icon: '📄', color: '#06b6d4' },
-                  todo:      { icon: '☑️', color: '#3b82f6' },
+                // Map types to an SVG glyph + a system color (no emoji icons)
+                const blue = 'var(--sys-blue)', green = 'var(--sys-green)', orange = 'var(--sys-orange)',
+                  red = 'var(--sys-red)', purple = 'var(--sys-purple)', teal = 'var(--sys-teal)', gray = 'var(--sys-gray)';
+                const typeMap: Record<string, { icon: React.ReactNode; color: string }> = {
+                  note:      { icon: <IconNote size={14} />, color: blue },
+                  info:      { icon: <IconInspect size={14} />, color: blue },
+                  tip:       { icon: <IconSparkle size={14} />, color: green },
+                  success:   { icon: <IconCheck size={14} />, color: green },
+                  warning:   { icon: <IconWarning size={14} />, color: orange },
+                  caution:   { icon: <IconWarning size={14} />, color: red },
+                  danger:    { icon: <IconWarning size={14} />, color: red },
+                  error:     { icon: <IconClose size={14} />, color: red },
+                  important: { icon: <IconWarning size={14} />, color: purple },
+                  example:   { icon: <IconClipboard size={14} />, color: purple },
+                  quote:     { icon: <IconChat size={14} />, color: gray },
+                  bug:       { icon: <IconTool size={14} />, color: red },
+                  failure:   { icon: <IconClose size={14} />, color: red },
+                  question:  { icon: <IconChat size={14} />, color: orange },
+                  abstract:  { icon: <IconFile size={14} />, color: teal },
+                  todo:      { icon: <IconCheck size={14} />, color: blue },
                 };
                 const { icon, color } = typeMap[calloutType] || typeMap.note;
-
                 // Remaining children after the first line
                 const restChildren = childArr.filter((c) => c !== firstP);
                 // Also strip the [!TYPE] line from the first <p> body
@@ -369,10 +371,9 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
 
                 return (
                   <div className="md-callout" style={{
-                    borderLeft: `4px solid ${color}`,
-                    background: `${color}10`,
-                    borderRadius: '0 var(--radius-sm) var(--radius-sm) 0',
-                    padding: 'var(--space-2) var(--space-3)',
+                    background: `color-mix(in srgb, ${color} 9%, transparent)`,
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '10px 14px',
                     margin: 'var(--space-3) 0',
                   }}>
                     <div className="md-callout-title" style={{
@@ -380,7 +381,7 @@ export function MarkdownRenderer({ content, className = 'markdown-content' }: Ma
                       fontWeight: 600, fontSize: 'var(--text-sm)', color,
                       marginBottom: (firstPText || restChildren.length > 0) ? 'var(--space-1)' : 0,
                     }}>
-                      <span>{icon}</span> {calloutTitle}
+                      <span style={{ display: 'inline-flex' }} aria-hidden="true">{icon}</span> {calloutTitle}
                     </div>
                     {firstPText && <p style={{ margin: 0 }}>{firstPText}</p>}
                     {restChildren}

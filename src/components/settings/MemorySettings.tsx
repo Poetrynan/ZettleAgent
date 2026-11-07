@@ -186,7 +186,7 @@ export function AiMemorySection() {
             </div>
             
             {/* Recommendation */}
-            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px', lineHeight: '1.6', background: 'rgba(0,0,0,0.02)', padding: '6px 8px', borderRadius: '4px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px', lineHeight: '1.6', background: 'rgba(0,0,0,0.02)', padding: '6px 8px', borderRadius: 'var(--radius-md)' }}>
               💡 <strong>{t('memory.recommendedPath')}</strong>：{t('memory.recommendedDesc')}<br/>
               • <code>D:\ZettelAgent_Data\</code> — {t('memory.recommendedDrive')}<br/>
               • <code>C:\Users\You\Documents\ZettelAgent\</code> — {t('memory.recommendedDocs')}<br/>

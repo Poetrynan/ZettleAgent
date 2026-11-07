@@ -27,7 +27,7 @@
   --text-xl: 1.0625rem;   /* 17 */
   --text-2xl: 1.375rem;   /* 22 */
   --text-3xl: 1.625rem;   /* 26 */
-  --text-reading: 0.9375rem; /* note body */
+  --text-reading: 1rem;    /* note body: 16px, Bear/Craft-like reading size */
 
   --leading-tight: 1.25;
   --leading-normal: 1.45;
@@ -48,12 +48,17 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* ── Radius (macOS: controls 6, cards 10, windows/sheets 12) ── */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
+  /* ── Radius (macOS 26: generous, concentric corners) ──────────
+     small chips 6 · controls/rows 8 · cards/popovers 14 ·
+     sheets/large panels 20 · push buttons & segmented = capsule.
+     Inner radius = outer radius − padding, so nested shapes stay
+     concentric (e.g. 14px card with 6px inset → 8px rows). */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
+  --radius-control: var(--radius-full);
 
   /* ── Transitions ──────────────────────────────────────────────── */
   /* Short and quiet. Frequent interactions get no motion beyond color;

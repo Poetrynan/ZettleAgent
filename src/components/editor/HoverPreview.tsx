@@ -258,7 +258,7 @@ export function HoverPreviewCard({ state, onClose, onMouseEnter, onMouseLeave }:
             </strong>
             {state.noteType && (
               <span style={{
-                fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-md)',
                 background: 'var(--accent-bg, rgba(59,130,246,0.1))',
                 color: 'var(--accent, #3b82f6)', flexShrink: 0,
               }}>

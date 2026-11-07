@@ -327,7 +327,7 @@ export function SidebarFileTree(props: FileTreeProps) {
             style={{
               border: 'none', background: 'none', cursor: 'pointer', padding: '2px',
               color: 'var(--text-tertiary)', display: 'none', alignItems: 'center',
-              marginLeft: 'auto', flexShrink: 0, borderRadius: '4px',
+              marginLeft: 'auto', flexShrink: 0, borderRadius: 'var(--radius-md)',
             }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

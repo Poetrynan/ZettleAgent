@@ -538,7 +538,7 @@ hr.dash-divider + .dash-band {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg-tertiary);
   border: none;
   font-family: var(--font-sans);
@@ -1093,7 +1093,7 @@ hr.dash-divider + .dash-band {
   height: 12px;
   background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%);
   background-size: 200% 100%;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   animation: skeletonShimmer 1.5s infinite ease-in-out;
 }
 
@@ -2996,7 +2996,7 @@ hr.dash-divider + .dash-band {
 .agent-auto-icon-wrap,
 .agent-auto-stat-icon {
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-full);
   background: var(--accent-tint);
   color: var(--accent-primary);
 }
@@ -3028,7 +3028,7 @@ hr.dash-divider + .dash-band {
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   box-shadow: none;
-  cursor: default;
+  cursor: pointer;
 }
 
 .agent-auto-toggle:hover:not(:disabled) {
@@ -3093,7 +3093,7 @@ hr.dash-divider + .dash-band {
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-  cursor: default;
+  cursor: pointer;
   flex-shrink: 0;
 }
 

@@ -1,8 +1,8 @@
 /* ── Viewer Document Container (centred reading column) ───────── */
 .viewer-document-container {
-  max-width: 780px;
+  max-width: 760px;   /* ~68 CJK/75 Latin chars per line at 16px */
   margin: 0 auto;
-  padding: 0 40px;
+  padding: 0 48px;
   width: 100%;
 }
 
@@ -144,7 +144,7 @@
 .outline-item {
   padding-top: 4px;
   padding-bottom: 4px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .outline-bullet {
@@ -535,7 +535,7 @@
   font-weight: 600;
   background: var(--bg-tertiary);
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   font-family: var(--font-mono);
 }

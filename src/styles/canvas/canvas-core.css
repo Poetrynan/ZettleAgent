@@ -219,7 +219,7 @@
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  border-radius: 7px;
+  border-radius: var(--radius-full);
   background: var(--canvas-accent);
   color: white;
   font-size: 9px;
@@ -602,7 +602,7 @@
   height: 22px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--text-tertiary);
   cursor: pointer;
   transition: all 0.12s ease;
@@ -656,7 +656,7 @@
 
 .note-node-skeleton-line {
   height: 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   background: linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite ease-in-out;
@@ -727,7 +727,7 @@
 }
 
 .canvas-mode-toggle .canvas-toolbar-btn {
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   transition: all 0.2s ease;
 }
 
@@ -1074,7 +1074,7 @@
 .canvas-controls-btn {
   border-radius: var(--radius-md) !important;
   color: var(--text-secondary);
-  cursor: default;
+  cursor: pointer;
 }
 
 .canvas-toolbar-btn:hover,

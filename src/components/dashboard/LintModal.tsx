@@ -724,7 +724,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                         {dupCount > 0 && (
                           <div>
                             <h4 style={{ margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                              <span style={{ color: '#EF4444' }}>⚠</span>
+                              <span style={{ color: 'var(--danger)', display: 'inline-flex' }} aria-hidden="true"><IconWarning size={13} /></span>
                               {navigator.language.startsWith('zh') ? `疑似重复 (${dupCount})` : `Near Duplicates (${dupCount})`}
                             </h4>
                             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '0 0 var(--space-3) 0' }}>
@@ -770,7 +770,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                         {hiddenCount > 0 && (
                           <div>
                             <h4 style={{ margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                              <span style={{ color: '#8B5CF6' }}>🔗</span>
+                              <span style={{ color: 'var(--sys-purple)', display: 'inline-flex' }} aria-hidden="true"><IconLink size={13} /></span>
                               {navigator.language.startsWith('zh') ? `隐藏关联 (${hiddenCount})` : `Hidden Connections (${hiddenCount})`}
                             </h4>
                             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '0 0 var(--space-3) 0' }}>

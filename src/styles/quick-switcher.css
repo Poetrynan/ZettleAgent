@@ -93,7 +93,7 @@
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
-  cursor: default;
+  cursor: pointer;
   text-align: left;
   font-size: var(--text-base);
   color: var(--text-primary);
@@ -157,7 +157,7 @@
 .quick-switcher-hint kbd {
   background: var(--bg-active);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 1px 5px;
   font-family: inherit;
   font-size: 11px;

@@ -7,7 +7,7 @@
   color: var(--text-tertiary);
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.15);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 0 4px;
   margin-left: 4px;
   vertical-align: middle;
@@ -160,7 +160,7 @@
   color: var(--text-tertiary);
   background: rgba(0, 0, 0, 0.05);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   margin-left: 4px;
 }
 
@@ -321,7 +321,7 @@
 .web-node-title-editable {
   cursor: text;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
               background 0.2s ease,
@@ -349,7 +349,7 @@
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(147, 197, 253, 0.5);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 2px 6px;
   outline: none;
   min-width: 0;
@@ -522,7 +522,7 @@
   border: none;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   transition: background 0.15s ease;
 }
 

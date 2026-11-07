@@ -742,7 +742,7 @@
   border-radius: 0;
   box-shadow: none;
   padding: 6px 8px;
-  cursor: default;
+  cursor: pointer;
   align-items: flex-end;
 }
 
@@ -826,7 +826,7 @@
   background: var(--dash-btn-bg) !important;
   box-shadow: var(--shadow-control) !important;
   border-radius: var(--radius-md) !important;
-  cursor: default;
+  cursor: pointer;
 }
 
 .calendar-nav-buttons {
@@ -846,7 +846,7 @@
 }
 
 .calendar-picker-option {
-  border-radius: 5px !important;
+  border-radius: var(--radius-md) !important;
 }
 
 .calendar-picker-option.active {

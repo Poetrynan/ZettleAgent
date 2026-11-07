@@ -1227,7 +1227,7 @@
   min-height: var(--control-height);
   border: none;
   border-radius: var(--radius-md);
-  cursor: default;
+  cursor: pointer;
 }
 
 .onboarding-btn-primary {

@@ -292,7 +292,7 @@
   cursor: pointer;
 }
 .overview-columns-item:hover { background: var(--bg-hover); }
-.overview-columns-item.is-locked { opacity: 0.55; cursor: default; }
+.overview-columns-item.is-locked { opacity: 0.55; cursor: pointer; }
 
 /* DSL help */
 .overview-help-card {
@@ -452,7 +452,7 @@
   font-size: 10px; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap;
   flex-shrink: 0;
 }
-.overview-tag-more { color: var(--accent, #3B82F6); font-weight: 700; cursor: default; }
+.overview-tag-more { color: var(--accent, #3B82F6); font-weight: 700; cursor: pointer; }
 
 /* Index status */
 .overview-index { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -651,7 +651,7 @@
   box-shadow: var(--shadow-control) !important;
   border-radius: var(--radius-md) !important;
   color: var(--text-primary) !important;
-  cursor: default;
+  cursor: pointer;
 }
 
 .overview-chip-btn:hover,
