@@ -411,6 +411,7 @@ export const zh = {
     'update.dismiss': '忽略此版本',
     'update.allReleases': '所有版本',
     'update.toastNewVersion': '有新版本 v{version}，可在 设置 → 关于 中下载',
+    'embedding.modelChangedToast': '本地嵌入模型已升级为中英双语模型，旧向量已清除。请在仪表盘重新构建向量索引，期间搜索会使用全文检索。',
 
     // About
     'about.tagline': '本地优先的 AI 知识库助手',

@@ -284,6 +284,26 @@ function AppLayout() {
   // Splash is ready to exit when BOTH conditions met
   const splashReady = splashMinTimeElapsed && initComplete && !state.isLoading;
 
+  // Embedding model identity check (once per launch). If the stored vectors came
+  // from another model (e.g. the old nomic default), the backend clears
+  // them; tell the user why vector search is gone until they rebuild.
+  useEffect(() => {
+    if (!splashReady || !onboardingDone) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { syncEmbeddingModel } = await import('./lib/tauri');
+        const res = await syncEmbeddingModel();
+        if (!cancelled && res.invalidated && res.cleared_chunks > 0) {
+          showToast(t('embedding.modelChangedToast'), 'info');
+        }
+      } catch (e) {
+        console.warn('Embedding model sync failed:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [splashReady, onboardingDone, showToast]);
+
   // Background update check (at most once per day)
   useEffect(() => {
     if (!splashReady || !onboardingDone) return;

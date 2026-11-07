@@ -1,4 +1,5 @@
 pub mod cjk;
+pub mod read_pool;
 pub mod schema;
 pub mod sync;
 pub mod search;

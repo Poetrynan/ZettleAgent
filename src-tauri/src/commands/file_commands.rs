@@ -253,8 +253,7 @@ pub fn list_markdown_files(dir_path: String) -> Result<Vec<String>, ZettelError>
 /// the path-order rule, not the same-vault one.
 #[tauri::command]
 pub fn resolve_wikilink(state: State<'_, AppState>, title: String) -> Result<Option<String>, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(resolve_wikilink_target(&conn, &title)?)
+    state.read(|conn| Ok(resolve_wikilink_target(conn, &title)?))
 }
 
 /// `Connection`-typed core of [`resolve_wikilink`], shared with the agent tool
@@ -282,8 +281,7 @@ pub struct BacklinkEntry {
 /// Get all notes that link to the given file path (via note_relations + wikilink scan).
 #[tauri::command]
 pub fn get_backlinks(state: State<'_, AppState>, file_path: String) -> Result<Vec<BacklinkEntry>, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(collect_backlinks(&conn, &file_path)?)
+    state.read(|conn| Ok(collect_backlinks(conn, &file_path)?))
 }
 
 /// The backlink query itself, `Connection`-typed so it is testable without Tauri.

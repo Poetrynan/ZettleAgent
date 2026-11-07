@@ -24,14 +24,22 @@ const ROOT = path.join(__dirname, '..');
 const RESOURCES = path.join(ROOT, 'src-tauri', 'resources');
 const WEBVIEW = path.join(RESOURCES, 'webview');
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const EMBED_DIR = path.join(RESOURCES, 'embed_models', 'nomic-ai', 'nomic-embed-text-v1.5');
+/**
+ * Local embedding model. Must match LOCAL_EMBED_MODEL_ID in src/lib/embeddingModel.ts
+ * (transformers.js resolves it under public/models/<id>/).
+ */
+const EMBED_MODEL_ID = 'jinaai/jina-embeddings-v2-base-zh';
+const EMBED_DIR = path.join(RESOURCES, 'embed_models', ...EMBED_MODEL_ID.split('/'));
 const EMBED_FILES = [
   'config.json',
   'tokenizer.json',
   'tokenizer_config.json',
+  'special_tokens_map.json',
   'onnx/model_quantized.onnx',
 ];
-const EMBED_BASE = 'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/';
+const EMBED_BASE = `https://huggingface.co/${EMBED_MODEL_ID}/resolve/main/`;
+/** Models this script used to bundle; removed so they don't bloat the installer. */
+const RETIRED_EMBED_MODELS = ['nomic-ai/nomic-embed-text-v1.5'];
 
 const RERANK_DIR = path.join(RESOURCES, 'embed_models', 'maidalun1020', 'bce-reranker-base_v1');
 const RERANK_BASE = 'https://huggingface.co/keisuke-miyako/bce-reranker-base_v1-onnx-int8/resolve/main/';
@@ -364,10 +372,21 @@ async function prepareUiFonts() {
 function syncIntoPublic() {
   console.log('=== Sync into public/ (ships in installer via Vite dist/) ===\n');
 
+  // Retired models: everything under public/ ships in dist/, so a stale copy
+  // left from an earlier build would silently add its weight to the installer.
+  for (const id of RETIRED_EMBED_MODELS) {
+    for (const dir of [path.join(PUBLIC_DIR, 'models', ...id.split('/')), path.join(RESOURCES, 'embed_models', ...id.split('/'))]) {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`  ✗ removed retired model ${path.relative(ROOT, dir)}`);
+      }
+    }
+  }
+
   // Embedding model — must be in public/models so transformers.js loads it offline
-  const publicModels = path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5');
+  const publicModels = path.join(PUBLIC_DIR, 'models', ...EMBED_MODEL_ID.split('/'));
   copyDir(EMBED_DIR, publicModels);
-  console.log('  → models/nomic-ai/nomic-embed-text-v1.5/');
+  console.log(`  → models/${EMBED_MODEL_ID}/`);
 
   const publicReranker = path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1');
   copyDir(RERANK_DIR, publicReranker);
@@ -400,9 +419,9 @@ function verifyInstallerAssets() {
   // Everything the installed app needs — must exist BEFORE `vite build` / `tauri build`
   const required = [
     // Embedding (frontend bundle path used at runtime)
-    path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'onnx', 'model_quantized.onnx'),
-    path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'config.json'),
-    path.join(PUBLIC_DIR, 'models', 'nomic-ai', 'nomic-embed-text-v1.5', 'tokenizer.json'),
+    path.join(PUBLIC_DIR, 'models', ...EMBED_MODEL_ID.split('/'), 'onnx', 'model_quantized.onnx'),
+    path.join(PUBLIC_DIR, 'models', ...EMBED_MODEL_ID.split('/'), 'config.json'),
+    path.join(PUBLIC_DIR, 'models', ...EMBED_MODEL_ID.split('/'), 'tokenizer.json'),
     // Local Reranker (BCEmbedding BCE-Reranker Base v1)
     path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1', 'onnx', 'model_quantized.onnx'),
     path.join(PUBLIC_DIR, 'models', 'maidalun1020', 'bce-reranker-base_v1', 'config.json'),

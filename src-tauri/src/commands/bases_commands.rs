@@ -167,22 +167,24 @@ pub fn get_notes_overview(
     vault_path: String,
     include_graph_signals: bool,
 ) -> Result<NotesOverview, ZettelError> {
-    let conn = state.db.lock()?;
     // The only clock read in this feature, so the domain layer stays deterministic.
     let now_ms = chrono::Utc::now().timestamp_millis();
-    Ok(crate::db::notes_overview::build_overview(
-        &conn,
-        &vault_path,
-        include_graph_signals,
-        now_ms,
-    )?)
+    // A cold graph rebuild (include_graph_signals) writes the graph cache; `read`
+    // then transparently retries on the writer.
+    state.read(|conn| {
+        Ok(crate::db::notes_overview::build_overview(
+            conn,
+            &vault_path,
+            include_graph_signals,
+            now_ms,
+        )?)
+    })
 }
 
 /// All saved Bases views, in the user's own order.
 #[tauri::command]
 pub fn list_saved_views(state: State<'_, AppState>) -> Result<Vec<SavedView>, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(crate::db::saved_views::list(&conn))
+    state.read(|conn| Ok(crate::db::saved_views::list(conn)))
 }
 
 /// Create or replace a saved view, keyed by `id`.

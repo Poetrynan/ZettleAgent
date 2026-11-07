@@ -54,29 +54,30 @@ pub struct AiMemoryEntry {
 pub fn list_chat_sessions(
     state: State<'_, AppState>,
 ) -> Result<Vec<ChatSession>, ZettelError> {
-    let conn = state.db.lock()?;
-    let mut stmt = conn.prepare(
-        "SELECT s.id, s.title, s.mode, s.created_at, s.updated_at,
-                (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) as msg_count
-         FROM chat_sessions s
-         ORDER BY s.updated_at DESC"
-    )?;
+    state.read(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.title, s.mode, s.created_at, s.updated_at,
+                    (SELECT COUNT(*) FROM chat_messages WHERE session_id = s.id) as msg_count
+             FROM chat_sessions s
+             ORDER BY s.updated_at DESC"
+        )?;
 
-    let results = stmt
-        .query_map([], |row| {
-            Ok(ChatSession {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                mode: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                message_count: row.get(5)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let results = stmt
+            .query_map([], |row| {
+                Ok(ChatSession {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    mode: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    message_count: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
-    Ok(results)
+        Ok(results)
+    })
 }
 
 #[tauri::command]
@@ -84,33 +85,34 @@ pub fn get_chat_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<ChatMessageRecord>, ZettelError> {
-    let conn = state.db.lock()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, session_id, role, content, sources, tool_calls, thinking_content, agent_timeline, plan_steps, created_at
-         FROM chat_messages
-         WHERE session_id = ?1
-         ORDER BY created_at ASC"
-    )?;
+    state.read(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, role, content, sources, tool_calls, thinking_content, agent_timeline, plan_steps, created_at
+             FROM chat_messages
+             WHERE session_id = ?1
+             ORDER BY created_at ASC"
+        )?;
 
-    let results = stmt
-        .query_map(params![session_id], |row| {
-            Ok(ChatMessageRecord {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                sources: row.get(4)?,
-                tool_calls: row.get(5)?,
-                thinking_content: row.get(6)?,
-                agent_timeline: row.get(7)?,
-                plan_steps: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+        let results = stmt
+            .query_map(params![session_id], |row| {
+                Ok(ChatMessageRecord {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    sources: row.get(4)?,
+                    tool_calls: row.get(5)?,
+                    thinking_content: row.get(6)?,
+                    agent_timeline: row.get(7)?,
+                    plan_steps: row.get(8)?,
+                    created_at: row.get(9)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
-    Ok(results)
+        Ok(results)
+    })
 }
 
 #[tauri::command]
@@ -445,10 +447,9 @@ pub fn get_setting(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Option<String>, ZettelError> {
-    let conn = state.db.lock()?;
-    let val = schema::get_setting(&conn, &key)
-        .map_err(|e| ZettelError::System(e.to_string()))?;
-    Ok(val)
+    state.read(|conn| {
+        schema::get_setting(conn, &key).map_err(|e| ZettelError::System(e.to_string()))
+    })
 }
 
 #[tauri::command]

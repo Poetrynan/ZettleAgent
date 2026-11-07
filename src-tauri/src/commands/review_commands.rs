@@ -143,18 +143,18 @@ pub async fn get_review_card(
     file_path: String,
 ) -> Result<Option<ReviewCardView>, ZettelError> {
     let reference = now_ms();
-    let conn = state.db.lock()?;
-    let Some(card) = review_store::get_card(&conn, &file_path)? else {
-        return Ok(None);
-    };
-    let suspended = review_store::card_status(&conn, &file_path)?.unwrap_or(false);
-    Ok(Some(ReviewCardView::from_card(&card, suspended, reference)))
+    state.read(|conn| {
+        let Some(card) = review_store::get_card(conn, &file_path)? else {
+            return Ok(None);
+        };
+        let suspended = review_store::card_status(conn, &file_path)?.unwrap_or(false);
+        Ok(Some(ReviewCardView::from_card(&card, suspended, reference)))
+    })
 }
 
 #[tauri::command]
 pub async fn get_review_stats(state: State<'_, AppState>) -> Result<ReviewStats, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(review_store::stats(&conn, now_ms())?)
+    state.read(|conn| Ok(review_store::stats(conn, now_ms())?))
 }
 
 /// Read from process state, not the DB: this is the same value the scheduler

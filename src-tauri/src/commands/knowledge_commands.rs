@@ -808,8 +808,8 @@ pub struct InboxCounts {
 pub async fn knowledge_inbox_counts(
     state: State<'_, AppState>,
 ) -> Result<InboxCounts, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(inbox_counts(&conn)?)
+    // 轮询的角标走只读连接池，不会被同步或 Agent 写入卡住。
+    state.read(|conn| Ok(inbox_counts(conn)?))
 }
 
 fn inbox_counts(conn: &rusqlite::Connection) -> rusqlite::Result<InboxCounts> {
@@ -874,8 +874,8 @@ pub async fn knowledge_inbox(
     state: State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<Vec<InboxItem>, ZettelError> {
-    let conn = state.db.lock()?;
-    Ok(build_inbox(&conn, limit.unwrap_or(50).clamp(1, 200))?)
+    let per_kind = limit.unwrap_or(50).clamp(1, 200);
+    state.read(|conn| build_inbox(conn, per_kind))
 }
 
 /// 收件箱的全部逻辑 / everything the inbox actually decides.

@@ -41,9 +41,7 @@ pub fn get_knowledge_graph(
 /// Get local graph data for a specific note.
 #[tauri::command]
 pub fn get_local_graph(state: State<'_, AppState>, file_path: String) -> Result<GraphData, ZettelError> {
-    let conn = state.db.lock()?;
-    let data = search::get_local_graph(&conn, &file_path)?;
-    Ok(data)
+    state.read(|conn| Ok(search::get_local_graph(conn, &file_path)?))
 }
 
 /// Notes related to the one currently being read — the Related Notes panel.
@@ -58,10 +56,9 @@ pub fn get_related_notes(
     file_path: String,
     limit: Option<usize>,
 ) -> Result<search::RelatedNotesResult, ZettelError> {
-    let conn = state.db.lock()?;
     // 8 is what fits the in-note panel without turning passive discovery into a wall
     // of links; the frontend can ask for more.
-    Ok(search::get_related_notes(&conn, &file_path, limit.unwrap_or(8))?)
+    state.read(|conn| Ok(search::get_related_notes(conn, &file_path, limit.unwrap_or(8))?))
 }
 
 /// Export knowledge graph to JSON Canvas 1.0 format

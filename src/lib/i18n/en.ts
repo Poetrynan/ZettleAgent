@@ -411,6 +411,7 @@ export const en = {
     'update.dismiss': 'Dismiss',
     'update.allReleases': 'All releases',
     'update.toastNewVersion': 'Version v{version} is available — open Settings → About to download',
+    'embedding.modelChangedToast': 'The local embedding model was upgraded to a Chinese–English model and old vectors were cleared. Rebuild the vector index from the Dashboard; until then search uses full-text.',
 
     // About
     'about.tagline': 'Local-first AI knowledge assistant',

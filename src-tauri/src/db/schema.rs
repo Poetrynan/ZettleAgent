@@ -84,7 +84,7 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
     setup_segmented_fts(conn)?;
 
     // Create vector table using vec0 virtual table
-    // 768 dimensions matches nomic-embed-text-v1.5 embedding model
+    // 768 dimensions matches the bundled jina-embeddings-v2-base-zh model
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
             id INTEGER PRIMARY KEY,
@@ -562,7 +562,7 @@ pub fn migrate_schema_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Migrate vec0 tables to 768 dimensions (nomic-embed-text-v1.5).
+/// Migrate vec0 tables to 768 dimensions (the bundled local embedding model).
 /// Safe to call on every startup — recreates vec tables if dimension differs.
 pub fn migrate_vec_dimensions(conn: &Connection) -> Result<bool> {
     // Check if chunks_vec exists and what dimension it uses

@@ -284,7 +284,7 @@ fn is_cjk_char(c: char) -> bool {
 }
 
 /// Perform vector similarity search using sqlite-vec.
-/// `query_embedding` must be a 768-dimensional f32 vector (nomic-embed-text-v1.5).
+/// `query_embedding` must be a 768-dimensional f32 vector (jina-embeddings-v2-base-zh).
 pub fn vector_search(
     conn: &Connection,
     query_embedding: &[f32],

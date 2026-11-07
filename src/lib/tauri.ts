@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getEmbedding } from './embeddings';
+import { embeddingModelKey } from './embeddingModel';
 import { getLang } from './i18n';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -946,6 +947,36 @@ export async function finalizeEmbeddingIndex(): Promise<void> {
 
 export async function getEmbeddingStats(): Promise<EmbeddingStats> {
   return invoke('get_embedding_stats');
+}
+
+export interface EmbeddingModelSync {
+  invalidated: boolean;
+  cleared_chunks: number;
+}
+
+/**
+ * Tell the backend which embedding model the current config will use. If the
+ * stored vectors came from another model (e.g. the old nomic default), the
+ * backend discards them so the next index build re-embeds everything with the
+ * new one instead of mixing two vector spaces.
+ *
+ * Call at startup and right before each index build.
+ */
+export async function syncEmbeddingModel(
+  /** The config the caller is about to embed with; defaults to the saved one. */
+  override?: { mode?: string; apiUrl?: string; model?: string },
+): Promise<EmbeddingModelSync> {
+  let config: { mode?: string; apiUrl?: string; model?: string } | null = override ?? null;
+  if (!config) {
+    try {
+      const raw = localStorage.getItem('zettelagent:embedding_config');
+      if (raw) config = JSON.parse(raw);
+    } catch { /* unreadable config = default (local) */ }
+  }
+  const { key, adoptIfUnset } = embeddingModelKey(config);
+  const result = await invoke<EmbeddingModelSync>('sync_embedding_model', { modelKey: key, adoptIfUnset });
+  if (result.invalidated) embeddingStatsCache = null; // index is now empty
+  return result;
 }
 
 // ── Data Management ───────────────────────────────────────────────

@@ -13,9 +13,96 @@
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
-/// Vector dimension produced by `nomic-embed-text-v1.5`. A cached vector with
-/// a different dim is treated as a miss so a model swap can't corrupt results.
+/// Vector dimension of the bundled local model (`jina-embeddings-v2-base-zh`,
+/// and `nomic-embed-text-v1.5` before it). A cached vector with a different dim
+/// is treated as a miss so a model swap can't corrupt results.
 pub const EMBEDDING_DIM: usize = 768;
+
+/// `app_settings` key recording which model produced the stored vectors.
+///
+/// The value is chosen by the frontend, which owns the embedding config:
+/// `local:<hf model id>` for the bundled model, `custom:<url>|<model>` for an
+/// API endpoint. Vectors from two different models live in unrelated spaces, so
+/// mixing them silently ruins vector search. That is why a changed key wipes
+/// every derived vector (see [`sync_model_key`]).
+pub const MODEL_KEY_SETTING: &str = "embedding_model_key";
+
+/// Result of [`sync_model_key`], returned to the frontend.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct ModelSyncOutcome {
+    /// Old vectors were discarded and must be rebuilt.
+    pub invalidated: bool,
+    /// Chunks whose embedding was cleared.
+    pub cleared_chunks: usize,
+}
+
+/// Make sure every stored vector belongs to the model identified by `key`.
+///
+/// - Same key as recorded: nothing happens.
+/// - No key recorded yet (a database from before this setting existed):
+///   if `adopt_if_unset` is true, or there are no vectors at all, the key is
+///   just recorded. Otherwise the existing vectors are from an unknown model and
+///   are discarded. The frontend passes `adopt_if_unset = true` for a custom API
+///   endpoint, so upgrading never forces a paid re-embed; for the local model it
+///   passes `false`, because pre-upgrade local vectors came from nomic.
+/// - Different key: all derived vectors are discarded.
+///
+/// "Discarded" means chunk embeddings, `chunks_vec`, `files_vec`, the content
+/// cache (keyed by text only, so it would hand old vectors back) and the
+/// semantic edges computed from them. Notes and FTS are untouched.
+pub fn sync_model_key(
+    conn: &mut Connection,
+    key: &str,
+    adopt_if_unset: bool,
+) -> rusqlite::Result<ModelSyncOutcome> {
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![MODEL_KEY_SETTING],
+            |r| r.get(0),
+        )
+        .ok();
+    if stored.as_deref() == Some(key) {
+        return Ok(ModelSyncOutcome::default());
+    }
+
+    let has_vectors: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chunks WHERE embedding IS NOT NULL)
+             OR EXISTS(SELECT 1 FROM embedding_cache)",
+        [],
+        |r| r.get(0),
+    )?;
+    let keep_existing = stored.is_none() && (adopt_if_unset || !has_vectors);
+
+    let tx = conn.transaction()?;
+    let mut outcome = ModelSyncOutcome::default();
+    if !keep_existing {
+        outcome.cleared_chunks =
+            tx.execute("UPDATE chunks SET embedding = NULL WHERE embedding IS NOT NULL", [])?;
+        tx.execute_batch(
+            "DELETE FROM chunks_vec;
+             DELETE FROM files_vec;
+             DELETE FROM embedding_cache;
+             DELETE FROM semantic_edges;",
+        )?;
+        outcome.invalidated = true;
+    }
+    tx.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
+        params![MODEL_KEY_SETTING, key],
+    )?;
+    tx.commit()?;
+
+    if outcome.invalidated {
+        crate::db::search::invalidate_graph_cache(conn);
+        log::info!(
+            "Embedding model changed ({:?} -> {}): cleared {} chunk vectors for rebuild",
+            stored, key, outcome.cleared_chunks
+        );
+    }
+    Ok(outcome)
+}
 
 /// Stable cache key for a chunk's text.
 ///
@@ -265,5 +352,73 @@ mod tests {
         let removed = prune(&conn, 2).unwrap();
         assert_eq!(removed, 3);
         assert_eq!(stats(&conn).entries, 2);
+    }
+
+    // ── model-key sync ──────────────────────────────────────────────
+
+    /// Full schema with one embedded chunk + a cache row, as an upgraded user has.
+    fn db_with_vectors() -> Connection {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        conn.execute("INSERT INTO files (path, hash) VALUES ('a.md', 'h')", []).unwrap();
+        conn.execute(
+            "INSERT INTO chunks (file_path, chunk_index, content) VALUES ('a.md', 0, 'text')",
+            [],
+        )
+        .unwrap();
+        let blob = vec_to_blob(&vec![0.1; EMBEDDING_DIM]);
+        conn.execute("UPDATE chunks SET embedding = ?1", params![blob]).unwrap();
+        conn.execute("INSERT INTO chunks_vec (id, embedding) VALUES (1, ?1)", params![blob]).unwrap();
+        put(&conn, "text", &vec![0.1; EMBEDDING_DIM]).unwrap();
+        conn
+    }
+
+    fn embedded(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn upgrade_on_local_model_discards_legacy_vectors() {
+        let mut conn = db_with_vectors();
+        let out = sync_model_key(&mut conn, "local:new", false).unwrap();
+        assert!(out.invalidated);
+        assert_eq!(out.cleared_chunks, 1);
+        assert_eq!(embedded(&conn), 0);
+        assert_eq!(stats(&conn).entries, 0, "text-keyed cache would hand old vectors back");
+        let vec_rows: i64 = conn.query_row("SELECT COUNT(*) FROM chunks_vec", [], |r| r.get(0)).unwrap();
+        assert_eq!(vec_rows, 0);
+    }
+
+    #[test]
+    fn upgrade_on_custom_endpoint_keeps_vectors() {
+        let mut conn = db_with_vectors();
+        let out = sync_model_key(&mut conn, "custom:https://x|m", true).unwrap();
+        assert!(!out.invalidated);
+        assert_eq!(embedded(&conn), 1);
+    }
+
+    #[test]
+    fn same_key_is_a_no_op_and_changed_key_clears() {
+        let mut conn = db_with_vectors();
+        sync_model_key(&mut conn, "custom:https://x|m", true).unwrap();
+        assert!(!sync_model_key(&mut conn, "custom:https://x|m", true).unwrap().invalidated);
+        assert_eq!(embedded(&conn), 1);
+
+        // Switching model, even with adopt_if_unset, must clear: a key is recorded.
+        let out = sync_model_key(&mut conn, "local:new", true).unwrap();
+        assert!(out.invalidated);
+        assert_eq!(embedded(&conn), 0);
+    }
+
+    #[test]
+    fn fresh_install_just_records_the_key() {
+        crate::db::register_sqlite_vec();
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        assert!(!sync_model_key(&mut conn, "local:new", false).unwrap().invalidated);
+        let v = crate::db::schema::get_setting(&conn, MODEL_KEY_SETTING).unwrap();
+        assert_eq!(v.as_deref(), Some("local:new"));
     }
 }

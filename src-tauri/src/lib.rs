@@ -82,9 +82,56 @@ impl SchedulerState {
 
 /// Application state shared across all Tauri commands.
 pub struct AppState {
+    /// The single writer connection. Everything that writes goes through here.
     pub db: Arc<Mutex<Connection>>,
+    /// Extra `query_only` connections for read-only commands, so quick UI reads
+    /// don't queue behind long jobs holding `db` (see `db::read_pool`).
+    /// `None` if the pool could not be opened; reads then fall back to `db`.
+    pub read_pool: Option<db::read_pool::ReadPool>,
     pub scheduler: SchedulerState,
     pub watcher: Arc<Mutex<std::collections::HashMap<String, notify_debouncer_mini::Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>>>>,
+}
+
+impl AppState {
+    /// Run a **read-only** closure on a pool connection.
+    ///
+    /// If the closure turns out to write (SQLite reports `SQLITE_READONLY`
+    /// because pool connections are `query_only`), it is retried once on the
+    /// main writer connection and a warning is logged. A mistake in choosing
+    /// which commands use the pool therefore costs only the old behaviour
+    /// (waiting for the writer), never a failed command.
+    pub fn read<T>(
+        &self,
+        f: impl Fn(&Connection) -> Result<T, error::ZettelError>,
+    ) -> Result<T, error::ZettelError> {
+        if let Some(pool) = &self.read_pool {
+            let first = {
+                let conn = pool.get()?;
+                f(&conn)
+            };
+            match first {
+                Err(e) if is_readonly_error(&e) => {
+                    log::warn!("read_pool: a read command tried to write, retrying on the writer: {}", e);
+                }
+                other => return other,
+            }
+        }
+        let conn = self.db.lock()?;
+        f(&conn)
+    }
+}
+
+/// True for SQLite's "attempt to write a readonly database" family, however the
+/// error got wrapped on its way up.
+fn is_readonly_error(e: &error::ZettelError) -> bool {
+    match e {
+        error::ZettelError::Db(rusqlite::Error::SqliteFailure(f, _)) => {
+            f.code == rusqlite::ErrorCode::ReadOnly
+        }
+        // Errors that went through `anyhow` keep only their message.
+        error::ZettelError::System(msg) => msg.contains("readonly database"),
+        _ => false,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -142,10 +189,21 @@ pipeline_log::init(&app_data_dir);
             // read the process copy, so it must be populated before any command runs.
             db::review_store::restore_config(&conn);
 
+            // Readers are opened only now: schema, migrations and the CJK index
+            // backfill above have all been committed on the writer.
+            let read_pool = match db::read_pool::ReadPool::open(&db_path, db::read_pool::DEFAULT_READERS) {
+                Ok(pool) => Some(pool),
+                Err(e) => {
+                    log::warn!("Read pool unavailable, all reads will use the writer connection: {}", e);
+                    None
+                }
+            };
+
             // Store connection in managed state
             let db_arc = Arc::new(Mutex::new(conn));
             app.manage(AppState {
                 db: db_arc.clone(),
+                read_pool,
                 scheduler: SchedulerState::new(&db_arc),
                 watcher: Arc::new(Mutex::new(std::collections::HashMap::new())),
             });
@@ -240,6 +298,7 @@ pipeline_log::init(&app_data_dir);
             commands::save_chunk_embeddings,
             commands::finalize_embedding_index,
             commands::get_embedding_stats,
+            commands::sync_embedding_model,
             // Custom-endpoint embeddings are proxied here so the API key stays
             // in Rust; the WebView never sees it (see `secrets`).
             commands::fetch_custom_embeddings,

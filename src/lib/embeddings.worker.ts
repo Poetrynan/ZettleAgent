@@ -1,4 +1,5 @@
 import { pipeline, env } from '@huggingface/transformers';
+import { LOCAL_EMBED_MODEL_ID, LOCAL_EMBED_DTYPE, formatForEmbedding } from './embeddingModel';
 
 env.allowLocalModels = true;
 env.allowRemoteModels = false;
@@ -47,9 +48,9 @@ async function getExtractor() {
     // 1. Try bundled local model first
     env.allowRemoteModels = false;
     extractorPromise = withTimeout(
-      pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
+      pipeline('feature-extraction', LOCAL_EMBED_MODEL_ID, {
         device: 'wasm',
-        dtype: 'q8',
+        dtype: LOCAL_EMBED_DTYPE,
         progress_callback: progressCallback,
       }),
       60000,
@@ -57,9 +58,9 @@ async function getExtractor() {
     ).catch((err) => {
       console.warn('Local WASM embedding failed, trying WebGPU or fallback:', err);
       return withTimeout(
-        pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
+        pipeline('feature-extraction', LOCAL_EMBED_MODEL_ID, {
           device: 'webgpu',
-          dtype: 'q8',
+          dtype: LOCAL_EMBED_DTYPE,
           progress_callback: progressCallback,
         }),
         60000,
@@ -69,9 +70,9 @@ async function getExtractor() {
       console.warn('Local model loading failed, trying remote with cache:', err);
       env.allowRemoteModels = true;
       return withTimeout(
-        pipeline('feature-extraction', 'nomic-ai/nomic-embed-text-v1.5', {
+        pipeline('feature-extraction', LOCAL_EMBED_MODEL_ID, {
           device: 'wasm',
-          dtype: 'q8',
+          dtype: LOCAL_EMBED_DTYPE,
           progress_callback: progressCallback,
         }),
         300000,
@@ -90,8 +91,7 @@ async function getEmbeddingsBatch(texts: string[], type: 'query' | 'document'): 
   if (texts.length === 0) return [];
 
   const extractor = await getExtractor();
-  const prefix = type === 'query' ? 'search_query: ' : 'search_document: ';
-  const formattedTexts = texts.map((t) => `${prefix}${t}`);
+  const formattedTexts = texts.map((t) => formatForEmbedding(t, type));
 
   const output = await extractor(formattedTexts, {
     pooling: 'mean',
@@ -99,7 +99,7 @@ async function getEmbeddingsBatch(texts: string[], type: 'query' | 'document'): 
   });
 
   const flatData = output.data as Float32Array;
-  const dim = output.dims[1]; // 768
+  const dim = output.dims[1]; // 768 (jina-embeddings-v2-base-zh)
   const result: number[][] = [];
 
   for (let i = 0; i < texts.length; i++) {

@@ -20,6 +20,10 @@ import {
   type FederatedPointerEvent,
 } from 'pixi.js';
 import { Point } from 'pixi.js';
+// The app ships a strict CSP without 'unsafe-eval' (tauri.conf.json). Pixi v8
+// generates shader/uniform code with `new Function` unless this polyfill module
+// is loaded first, which swaps in eval-free implementations.
+import 'pixi.js/unsafe-eval';
 import {
   type SimulationNodeDatum,
 } from 'd3-force';

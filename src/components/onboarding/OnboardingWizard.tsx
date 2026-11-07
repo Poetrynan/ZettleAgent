@@ -5,6 +5,7 @@ import { saveLlmConfig, saveMethodology, saveOnboardingComplete } from '../../li
 import { initDemoVault, setVaultPath, syncVault } from '../../lib/tauri';
 import { getThemeMode, setThemeMode, type ThemeMode } from '../../lib/theme';
 import { IconSun, IconMoon, IconSliders } from '../icons';
+import { LOCAL_EMBED_MODEL_ID } from '../../lib/embeddingModel';
 
 interface OnboardingWizardProps {
   onComplete: () => void;
@@ -552,7 +553,7 @@ function EmbeddingInfoPage({ isZh }: { isZh: boolean }) {
             </svg>
           </div>
           <div className="onboarding-embed-hero-body">
-            <h3 className="onboarding-embed-model-name">nomic-embed-text-v1.5</h3>
+            <h3 className="onboarding-embed-model-name">{LOCAL_EMBED_MODEL_ID.split('/')[1]}</h3>
             <p className="onboarding-embed-model-tag">INT8 Quantized</p>
           </div>
           <div className="onboarding-embed-status">

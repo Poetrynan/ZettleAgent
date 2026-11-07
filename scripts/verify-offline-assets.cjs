@@ -49,11 +49,14 @@ function assertValidOnnx(full, label, minBytes) {
 console.log(`=== Zero-download installer check (${frontendRoot}/ + resources/) ===\n`);
 console.log('These ship INSIDE the Release installer. End users never download them.\n');
 
+// Must match LOCAL_EMBED_MODEL_ID in src/lib/embeddingModel.ts and download-model.cjs.
+const EMBED_MODEL_ID = 'jinaai/jina-embeddings-v2-base-zh';
+
 // Frontend bundle (embedding + ORT + fonts + pdf) — loaded by WebView at runtime
 [
-  'models/nomic-ai/nomic-embed-text-v1.5/onnx/model_quantized.onnx',
-  'models/nomic-ai/nomic-embed-text-v1.5/config.json',
-  'models/nomic-ai/nomic-embed-text-v1.5/tokenizer.json',
+  `models/${EMBED_MODEL_ID}/onnx/model_quantized.onnx`,
+  `models/${EMBED_MODEL_ID}/config.json`,
+  `models/${EMBED_MODEL_ID}/tokenizer.json`,
   'models/maidalun1020/bce-reranker-base_v1/onnx/model_quantized.onnx',
   'models/maidalun1020/bce-reranker-base_v1/config.json',
   'models/maidalun1020/bce-reranker-base_v1/tokenizer.json',
@@ -82,7 +85,11 @@ if (woff2 < 10) {
 assertValidOnnx(path.join(RESOURCES, 'ocr_models/det.onnx'), 'resources/ocr_models/det.onnx', 4_000_000);
 assertValidOnnx(path.join(RESOURCES, 'ocr_models/rec.onnx'), 'resources/ocr_models/rec.onnx', 14_000_000);
 check(path.join(RESOURCES, 'ocr_models/ppocrv5_dict.txt'), 'resources/ocr_models/ppocrv5_dict.txt');
-check(path.join(RESOURCES, 'embed_models/nomic-ai/nomic-embed-text-v1.5/onnx/model_quantized.onnx'), 'resources/embed_models/nomic-ai/nomic-embed-text-v1.5/onnx/model_quantized.onnx');
+assertValidOnnx(
+  path.join(RESOURCES, `embed_models/${EMBED_MODEL_ID}/onnx/model_quantized.onnx`),
+  `resources/embed_models/${EMBED_MODEL_ID}/onnx/model_quantized.onnx`,
+  100_000_000,
+);
 
 const demo = path.join(RESOURCES, 'demo-vault');
 const n = fs.existsSync(demo) ? fs.readdirSync(demo).filter((f) => f.endsWith('.md')).length : 0;

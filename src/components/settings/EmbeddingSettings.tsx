@@ -7,7 +7,9 @@ import {
   finalizeEmbeddingIndex,
   getEmbeddingStats,
   fetchCustomEmbeddings,
+  syncEmbeddingModel,
 } from '../../lib/tauri';
+import { LOCAL_EMBED_MODEL_ID } from '../../lib/embeddingModel';
 import { getEmbeddingsBatch } from '../../lib/embeddings';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { detectHardware, recommendConfig, getGpuSummary, type HardwareProfile, type RecommendedConfig } from '../../lib/hardwareDetect';
@@ -112,6 +114,10 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
       let totalProcessed = 0;
       let hasMore = true;
       const batchSize = 16;
+
+      // Vectors from a different model than this build will use are discarded
+      // first, so the index never mixes two vector spaces.
+      await syncEmbeddingModel({ mode, apiUrl: customApiUrl, model: customModel });
 
       while (hasMore) {
         if (cancelRef.current) {
@@ -400,12 +406,12 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-md)', background: 'rgba(34,197,94,0.12)', color: 'var(--success, #22c55e)', flexShrink: 0 }}><IconBrain size={16} /></span>
                 <div>
                   <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    nomic-ai/nomic-embed-text-v1.5 (q8)
+                    {LOCAL_EMBED_MODEL_ID} (q8)
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
                     {isZh
-                      ? '768 维 · 8192 Token 窗口 · WebAssembly/WebGPU 离线推理'
-                      : '768-dim · 8192 token window · WebAssembly/WebGPU offline inference'}
+                      ? '中英双语 · 768 维 · 8192 Token 窗口 · WebAssembly/WebGPU 离线推理'
+                      : 'Chinese–English bilingual · 768-dim · 8192 token window · WebAssembly/WebGPU offline inference'}
                   </div>
                 </div>
               </div>

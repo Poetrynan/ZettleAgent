@@ -10,6 +10,8 @@
  */
 
 import * as PIXI from 'pixi.js';
+// Eval-free Pixi internals; required under the app's CSP (no 'unsafe-eval').
+import 'pixi.js/unsafe-eval';
 import type { GraphNode, GraphEdge, Viewport, RendererStats } from './types';
 import { LODLevel, RenderBackend } from './types';
 import { SpatialIndex } from './SpatialIndex';

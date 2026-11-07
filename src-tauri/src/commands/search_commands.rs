@@ -49,15 +49,15 @@ pub async fn search_chunks(
                 "Missing pre-computed query embedding for hybrid/vector search".to_string()
             ))?;
 
-            let conn = state.db.lock()?;
-            match mode {
+            // Read pool: a search must not wait behind a vault sync or agent write.
+            state.read(|conn| match mode {
                 // `external: None` = Tier 1 (lexical). Tiers 2/3 cannot be driven
                 // from inside a command that must return synchronously to the
                 // frontend that *hosts* the model; that path is `rerank_window`
                 // below, and `rerank_results` already degrades CrossEncoder/Llm
                 // to Tier 1 when no external reranker is supplied.
                 "hybrid" => Ok(search::hybrid_search_reranked(
-                    &conn,
+                    conn,
                     &query.query,
                     &query_embedding,
                     limit,
@@ -69,19 +69,18 @@ pub async fn search_chunks(
                 // signal they opted out of. (It would also be near-inert — a
                 // paraphrase query scores ~0 lexically on every candidate, so the
                 // stable sort would mostly return the vector order anyway.)
-                _ => Ok(search::vector_search(&conn, &query_embedding, limit)?),
-            }
+                _ => Ok(search::vector_search(conn, &query_embedding, limit)?),
+            })
         }
-        _ => {
-            let conn = state.db.lock()?;
+        _ => state.read(|conn| {
             Ok(search::full_text_search_reranked(
-                &conn,
+                conn,
                 &query.query,
                 limit,
                 &rerank_config,
                 None,
             )?)
-        }
+        }),
     }
 }
 
@@ -191,16 +190,30 @@ pub async fn finalize_embedding_index(
     Ok(())
 }
 
+/// Tell the backend which embedding model the frontend is about to use, and
+/// discard stored vectors if they came from a different one. Called at startup
+/// and before every index build; see `embedding_cache::sync_model_key`.
+#[tauri::command]
+pub fn sync_embedding_model(
+    state: State<'_, AppState>,
+    model_key: String,
+    adopt_if_unset: bool,
+) -> Result<crate::db::embedding_cache::ModelSyncOutcome, ZettelError> {
+    let mut conn = state.db.lock()?;
+    Ok(crate::db::embedding_cache::sync_model_key(&mut conn, &model_key, adopt_if_unset)?)
+}
+
 #[tauri::command]
 pub fn get_embedding_stats(state: State<'_, AppState>) -> Result<EmbeddingStats, ZettelError> {
-    let conn = state.db.lock()?;
-    let total_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
-    let indexed_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL", [], |row| row.get(0))?;
+    state.read(|conn| {
+        let total_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
+        let indexed_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL", [], |row| row.get(0))?;
 
-    Ok(EmbeddingStats {
-        total_chunks,
-        indexed_chunks,
-        has_index: indexed_chunks > 0,
+        Ok(EmbeddingStats {
+            total_chunks,
+            indexed_chunks,
+            has_index: indexed_chunks > 0,
+        })
     })
 }
 
@@ -217,7 +230,7 @@ pub fn get_embedding_stats(state: State<'_, AppState>) -> Result<EmbeddingStats,
 /// attached to the header without ever crossing back into JS.
 ///
 /// Scope: this is ONLY the custom-endpoint path. The default provider embeds in
-/// the WebView (nomic-embed-text-v1.5 ONNX via WASM/WebGPU) and never touches
+/// the WebView (jina-embeddings-v2-base-zh ONNX via WASM/WebGPU) and never touches
 /// Rust — that path is intentionally left alone.
 #[tauri::command]
 pub async fn fetch_custom_embeddings(

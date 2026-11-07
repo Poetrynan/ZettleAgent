@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getUnindexedChunks, saveChunkEmbeddings, finalizeEmbeddingIndex, getKnowledgeGraph, fetchCustomEmbeddings } from '../../lib/tauri';
+import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getUnindexedChunks, saveChunkEmbeddings, finalizeEmbeddingIndex, getKnowledgeGraph, fetchCustomEmbeddings, syncEmbeddingModel } from '../../lib/tauri';
 import { getEmbeddingsBatch } from '../../lib/embeddings';
 import { getSmartOrganizeConfig, setBackgroundOrganizeEnabled } from '../settings/Settings';
 import { isLlmConfigured, startBackgroundOrganize } from '../../lib/backgroundOrganize';
@@ -49,6 +49,11 @@ export function Dashboard() {
         const raw = localStorage.getItem('zettelagent:embedding_config');
         if (raw) embedConfig = JSON.parse(raw);
       } catch {}
+
+      // Never mix vectors from two models: if the config now points at a
+      // different model than the stored vectors came from, the backend clears
+      // them first and this build re-embeds everything.
+      await syncEmbeddingModel(embedConfig);
 
       // No API key is read here on purpose: it lives in the OS credential store
       // and only Rust can read it. `fetchCustomEmbeddings` attaches the
