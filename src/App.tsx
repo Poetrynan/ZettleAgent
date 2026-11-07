@@ -284,6 +284,18 @@ function AppLayout() {
   // Splash is ready to exit when BOTH conditions met
   const splashReady = splashMinTimeElapsed && initComplete && !state.isLoading;
 
+  // Let Rust-side searches (agent `search_notes`) embed their query with the
+  // model that lives in this WebView. Started early: the agent can run any time.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void import('./lib/queryEmbeddingBridge')
+      .then(({ startQueryEmbeddingBridge }) => startQueryEmbeddingBridge())
+      .then((fn) => { if (cancelled) fn(); else unlisten = fn; })
+      .catch((e) => console.warn('Query embedding bridge failed to start:', e));
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   // Embedding model identity check (once per launch). If the stored vectors came
   // from another model (e.g. the old nomic default), the backend clears
   // them; tell the user why vector search is gone until they rebuild.

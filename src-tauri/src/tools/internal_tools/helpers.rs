@@ -113,6 +113,16 @@ pub(crate) fn snapshot_before_write(
 
 // ── Agent run journal (whole-turn undo) ────────────────────────────
 
+/// SHA-256 (hex) of a file's bytes, or `None` if it cannot be read.
+///
+/// Shared by the journal (records the post-write state) and undo (checks the
+/// current state), so both sides hash identically.
+pub(crate) fn content_hash_of_file(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("{:x}", Sha256::digest(&bytes)))
+}
+
 /// Append one row to `agent_run_journal` describing a file mutation the current
 /// Agent turn just performed.
 ///
@@ -157,10 +167,19 @@ pub(crate) fn journal_write(
 
     let now_ms = chrono::Utc::now().timestamp_millis();
 
+    // Every call site journals *after* its write landed, so the file now holds
+    // exactly what the Agent wrote. Undo compares against this to detect edits
+    // made afterwards (see `undo_commands::undo_one`).
+    let post_hash = if op == "write" || op == "create" {
+        content_hash_of_file(std::path::Path::new(file_path))
+    } else {
+        None
+    };
+
     if let Err(e) = conn.execute(
         "INSERT INTO agent_run_journal
-            (run_id, seq, tool_name, op, file_path, new_path, snapshot_id, trash_path, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (run_id, seq, tool_name, op, file_path, new_path, snapshot_id, trash_path, created_at_ms, post_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             &run_id,
             seq,
@@ -170,7 +189,8 @@ pub(crate) fn journal_write(
             new_path,
             snapshot_id,
             trash_path,
-            now_ms
+            now_ms,
+            post_hash
         ],
     ) {
         log::warn!("journal_write: failed to record {} on {}: {}", op, file_path, e);

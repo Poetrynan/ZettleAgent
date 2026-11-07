@@ -299,6 +299,7 @@ pipeline_log::init(&app_data_dir);
             commands::finalize_embedding_index,
             commands::get_embedding_stats,
             commands::sync_embedding_model,
+            commands::resolve_query_embedding,
             // Custom-endpoint embeddings are proxied here so the API key stays
             // in Rust; the WebView never sees it (see `secrets`).
             commands::fetch_custom_embeddings,

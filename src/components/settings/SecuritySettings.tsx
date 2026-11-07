@@ -395,6 +395,12 @@ function UndoReportView({ report, isZh }: { report: UndoReport; isZh: boolean })
       ? `移入回收站：${report.trashed.join(', ')}`
       : `Moved to recycle bin: ${report.trashed.join(', ')}`);
   }
+  const conflicts = report.conflicts?.length ?? 0;
+  if (conflicts > 0) {
+    lines.push(isZh
+      ? `${conflicts} 处因文件之后又被修改而没有撤销，以免覆盖新内容（见下方红字）`
+      : `${conflicts} change(s) left in place because the file was edited afterwards — undoing would overwrite newer work (see below)`);
+  }
   return (
     <div style={{
       marginTop: 'var(--space-3)',

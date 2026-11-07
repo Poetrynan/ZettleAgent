@@ -81,8 +81,13 @@ pub struct UndoReport {
     pub run_id: String,
     /// Entries rolled back successfully during this call.
     pub restored: u32,
-    /// Human-readable reason per entry that could not be rolled back.
+    /// Human-readable reason per entry that could not be rolled back. Conflicts are
+    /// listed here too, so every existing report view shows them.
     pub failed: Vec<String>,
+    /// The subset of `failed` skipped on purpose because rolling back would have
+    /// overwritten a newer change (edited after the Agent wrote it, or path reused).
+    /// These entries stay un-undone and the files are untouched.
+    pub conflicts: Vec<String>,
     /// Files moved into the recycle bin (undo of a `create`).
     pub trashed: Vec<String>,
     /// Entries skipped because a previous call already undid them.
@@ -117,6 +122,8 @@ struct JournalEntry {
     snapshot_id: Option<i64>,
     trash_path: Option<String>,
     undone: bool,
+    /// SHA-256 of the file right after the Agent's write; `None` for legacy rows.
+    post_hash: Option<String>,
 }
 
 /// What one rolled-back entry did, for the report and the re-index pass.
@@ -218,6 +225,7 @@ fn undo_agent_run_impl(db: &Db, run_id: &str) -> Result<UndoReport, ZettelError>
         run_id: run_id.to_string(),
         restored: 0,
         failed: Vec::new(),
+        conflicts: Vec::new(),
         trashed: Vec::new(),
         skipped_already_undone: 0,
         reindexed: 0,
@@ -244,10 +252,16 @@ fn undo_agent_run_impl(db: &Db, run_id: &str) -> Result<UndoReport, ZettelError>
             }
             // A single unrecoverable entry must not strand the rest: partial recovery
             // is worth more than none, and the user gets told exactly what to fix.
-            Err(e) => report.failed.push(format!(
-                "seq {} ({} {} on {}): {}",
-                entry.seq, entry.tool_name, entry.op, entry.file_path, e
-            )),
+            Err(e) => {
+                let line = format!(
+                    "seq {} ({} {} on {}): {}",
+                    entry.seq, entry.tool_name, entry.op, entry.file_path, e
+                );
+                if matches!(e, ZettelError::Conflict(_)) {
+                    report.conflicts.push(line.clone());
+                }
+                report.failed.push(line);
+            }
         }
     }
 
@@ -274,7 +288,7 @@ fn load_journal_entries(
 ) -> Result<Vec<JournalEntry>, ZettelError> {
     let conn = db.lock()?;
     let mut stmt = conn.prepare(
-        "SELECT id, seq, tool_name, op, file_path, new_path, snapshot_id, trash_path, undone
+        "SELECT id, seq, tool_name, op, file_path, new_path, snapshot_id, trash_path, undone, post_hash
          FROM agent_run_journal
          WHERE run_id = ?1
          ORDER BY seq DESC",
@@ -290,6 +304,7 @@ fn load_journal_entries(
             snapshot_id: row.get(6)?,
             trash_path: row.get(7)?,
             undone: row.get::<_, i64>(8)? != 0,
+            post_hash: row.get(9)?,
         })
     })?;
     let mut out = Vec::new();
@@ -314,7 +329,17 @@ fn undo_one(
             let snapshot_id = entry.snapshot_id.ok_or_else(|| {
                 ZettelError::System("write entry has no snapshot to restore".to_string())
             })?;
+            // Never replace an edit made after the Agent's write.
+            ensure_unchanged_since_write(entry, &target)?;
             let content = snapshot_content(db, snapshot_id)?;
+            // Keep what is on disk right now as a restore point before overwriting
+            // it. For a verified entry this is the Agent's own output (a "redo");
+            // for a legacy entry without `post_hash` it is the only protection a
+            // later human edit has. Fail-closed: no restore point, no overwrite.
+            if target.exists() {
+                crate::tools::internal_tools::helpers::snapshot_before_write(db, &target)
+                    .map_err(|e| ZettelError::System(e.to_string()))?;
+            }
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -323,6 +348,9 @@ fn undo_one(
             outcome.touched.push(target);
         }
         "create" => {
+            // A note the Agent created and the user has since written into is the
+            // user's note now; trashing it would hide their work.
+            ensure_unchanged_since_write(entry, &target)?;
             // Undo a create by trashing the file — never a hard delete, so a mis-fired
             // undo is itself recoverable from the recycle bin.
             if target.exists() {
@@ -345,6 +373,11 @@ fn undo_one(
                     trash_path
                 )));
             }
+            // A new file now sits where the deleted one was: moving the old one back
+            // would replace it (rename overwrites on every platform we ship).
+            if target.exists() {
+                return Err(conflict(entry, "a file was created at this path after the Agent deleted it / Agent 删除后该位置又出现了新文件"));
+            }
             // The original parent directory may have been removed since deletion.
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -363,6 +396,10 @@ fn undo_one(
                     new_path
                 )));
             }
+            // Same overwrite hazard as `delete`: the old name has been reused.
+            if target.exists() {
+                return Err(conflict(entry, "the original name is taken by another file now / 原文件名已被另一个文件占用"));
+            }
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -378,6 +415,37 @@ fn undo_one(
 
     // `seq` is only read for the failure message in `undo_agent_run`.
     Ok(outcome)
+}
+
+/// Refuse when the file no longer holds what the Agent wrote.
+///
+/// `post_hash` is recorded right after the Agent's write (see
+/// `helpers::journal_write`). A mismatch means a person, another editor, a sync
+/// tool or a later turn changed the file since, and restoring the pre-image would
+/// silently throw that change away. Entries journaled before `post_hash` existed
+/// (`None`) cannot be checked; the `write` branch protects those with a restore
+/// point instead.
+fn ensure_unchanged_since_write(entry: &JournalEntry, target: &Path) -> Result<(), ZettelError> {
+    let Some(expected) = entry.post_hash.as_deref() else {
+        return Ok(());
+    };
+    if !target.exists() {
+        return Err(conflict(entry, "the file was moved or deleted after the Agent wrote it / Agent 写入后文件已被移动或删除"));
+    }
+    match crate::tools::internal_tools::helpers::content_hash_of_file(target) {
+        Some(actual) if actual == expected => Ok(()),
+        Some(_) => Err(conflict(
+            entry,
+            "the file was edited after the Agent wrote it; restore it from version history if you still want the old text / Agent 写入后文件又被修改过，如仍需旧内容请从版本历史恢复",
+        )),
+        None => Err(ZettelError::System(format!("cannot read {} to verify it", target.display()))),
+    }
+}
+
+/// A rollback that would destroy newer work. Kept distinct from other failures so
+/// the report can list conflicts on their own.
+fn conflict(entry: &JournalEntry, why: &str) -> ZettelError {
+    ZettelError::Conflict(format!("{}: {}", entry.file_path, why))
 }
 
 /// Fetch the stored pre-image body for a snapshot id.
@@ -1395,6 +1463,123 @@ mod tests {
             crate::db::schema::set_setting(&conn, TRASH_RETENTION_SETTING_KEY, "0").unwrap();
         }
         assert_eq!(read_retention_days(&db), RETENTION_DISABLED);
+    }
+
+    // ── Conflict protection: undo must never eat a later edit ───────
+
+    /// Simulate one Agent write the way the tools do it: restore point, write,
+    /// then journal (which records `post_hash` from disk).
+    fn agent_write(db: &Db, run_id: &str, note: &Path, body: &str) {
+        let snap = snapshot_before_write(db, note).unwrap();
+        crate::file_lock::safe_write(note, body).unwrap();
+        crate::llm::tool_hooks::set_current_run_id(run_id);
+        journal_write(db, "edit_note", "write", &snapshot_path_key(note), None, snap, None);
+        crate::llm::tool_hooks::clear_current_run_id();
+    }
+
+    fn snapshot_bodies(db: &Db, note: &Path) -> Vec<String> {
+        let conn = db.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT content FROM note_snapshots WHERE file_path = ?1 ORDER BY id")
+            .unwrap();
+        let rows = stmt.query_map(params![snapshot_path_key(note)], |r| r.get(0)).unwrap();
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    #[test]
+    fn undo_refuses_to_overwrite_an_edit_made_after_the_agent() {
+        let _guard = run_id_guard();
+        let db = mem_db();
+        let vault = temp_vault("conflict");
+        let note = vault.join("notes").join("a.md");
+        std::fs::write(&note, "A original").unwrap();
+
+        agent_write(&db, "run-c", &note, "B agent");
+        std::fs::write(&note, "C human edit").unwrap(); // edited afterwards
+
+        let report = undo_agent_run_impl(&db, "run-c").unwrap();
+        assert_eq!(report.restored, 0);
+        assert_eq!(report.conflicts.len(), 1, "{:?}", report.failed);
+        assert_eq!(report.failed.len(), 1, "conflicts must also show in `failed`");
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "C human edit");
+
+        // Left replayable, not marked undone.
+        let undone: i64 = db.lock().unwrap()
+            .query_row("SELECT undone FROM agent_run_journal WHERE run_id='run-c'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(undone, 0);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn untouched_agent_write_still_undoes_and_keeps_a_redo_point() {
+        let _guard = run_id_guard();
+        let db = mem_db();
+        let vault = temp_vault("noconflict");
+        let note = vault.join("notes").join("a.md");
+        std::fs::write(&note, "A original").unwrap();
+
+        agent_write(&db, "run-ok", &note, "B agent");
+        let report = undo_agent_run_impl(&db, "run-ok").unwrap();
+        assert_eq!(report.restored, 1, "{:?}", report.failed);
+        assert!(report.conflicts.is_empty());
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "A original");
+        assert!(snapshot_bodies(&db, &note).contains(&"B agent".to_string()),
+            "the Agent's version is kept so the undo itself can be reverted");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn two_writes_in_one_run_unwind_in_order() {
+        let _guard = run_id_guard();
+        let db = mem_db();
+        let vault = temp_vault("twowrites");
+        let note = vault.join("notes").join("a.md");
+        std::fs::write(&note, "v0").unwrap();
+
+        agent_write(&db, "run-2", &note, "v1");
+        agent_write(&db, "run-2", &note, "v2");
+        let report = undo_agent_run_impl(&db, "run-2").unwrap();
+        assert_eq!(report.restored, 2, "{:?}", report.failed);
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "v0");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn legacy_row_without_hash_restores_but_saves_the_current_text_first() {
+        let db = mem_db();
+        let vault = temp_vault("legacy");
+        let note = vault.join("notes").join("a.md");
+        std::fs::write(&note, "A original").unwrap();
+        let snap = snapshot_before_write(&db, &note).unwrap();
+        std::fs::write(&note, "C human edit").unwrap();
+        // Pre-upgrade row: no post_hash, so the edit cannot be detected.
+        add_row(&db, "run-old", 1, "edit_note", "write", &snapshot_path_key(&note), None, snap, None);
+
+        let report = undo_agent_run_impl(&db, "run-old").unwrap();
+        assert_eq!(report.restored, 1, "{:?}", report.failed);
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "A original");
+        assert!(snapshot_bodies(&db, &note).contains(&"C human edit".to_string()),
+            "the overwritten text must survive as a restore point");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn created_note_the_user_wrote_into_is_not_trashed() {
+        let _guard = run_id_guard();
+        let db = mem_db();
+        let vault = temp_vault("createedit");
+        let note = vault.join("notes").join("new.md");
+        crate::file_lock::safe_write(&note, "agent draft").unwrap();
+        crate::llm::tool_hooks::set_current_run_id("run-new");
+        journal_write(&db, "create_note", "create", &snapshot_path_key(&note), None, None, None);
+        crate::llm::tool_hooks::clear_current_run_id();
+        std::fs::write(&note, "agent draft + my notes").unwrap();
+
+        let report = undo_agent_run_impl(&db, "run-new").unwrap();
+        assert_eq!(report.conflicts.len(), 1, "{:?}", report.failed);
+        assert!(note.exists());
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }
 

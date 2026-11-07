@@ -371,10 +371,16 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
             snapshot_id   INTEGER,
             trash_path    TEXT,
             created_at_ms INTEGER NOT NULL,
-            undone        INTEGER NOT NULL DEFAULT 0
+            undone        INTEGER NOT NULL DEFAULT 0,
+            post_hash     TEXT
         );",
         [],
     )?;
+    // `post_hash` = SHA-256 of the file right after the Agent's write. Undo refuses
+    // to overwrite a file whose current content no longer matches it, so a later
+    // human edit is never silently replaced. Added to existing databases here;
+    // the error when the column already exists is expected and ignored.
+    let _ = conn.execute("ALTER TABLE agent_run_journal ADD COLUMN post_hash TEXT", []);
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_run_journal_run ON agent_run_journal(run_id, seq);",
         [],

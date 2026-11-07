@@ -1535,7 +1535,11 @@ pub async fn try_execute(
 ) -> Option<anyhow::Result<String>> {
     let result = match name {
         // Search operations
-        "search_notes" => Some(search_ops::execute_search_notes(arguments, db)),
+        "search_notes" => {
+            // Embed the query (may await the WebView) before the tool takes the DB lock.
+            let query_vector = search_ops::prepare_query_vector(arguments, db).await;
+            Some(search_ops::execute_search_notes(arguments, db, query_vector))
+        }
         "list_notes" => Some(search_ops::execute_list_notes(arguments, db)),
         "find_similar_notes" => Some(search_ops::execute_find_similar_notes(arguments, db)),
         "search_by_tag" => Some(search_ops::execute_search_by_tag(arguments, db)),

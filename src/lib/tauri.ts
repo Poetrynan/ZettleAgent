@@ -1804,7 +1804,13 @@ export interface AgentRunSummary {
 export interface UndoReport {
   run_id: string;
   restored: number;
+  /** Every entry not rolled back, conflicts included. */
   failed: string[];
+  /**
+   * Entries skipped on purpose because undoing them would overwrite a newer change
+   * (file edited after the Agent wrote it, or its path reused). Files untouched.
+   */
+  conflicts?: string[];
   /** Files moved into the recycle bin (undo of a `create`). */
   trashed: string[];
   skipped_already_undone: number;

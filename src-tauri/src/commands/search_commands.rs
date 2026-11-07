@@ -203,6 +203,23 @@ pub fn sync_embedding_model(
     Ok(crate::db::embedding_cache::sync_model_key(&mut conn, &model_key, adopt_if_unset)?)
 }
 
+/// The WebView's answer to a `zettel://embed-query` request (see
+/// `db::query_embedding`). Exactly one of `embedding` / `error` is expected;
+/// returns whether a search was still waiting for it.
+#[tauri::command]
+pub fn resolve_query_embedding(
+    id: u64,
+    embedding: Option<Vec<f32>>,
+    error: Option<String>,
+) -> bool {
+    let reply = match (embedding, error) {
+        (Some(v), _) => Ok(v),
+        (None, Some(e)) => Err(e),
+        (None, None) => Err("empty reply".to_string()),
+    };
+    crate::db::query_embedding::resolve(id, reply)
+}
+
 #[tauri::command]
 pub fn get_embedding_stats(state: State<'_, AppState>) -> Result<EmbeddingStats, ZettelError> {
     state.read(|conn| {

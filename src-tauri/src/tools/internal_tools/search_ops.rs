@@ -20,9 +20,50 @@ fn escape_like_pattern(s: &str) -> String {
     result
 }
 
+/// The query vector `search_notes` will use, decided *before* the DB lock is taken
+/// (computing it may await the WebView).
+pub(super) enum QueryVector {
+    /// A real embedding of the query text, from the same model as the index.
+    Ready(Vec<f32>),
+    /// Semantic search was wanted but no query embedding could be produced.
+    Unavailable(String),
+    /// Regex mode, or there is no vector index to search.
+    NotNeeded,
+}
+
+/// Work out the query vector for a `search_notes` call. Asks the WebView only
+/// when a vector index exists and the call is not a regex lookup.
+pub(super) async fn prepare_query_vector(
+    arguments: &str,
+    db: &Arc<Mutex<Connection>>,
+) -> QueryVector {
+    let Ok(args) = serde_json::from_str::<serde_json::Value>(arguments) else {
+        return QueryVector::NotNeeded; // execute_search_notes reports the bad args
+    };
+    let Some(query) = args["query"].as_str() else {
+        return QueryVector::NotNeeded;
+    };
+    if args["regex"].as_bool().unwrap_or(false) || query.trim().is_empty() {
+        return QueryVector::NotNeeded;
+    }
+    let has_index = db
+        .lock()
+        .ok()
+        .and_then(|c| c.query_row("SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1", [], |r| r.get(0)).ok())
+        .unwrap_or(false);
+    if !has_index {
+        return QueryVector::NotNeeded;
+    }
+    match crate::db::query_embedding::embed_query(query).await {
+        Ok(v) => QueryVector::Ready(v),
+        Err(reason) => QueryVector::Unavailable(reason),
+    }
+}
+
 pub(super) fn execute_search_notes(
     arguments: &str,
     db: &Arc<Mutex<Connection>>,
+    query_vector: QueryVector,
 ) -> anyhow::Result<String> {
     let args: serde_json::Value = serde_json::from_str(arguments)?;
     let query = args["query"]
@@ -33,6 +74,12 @@ pub(super) fn execute_search_notes(
     let use_regex = args["regex"].as_bool().unwrap_or(false);
 
     let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+
+    // What actually happened on this call, reported back verbatim so the model
+    // (and the user) never sees "hybrid" for a search that was really lexical.
+    let mut effective_mode = if use_regex { "regex" } else { "fts5" };
+    let mut query_vector_origin = "none";
+    let mut degradation_reason: Option<String> = None;
 
     let mut results = if use_regex {
         // Regex search: scan chunks table with regex on content
@@ -81,45 +128,52 @@ pub(super) fn execute_search_notes(
             |row| row.get(0),
         ).unwrap_or(false);
 
-        if has_embeddings {
-            // Use FTS top-1 result's embedding as the query vector for hybrid search
-            // (this probe is a seed lookup, not a result set — reranking a 1-row
-            // list is a no-op anyway, so it stays on the plain function).
-            let fts_top = search::full_text_search(&conn, query, 1)?;
-            if let Some(top_result) = fts_top.first() {
-                // Load the chunk's embedding from chunks_vec
-                let emb_result: Result<Vec<u8>, _> = conn.query_row(
-                    "SELECT embedding FROM chunks_vec WHERE id = ?1",
-                    rusqlite::params![top_result.chunk_id],
-                    |row| row.get(0),
-                );
-                if let Ok(emb_bytes) = emb_result {
-                    let query_emb: Vec<f32> = emb_bytes
-                        .chunks_exact(4)
-                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                        .collect();
-                    search::hybrid_search_reranked(
-                        &conn,
-                        query,
-                        &query_emb,
-                        fetch_limit,
-                        &rerank_config,
-                        None,
-                    )?
-                } else {
-                    search::full_text_search_reranked(
-                        &conn,
-                        query,
-                        fetch_limit,
-                        &rerank_config,
-                        None,
-                    )?
+        match (has_embeddings, query_vector) {
+            // The real thing: the query's own embedding, same model as the index.
+            (true, QueryVector::Ready(query_emb)) => {
+                effective_mode = "hybrid";
+                query_vector_origin = "query_embedding";
+                search::hybrid_search_reranked(&conn, query, &query_emb, fetch_limit, &rerank_config, None)?
+            }
+            // No query embedding available (no window, timeout, model error...).
+            // Fall back to seeding the vector side with the top full-text hit, and
+            // say so: this is lexical search plus nearest-neighbour expansion, and
+            // it finds nothing for a query without a lexical match.
+            (true, QueryVector::Unavailable(reason)) => {
+                degradation_reason = Some(reason);
+                let fts_top = search::full_text_search(&conn, query, 1)?;
+                let seed: Option<Vec<f32>> = fts_top.first().and_then(|top| {
+                    conn.query_row(
+                        "SELECT embedding FROM chunks_vec WHERE id = ?1",
+                        rusqlite::params![top.chunk_id],
+                        |row| row.get::<_, Vec<u8>>(0),
+                    )
+                    .ok()
+                    .map(|bytes| {
+                        bytes
+                            .chunks_exact(4)
+                            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                            .collect()
+                    })
+                });
+                match seed {
+                    Some(seed_emb) => {
+                        effective_mode = "hybrid_fts_seed";
+                        query_vector_origin = "fts_top_hit";
+                        search::hybrid_search_reranked(&conn, query, &seed_emb, fetch_limit, &rerank_config, None)?
+                    }
+                    None => search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?,
                 }
-            } else {
+            }
+            (true, QueryVector::NotNeeded) => {
+                // Index appeared between prepare and execute; nothing to embed with.
+                degradation_reason = Some("query_vector_not_prepared".to_string());
                 search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?
             }
-        } else {
-            search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?
+            (false, _) => {
+                degradation_reason = Some("no_vector_index".to_string());
+                search::full_text_search_reranked(&conn, query, fetch_limit, &rerank_config, None)?
+            }
         }
     };
 
@@ -232,21 +286,21 @@ pub(super) fn execute_search_notes(
 
     // Structured envelope: _summary helps LLM quickly understand results
     let unique_files: std::collections::HashSet<&str> = results.iter().map(|r| r.file_path.as_str()).collect();
-    let has_vec: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(false);
-    let search_mode = if use_regex { "regex" } else if has_vec { "hybrid" } else { "fts5" };
+    // `search_mode` is what this call actually did, not "an index exists".
+    let search_mode = effective_mode;
 
     let mut response = json!({
         "_summary": format!("Found {} results across {} notes (mode: {})", output.len(), unique_files.len(), search_mode),
         "total_results": output.len(),
         "unique_files": unique_files.len(),
         "search_mode": search_mode,
+        "query_vector_origin": query_vector_origin,
         "query": query,
         "results": output
     });
+    if let Some(reason) = &degradation_reason {
+        response["degradation_reason"] = json!(reason);
+    }
 
     // Add graph context if available
     if !graph_context.is_empty() {
@@ -255,6 +309,10 @@ pub(super) fn execute_search_notes(
             "Found {} results across {} notes (mode: {}). {} related notes from knowledge graph.",
             output.len(), unique_files.len(), search_mode, graph_context.len()
         ));
+    }
+    if let Some(reason) = &degradation_reason {
+        let summary = response["_summary"].as_str().unwrap_or_default().to_string();
+        response["_summary"] = json!(format!("{summary} Semantic search unavailable ({reason})."));
     }
 
     Ok(serde_json::to_string_pretty(&response)?)
@@ -491,7 +549,7 @@ mod rerank_wiring_tests {
         rerank::store_config(RerankConfig::lexical());
         let db = db();
         let out =
-            execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db).unwrap();
+            execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db, QueryVector::NotNeeded).unwrap();
         let paths = hit_paths(&out);
         assert!(!paths.is_empty(), "fixture should produce hits: {}", out);
         assert_eq!(paths[0], "b.md", "expected the reranked winner first: {:?}", paths);
@@ -505,7 +563,7 @@ mod rerank_wiring_tests {
         let db = db();
 
         rerank::store_config(RerankConfig { mode: RerankMode::Off, ..Default::default() });
-        let off = hit_paths(&execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db).unwrap());
+        let off = hit_paths(&execute_search_notes(r#"{"query":"knowledge graph","limit":5}"#, &db, QueryVector::NotNeeded).unwrap());
 
         // Same query straight through the plain function, for reference.
         let plain: Vec<String> = {
@@ -527,8 +585,110 @@ mod rerank_wiring_tests {
         let _g = rerank::config_guard();
         rerank::store_config(RerankConfig::lexical());
         let db = db();
-        let out = execute_search_notes(r#"{"query":"知识图谱是什么","limit":5}"#, &db).unwrap();
+        let out = execute_search_notes(r#"{"query":"知识图谱是什么","limit":5}"#, &db, QueryVector::NotNeeded).unwrap();
         let _ = hit_paths(&out);
+    }
+}
+
+/// `search_notes` must use the query's own vector when it has one, and must say
+/// plainly what it did when it does not.
+#[cfg(test)]
+mod query_vector_tests {
+    use super::*;
+    use crate::db::embedding_cache::{vec_to_blob, EMBEDDING_DIM};
+
+    /// Two notes: `lexical.md` shares the query's words, `semantic.md` shares none
+    /// of them but has the vector we will pass as the query embedding.
+    fn db_with_vectors() -> Arc<Mutex<Connection>> {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        for (i, (path, content)) in [("lexical.md", "向量检索的基本原理"), ("semantic.md", "用嵌入相似度查找相近文档")]
+            .iter()
+            .enumerate()
+        {
+            conn.execute("INSERT INTO files (path, hash) VALUES (?1, 'h')", rusqlite::params![path]).unwrap();
+            conn.execute(
+                "INSERT INTO chunks (file_path, chunk_index, content) VALUES (?1, 0, ?2)",
+                rusqlite::params![path, content],
+            )
+            .unwrap();
+            let mut v = vec![0.0f32; EMBEDDING_DIM];
+            v[i] = 1.0; // orthogonal unit vectors
+            let id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO chunks_vec (id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![id, vec_to_blob(&v)],
+            )
+            .unwrap();
+        }
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn parse(out: &str) -> serde_json::Value {
+        serde_json::from_str(out).unwrap()
+    }
+
+    #[test]
+    fn real_query_vector_finds_a_note_with_no_lexical_overlap() {
+        let db = db_with_vectors();
+        let mut q = vec![0.0f32; EMBEDDING_DIM];
+        q[1] = 1.0; // points at semantic.md
+        let v = parse(&execute_search_notes(r#"{"query":"毫不相干的词","limit":5}"#, &db, QueryVector::Ready(q)).unwrap());
+        assert_eq!(v["search_mode"], "hybrid");
+        assert_eq!(v["query_vector_origin"], "query_embedding");
+        assert!(v.get("degradation_reason").is_none());
+        let paths: Vec<&str> = v["results"].as_array().unwrap().iter().map(|r| r["file_path"].as_str().unwrap()).collect();
+        assert!(paths.contains(&"semantic.md"), "semantic hit expected: {paths:?}");
+    }
+
+    #[test]
+    fn unavailable_embedding_is_reported_not_disguised() {
+        let db = db_with_vectors();
+        let v = parse(
+            &execute_search_notes(r#"{"query":"向量检索","limit":5}"#, &db, QueryVector::Unavailable("no_window".into())).unwrap(),
+        );
+        assert_eq!(v["search_mode"], "hybrid_fts_seed");
+        assert_eq!(v["query_vector_origin"], "fts_top_hit");
+        assert_eq!(v["degradation_reason"], "no_window");
+        assert!(v["_summary"].as_str().unwrap().contains("no_window"));
+    }
+
+    #[test]
+    fn no_lexical_hit_and_no_embedding_is_plain_fts_and_says_why() {
+        let db = db_with_vectors();
+        let v = parse(
+            &execute_search_notes(r#"{"query":"毫不相干的词","limit":5}"#, &db, QueryVector::Unavailable("timeout".into())).unwrap(),
+        );
+        assert_eq!(v["search_mode"], "fts5");
+        assert_eq!(v["query_vector_origin"], "none");
+        assert_eq!(v["degradation_reason"], "timeout");
+    }
+
+    #[test]
+    fn without_an_index_mode_is_fts5_not_hybrid() {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        let db = Arc::new(Mutex::new(conn));
+        let v = parse(&execute_search_notes(r#"{"query":"x","limit":5}"#, &db, QueryVector::NotNeeded).unwrap());
+        assert_eq!(v["search_mode"], "fts5");
+        assert_eq!(v["degradation_reason"], "no_vector_index");
+    }
+
+    #[tokio::test]
+    async fn prepare_skips_the_bridge_when_there_is_no_index_or_regex() {
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        let empty = Arc::new(Mutex::new(conn));
+        assert!(matches!(prepare_query_vector(r#"{"query":"x"}"#, &empty).await, QueryVector::NotNeeded));
+
+        let indexed = db_with_vectors();
+        assert!(matches!(
+            prepare_query_vector(r#"{"query":"x","regex":true}"#, &indexed).await,
+            QueryVector::NotNeeded
+        ));
     }
 }
 
