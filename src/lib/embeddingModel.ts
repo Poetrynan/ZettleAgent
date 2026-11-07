@@ -12,6 +12,9 @@
  */
 export const LOCAL_EMBED_MODEL_ID = 'jinaai/jina-embeddings-v2-base-zh';
 
+/** Vector size of the index (`chunks_vec` / `files_vec`, `EMBEDDING_DIM` in Rust). */
+export const EMBEDDING_DIM = 768;
+
 /** transformers.js dtype; `q8` loads `onnx/model_quantized.onnx` (~154 MB). */
 export const LOCAL_EMBED_DTYPE = 'q8' as const;
 

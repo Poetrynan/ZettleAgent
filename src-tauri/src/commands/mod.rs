@@ -191,9 +191,17 @@ pub struct RunSchedulerNowRequest {
 // EmbeddingStats remains used for progress UI
 #[derive(Serialize)]
 pub struct EmbeddingStats {
+    /// Chunks that should have a vector (all chunks minus ignored ones).
     pub total_chunks: usize,
     pub indexed_chunks: usize,
     pub has_index: bool,
+    /// Never embedded on purpose (`.zettelignore`, no text); not in `total_chunks`.
+    pub ignored_chunks: usize,
+    /// Texts waiting out a failure backoff.
+    pub retrying_chunks: usize,
+    /// Texts skipped after repeated failures, until a manual retry.
+    pub failed_chunks: usize,
+    pub last_error: Option<String>,
 }
 
 #[derive(Deserialize)]

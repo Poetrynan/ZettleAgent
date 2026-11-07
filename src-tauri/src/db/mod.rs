@@ -8,6 +8,7 @@ pub mod schema;
 pub mod sync;
 pub mod search;
 pub mod embedding_cache;
+pub mod embedding_health;
 pub mod rerank;
 pub mod memory_store;
 pub mod review_store;

@@ -89,26 +89,50 @@ pub fn get_unindexed_chunks(
     state: State<'_, AppState>,
     limit: usize,
 ) -> Result<Vec<(i64, String)>, ZettelError> {
-    let mut conn = state.db.lock()?;
-
-    // ── Embedding Cache: backfill from cache first ──────────────────
-    // Unchanged chunks that went through a sync_file DELETE+INSERT cycle
-    // can be satisfied from the content-hash cache without any model call.
-    let bf = crate::db::embedding_cache::backfill_null_embeddings(&mut conn, limit)
-        .unwrap_or_default();
-    if bf.filled > 0 {
-        pipeline_log::log_embedding_info(&format!(
-            "embedding_cache: backfilled {}/{} chunks from cache",
-            bf.filled, bf.scanned
-        ));
-    }
-
-    // Return whatever is still NULL (true cache misses).
-    let mut stmt = conn.prepare("SELECT id, content FROM chunks WHERE embedding IS NULL LIMIT ?1")?;
-    let rows = stmt.query_map([limit], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
-    let chunks = rows.collect::<Result<Vec<_>, _>>()?;
-    pipeline_log::log_embedding_info(&format!("get_unindexed_chunks: requested={}, returned={} (after cache backfill)", limit, chunks.len()));
+    let conn = state.db.lock()?;
+    // Cache hits are filled on the way, ignored chunks and chunks in a failure
+    // backoff are skipped: see `db::embedding_health`. One transaction, so the
+    // cache fills of a page are a single write.
+    let tx = conn.unchecked_transaction()?;
+    let chunks = crate::db::embedding_health::pending_chunks(&tx, limit, crate::db::embedding_health::now_ms())?;
+    tx.commit()?;
+    pipeline_log::log_embedding_info(&format!("get_unindexed_chunks: requested={}, returned={}", limit, chunks.len()));
     Ok(chunks)
+}
+
+/// Start of an index build: re-evaluate `.zettelignore` (notes newly ignored
+/// lose their vectors, notes no longer ignored become pending again).
+#[tauri::command]
+pub fn prepare_embedding_build(
+    state: State<'_, AppState>,
+) -> Result<crate::db::embedding_health::IgnoreSummary, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(crate::db::embedding_health::apply_ignore_rules(&conn)?)
+}
+
+/// The build could not embed these chunks. Each is retried after a growing
+/// delay, and skipped for good after `MAX_FAILURES` failures in a row.
+#[tauri::command]
+pub fn record_embedding_failures(
+    state: State<'_, AppState>,
+    chunk_ids: Vec<i64>,
+    error: String,
+) -> Result<Vec<crate::db::embedding_health::FailureOutcome>, ZettelError> {
+    let conn = state.db.lock()?;
+    pipeline_log::log_embedding_error(&format!("embedding failed for {} chunk(s): {}", chunk_ids.len(), error));
+    Ok(crate::db::embedding_health::record_failures(
+        &conn,
+        &chunk_ids,
+        &error,
+        crate::db::embedding_health::now_ms(),
+    )?)
+}
+
+/// Forget all embedding failures so the next build tries those chunks again.
+#[tauri::command]
+pub fn retry_failed_embeddings(state: State<'_, AppState>) -> Result<usize, ZettelError> {
+    let conn = state.db.lock()?;
+    Ok(crate::db::embedding_health::clear_all_failures(&conn)?)
 }
 
 #[tauri::command]
@@ -140,6 +164,8 @@ pub fn save_chunk_embeddings(
     };
 
     let tx = conn.transaction().map_err(|e| ZettelError::System(format!("Failed to start transaction: {}", e)))?;
+    // These texts embedded fine now; any earlier failure for them is moot.
+    crate::db::embedding_health::clear_failures_for_texts(&tx, id_to_text.values().map(|s| s.as_str()))?;
     {
         let mut update_chunk_stmt = tx.prepare("UPDATE chunks SET embedding = ?1 WHERE id = ?2")?;
         let mut insert_vec_stmt = tx.prepare("INSERT OR REPLACE INTO chunks_vec (id, embedding) VALUES (?1, ?2)")?;
@@ -223,13 +249,21 @@ pub fn resolve_query_embedding(
 #[tauri::command]
 pub fn get_embedding_stats(state: State<'_, AppState>) -> Result<EmbeddingStats, ZettelError> {
     state.read(|conn| {
-        let total_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
+        let all_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
         let indexed_chunks: usize = conn.query_row("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL", [], |row| row.get(0))?;
+        let health = crate::db::embedding_health::counts(conn)?;
+        // `total_chunks` is what *should* get a vector: ignored chunks never
+        // carry one, so every "indexed == total" check in the UI means "done".
+        let total_chunks = all_chunks.saturating_sub(health.ignored_chunks);
 
         Ok(EmbeddingStats {
             total_chunks,
             indexed_chunks,
             has_index: indexed_chunks > 0,
+            ignored_chunks: health.ignored_chunks,
+            retrying_chunks: health.retrying,
+            failed_chunks: health.failed,
+            last_error: health.last_error,
         })
     })
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getUnindexedChunks, saveChunkEmbeddings, finalizeEmbeddingIndex, getKnowledgeGraph, fetchCustomEmbeddings, syncEmbeddingModel } from '../../lib/tauri';
-import { getEmbeddingsBatch } from '../../lib/embeddings';
+import { listMarkdownFiles, syncVault, getSchedulerStatus, stopScheduler, runSchedulerNow, SchedulerStatus, getEmbeddingStats, EmbeddingStats, getKnowledgeGraph } from '../../lib/tauri';
+import { runEmbeddingBuild as buildEmbeddingIndex, buildStageText, describeBuild, EmbedConfig } from '../../lib/embeddingIndexer';
 import { getSmartOrganizeConfig, setBackgroundOrganizeEnabled } from '../settings/Settings';
 import { isLlmConfigured, startBackgroundOrganize } from '../../lib/backgroundOrganize';
 import { t } from '../../lib/i18n';
@@ -39,102 +39,26 @@ export function Dashboard() {
     cancelRef.current = false;
     
     try {
-      let totalProcessed = 0;
-      let hasMore = true;
-      const batchSize = 16;
-
-      // 加载配置
-      let embedConfig = { mode: 'local', apiUrl: '', model: '', dimensions: 1536 };
+      const zh = state.lang === 'zh';
+      let embedConfig: EmbedConfig = { mode: 'local' };
       try {
         const raw = localStorage.getItem('zettelagent:embedding_config');
         if (raw) embedConfig = JSON.parse(raw);
       } catch {}
 
-      // Never mix vectors from two models: if the config now points at a
-      // different model than the stored vectors came from, the backend clears
-      // them first and this build re-embeds everything.
-      await syncEmbeddingModel(embedConfig);
-
       // No API key is read here on purpose: it lives in the OS credential store
-      // and only Rust can read it. `fetchCustomEmbeddings` attaches the
-      // Authorization header backend-side (see src-tauri/.../search_commands.rs).
+      // and only Rust can read it (custom mode goes through `fetchCustomEmbeddings`).
+      const report = await buildEmbeddingIndex({
+        config: embedConfig,
+        isCancelled: () => cancelRef.current,
+        onStage: (s) => setBuildStage(buildStageText(s, zh)),
+        onProgress: async () => setEmbeddingStats(await getEmbeddingStats()),
+      });
 
-      // Yield to the event loop so the UI stays responsive
-      const yieldToUI = () => new Promise<void>(r => setTimeout(r, 50));
-
-      while (hasMore) {
-        if (cancelRef.current) {
-          showToast(
-            state.lang === 'zh' ? '构建任务已被用户中止' : 'Build task was cancelled by user',
-            'info'
-          );
-          break;
-        }
-
-        // 1. 获取未索引的分块
-        setBuildStage(state.lang === 'zh' ? '正在读取未索引的笔记分块...' : 'Reading unindexed note chunks...');
-        const chunks = await getUnindexedChunks(batchSize);
-        if (chunks.length === 0) {
-          hasMore = false;
-          break;
-        }
-
-        const contents = chunks.map(([_, content]) => content);
-        let embeddings: number[][];
-
-        if (embedConfig.mode === 'local') {
-          setBuildStage(state.lang === 'zh' 
-            ? `正在通过本地线程计算向量 (本组分块: ${contents.length})...`
-            : `Computing vectors in background thread (batch chunks: ${contents.length})...`
-          );
-          embeddings = await getEmbeddingsBatch(contents, 'document');
-        } else {
-          setBuildStage(state.lang === 'zh' 
-            ? `正在通过 API 请求计算向量 (本组分块: ${contents.length})...`
-            : `Requesting vectors via API (batch chunks: ${contents.length})...`
-          );
-          if (!embedConfig.apiUrl || !embedConfig.model) {
-            throw new Error(state.lang === 'zh' ? 'Embedding API 配置不完整' : 'Incomplete Embedding API configuration');
-          }
-          // Rust performs the call and owns the credential. Its error strings are
-          // already bilingual and actionable (a 401 says "re-enter your API Key"),
-          // so they are surfaced to the user verbatim by the catch below.
-          embeddings = await fetchCustomEmbeddings(embedConfig.apiUrl, embedConfig.model, contents);
-        }
-
-        if (cancelRef.current) {
-          showToast(
-            state.lang === 'zh' ? '构建任务已被用户中止' : 'Build task was cancelled by user',
-            'info'
-          );
-          break;
-        }
-
-        // 3. 保存到 Rust SQLite
-        setBuildStage(state.lang === 'zh' ? '正在将生成的向量存入本地数据库...' : 'Saving generated vectors to local database...');
-        const payload: [number, number[]][] = chunks.map(([id, _], index) => [id, embeddings[index]]);
-        await saveChunkEmbeddings(payload);
-
-        totalProcessed += chunks.length;
-
-        // 更新 Dashboard 的 Embedding Stats
-        const newStats = await getEmbeddingStats();
-        setEmbeddingStats(newStats);
-
-        // Yield to let UI process events (scroll, click, paint)
-        await yieldToUI();
-      }
-
-      if (!cancelRef.current) {
-        setBuildStage(state.lang === 'zh' ? '正在重建语义图关系与索引缓存...' : 'Rebuilding semantic graph relationships and index cache...');
-        await finalizeEmbeddingIndex();
-
-        showToast(
-          state.lang === 'zh'
-            ? `已成功索引 ${totalProcessed} 个分块`
-            : `Successfully indexed ${totalProcessed} chunks`,
-          'success'
-        );
+      if (report.cancelled) {
+        showToast(zh ? '构建任务已被用户中止' : 'Build task was cancelled by user', 'info');
+      } else {
+        showToast(describeBuild(report, zh), report.failed > 0 ? 'info' : 'success');
       }
 
       const finalStats = await getEmbeddingStats();

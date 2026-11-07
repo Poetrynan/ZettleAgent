@@ -1,16 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { IconChevronRight, IconDatabase, IconBrain, IconPlug, IconSync, IconWarning } from '../icons';
 import { sectionTitle, rowBetween, rowLabel } from './settingsStyles';
-import {
-  getUnindexedChunks,
-  saveChunkEmbeddings,
-  finalizeEmbeddingIndex,
-  getEmbeddingStats,
-  fetchCustomEmbeddings,
-  syncEmbeddingModel,
-} from '../../lib/tauri';
+import { getEmbeddingStats, retryFailedEmbeddings, EmbeddingStats } from '../../lib/tauri';
 import { LOCAL_EMBED_MODEL_ID } from '../../lib/embeddingModel';
-import { getEmbeddingsBatch } from '../../lib/embeddings';
+import { runEmbeddingBuild, buildStageText, describeBuild } from '../../lib/embeddingIndexer';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { detectHardware, recommendConfig, getGpuSummary, type HardwareProfile, type RecommendedConfig } from '../../lib/hardwareDetect';
 
@@ -44,7 +37,7 @@ export function getEmbeddingConfig(): EmbeddingConfig {
 export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
   const [building, setBuilding] = useState(false);
   const [buildResult, setBuildResult] = useState<string | null>(null);
-  const [stats, setStats] = useState<{ total_chunks: number; indexed_chunks: number; has_index: boolean } | null>(null);
+  const [stats, setStats] = useState<EmbeddingStats | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [buildStage, setBuildStage] = useState<string>('');
   const cancelRef = useRef<boolean>(false);
@@ -111,87 +104,25 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
     cancelRef.current = false;
 
     try {
-      let totalProcessed = 0;
-      let hasMore = true;
-      const batchSize = 16;
-
-      // Vectors from a different model than this build will use are discarded
-      // first, so the index never mixes two vector spaces.
-      await syncEmbeddingModel({ mode, apiUrl: customApiUrl, model: customModel });
-
-      while (hasMore) {
-        if (cancelRef.current) {
-          setBuildResult(isZh ? '构建任务已被用户中止' : 'Build task was cancelled by user');
-          break;
-        }
-
-        // 1. 获取未索引的分块
-        setBuildStage(isZh ? '正在读取未索引的笔记分块...' : 'Reading unindexed note chunks...');
-        const chunks = await getUnindexedChunks(batchSize);
-        if (chunks.length === 0) {
-          hasMore = false;
-          break;
-        }
-
-        // 2. 生成嵌入向量
-        const contents = chunks.map(([_, content]) => content);
-        let embeddings: number[][];
-
-        if (mode === 'local') {
-          setBuildStage(isZh 
-            ? `正在通过本地线程计算向量 (本组分块: ${contents.length})...`
-            : `Computing vectors in background thread (batch chunks: ${contents.length})...`
-          );
-          embeddings = await getEmbeddingsBatch(contents, 'document');
-        } else {
-          setBuildStage(isZh 
-            ? `正在通过 API 请求计算向量 (本组分块: ${contents.length})...`
-            : `Requesting vectors via API (batch chunks: ${contents.length})...`
-          );
-          // 自定义 API 模式
-          if (!customApiUrl) {
-            throw new Error(isZh ? 'API Endpoint 不能为空' : 'API Endpoint cannot be empty');
-          }
-          if (!customModel) {
-            throw new Error(isZh ? '模型名称不能为空' : 'Model name cannot be empty');
-          }
-          // The request is issued by Rust, not here: the API key lives in the OS
-          // credential store and has no getter, so the `apiKey` prop is empty
-          // after migration and a WebView fetch would send a blank bearer and
-          // 401. Backend errors arrive already bilingual and actionable.
-          embeddings = await fetchCustomEmbeddings(customApiUrl, customModel, contents);
-        }
-
-        if (cancelRef.current) {
-          setBuildResult(isZh ? '构建任务已被用户中止' : 'Build task was cancelled by user');
-          break;
-        }
-
-        // 3. 保存到 Rust SQLite
-        setBuildStage(isZh ? '正在将生成的向量存入本地数据库...' : 'Saving generated vectors to local database...');
-        const payload: [number, number[]][] = chunks.map(([id, _], index) => [id, embeddings[index]]);
-        await saveChunkEmbeddings(payload);
-
-        totalProcessed += chunks.length;
-
-        // 实时更新进度条
-        const currentStats = await getEmbeddingStats();
-        setStats(currentStats);
-
-        // 让出主线程事件循环，防止浏览器卡死
-        await new Promise(resolve => setTimeout(resolve, 50));
+      if (mode === 'custom' && !customApiUrl) {
+        throw new Error(isZh ? 'API Endpoint 不能为空' : 'API Endpoint cannot be empty');
       }
-
-      if (!cancelRef.current) {
-        // 4. 重建边和索引缓存
-        setBuildStage(isZh ? '正在重建语义图关系与索引缓存...' : 'Rebuilding semantic graph relationships and index cache...');
-        await finalizeEmbeddingIndex();
-
-        setBuildResult(isZh
-          ? `已成功索引 ${totalProcessed} 个分块`
-          : `Successfully indexed ${totalProcessed} chunks`
-        );
+      if (mode === 'custom' && !customModel) {
+        throw new Error(isZh ? '模型名称不能为空' : 'Model name cannot be empty');
       }
+      // Custom requests are issued by Rust: the API key lives in the OS
+      // credential store and has no getter (see `fetchCustomEmbeddings`).
+      const report = await runEmbeddingBuild({
+        config: { mode, apiUrl: customApiUrl, model: customModel },
+        isCancelled: () => cancelRef.current,
+        onStage: (s) => setBuildStage(buildStageText(s, isZh)),
+        onProgress: async () => setStats(await getEmbeddingStats()),
+      });
+      setBuildResult(
+        report.cancelled
+          ? (isZh ? '构建任务已被用户中止' : 'Build task was cancelled by user')
+          : describeBuild(report, isZh),
+      );
 
       const finalStats = await getEmbeddingStats();
       setStats(finalStats);
@@ -199,6 +130,17 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
       setBuildResult(isZh ? `构建失败: ${e.message || e}` : `Build failed: ${e.message || e}`);
     }
     setBuilding(false);
+  };
+
+  /** Clear remembered failures, then build so those chunks are tried right away. */
+  const handleRetryFailed = async () => {
+    try {
+      await retryFailedEmbeddings();
+      setStats(await getEmbeddingStats());
+      await handleBuildIndex();
+    } catch (e: any) {
+      setBuildResult(isZh ? `构建失败: ${e.message || e}` : `Build failed: ${e.message || e}`);
+    }
   };
 
   const handleModeChange = useCallback((newMode: EmbeddingMode) => {
@@ -578,6 +520,31 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <IconWarning size={14} />
                   {isZh ? '索引尚未构建，请点击下方按钮生成' : 'Index not built yet. Click the button below to generate.'}
+                </div>
+              )}
+              {((stats.failed_chunks ?? 0) > 0 || (stats.retrying_chunks ?? 0) > 0) && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <IconWarning size={14} />
+                  <span>
+                    {isZh
+                      ? `${stats.retrying_chunks ?? 0} 个分块等待重试，${stats.failed_chunks ?? 0} 个多次失败已跳过`
+                      : `${stats.retrying_chunks ?? 0} chunks waiting to retry, ${stats.failed_chunks ?? 0} skipped after repeated failures`}
+                  </span>
+                  <button className="btn btn-sm btn-secondary" disabled={building} onClick={handleRetryFailed}>
+                    {isZh ? '立即重试' : 'Retry now'}
+                  </button>
+                  {stats.last_error && (
+                    <span style={{ width: '100%', color: 'var(--text-tertiary)' }} title={stats.last_error}>
+                      {(isZh ? '最近错误：' : 'Last error: ') + stats.last_error.slice(0, 160)}
+                    </span>
+                  )}
+                </div>
+              )}
+              {(stats.ignored_chunks ?? 0) > 0 && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                  {isZh
+                    ? `${stats.ignored_chunks} 个分块不建索引（.zettelignore 或无文字内容）`
+                    : `${stats.ignored_chunks} chunks not indexed (.zettelignore or no text)`}
                 </div>
               )}
             </div>

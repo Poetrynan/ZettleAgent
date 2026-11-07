@@ -82,6 +82,8 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
     )?;
 
     setup_segmented_fts(conn)?;
+    // Its trigger hangs off `chunks`, so it is re-created wherever `chunks` is.
+    crate::db::embedding_health::setup(conn)?;
 
     // Create vector table using vec0 virtual table
     // 768 dimensions matches the bundled jina-embeddings-v2-base-zh model
@@ -757,6 +759,8 @@ pub fn migrate_add_update_cascade(conn: &Connection) -> Result<()> {
     // Dropping `chunks` also dropped the segmented-FTS triggers. Row ids were copied
     // verbatim, so the existing index stays valid; only the triggers need restoring.
     setup_segmented_fts(conn)?;
+    // Its trigger hangs off `chunks`, so it is re-created wherever `chunks` is.
+    crate::db::embedding_health::setup(conn)?;
 
     // ── card_meta ──
     conn.execute_batch("

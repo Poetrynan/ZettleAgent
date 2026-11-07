@@ -41,9 +41,17 @@ export interface SearchResult {
 export type SearchMode = 'fts' | 'hybrid' | 'vector';
 
 export interface EmbeddingStats {
+  /** Chunks that should have a vector (ignored ones are not counted). */
   total_chunks: number;
   indexed_chunks: number;
   has_index: boolean;
+  /** Never embedded on purpose: `.zettelignore` or no text. */
+  ignored_chunks?: number;
+  /** Waiting out a failure backoff; retried by a later build. */
+  retrying_chunks?: number;
+  /** Skipped after repeated failures until `retryFailedEmbeddings`. */
+  failed_chunks?: number;
+  last_error?: string | null;
 }
 
 export interface SearchQuery {
@@ -995,6 +1003,33 @@ export async function getUnindexedChunks(limit: number): Promise<[number, string
 
 export async function saveChunkEmbeddings(embeddings: [number, number[]][]): Promise<void> {
   return invoke('save_chunk_embeddings', { embeddings });
+}
+
+export interface EmbeddingIgnoreSummary {
+  ignoredFiles: number;
+  ignoredChunks: number;
+  removedVectors: number;
+}
+
+/** Start of a build: re-applies `.zettelignore` rules. */
+export async function prepareEmbeddingBuild(): Promise<EmbeddingIgnoreSummary> {
+  return invoke('prepare_embedding_build');
+}
+
+export interface EmbeddingFailureOutcome {
+  chunkId: number;
+  failCount: number;
+  /** Not tried again until `retryFailedEmbeddings`. */
+  permanent: boolean;
+}
+
+export async function recordEmbeddingFailures(chunkIds: number[], error: string): Promise<EmbeddingFailureOutcome[]> {
+  return invoke('record_embedding_failures', { chunkIds, error });
+}
+
+/** Forget remembered failures; returns how many were cleared. */
+export async function retryFailedEmbeddings(): Promise<number> {
+  return invoke('retry_failed_embeddings');
 }
 
 export async function finalizeEmbeddingIndex(): Promise<void> {

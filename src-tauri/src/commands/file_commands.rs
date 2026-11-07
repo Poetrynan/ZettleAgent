@@ -525,6 +525,9 @@ pub fn clear_data(state: State<'_, AppState>) -> Result<(), ZettelError> {
         // Must go with `chunks`: chunk ids restart at 1 after the drop, and stale
         // rowids left here would collide with the new inserts.
         "DROP TABLE IF EXISTS chunks_fts_seg;",
+        // Same reason: `embedding_ignored` is keyed by chunk id.
+        "DROP TABLE IF EXISTS embedding_ignored;",
+        "DROP TABLE IF EXISTS embedding_failures;",
         "DROP TABLE IF EXISTS chunks_vec;",
         "DROP TABLE IF EXISTS files_vec;",
         "DROP TABLE IF EXISTS card_meta;",
@@ -603,6 +606,8 @@ pub fn clear_data_selective(
                 let _ = conn.execute("DROP TABLE IF EXISTS chunks_fts_seg;", []);
                 let _ = conn.execute("DROP TABLE IF EXISTS chunks_vec;", []);
                 let _ = conn.execute("DELETE FROM chunks", []);
+                let _ = conn.execute("DELETE FROM embedding_ignored", []);
+                let _ = conn.execute("DELETE FROM embedding_failures", []);
                 // Re-create FTS/vec tables
                 crate::db::schema::setup_database_schema(&conn)?;
             }

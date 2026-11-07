@@ -75,6 +75,9 @@ pub fn sync_model_key(
     let keep_existing = stored.is_none() && (adopt_if_unset || !has_vectors);
 
     let tx = conn.transaction()?;
+    // Failures are about one model; another model gets a clean slate even when
+    // the vectors are adopted.
+    tx.execute("DELETE FROM embedding_failures", [])?;
     let mut outcome = ModelSyncOutcome::default();
     if !keep_existing {
         outcome.cleared_chunks =
@@ -177,66 +180,6 @@ pub fn get_blob(conn: &Connection, text: &str) -> Option<Vec<u8>> {
     blob
 }
 
-/// Outcome of a backfill pass.
-#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
-pub struct BackfillStats {
-    /// Chunks that had no embedding before the pass.
-    pub scanned: usize,
-    /// Chunks filled from cache (no model inference needed).
-    pub filled: usize,
-}
-
-/// Fill `embedding IS NULL` chunks from the cache.
-///
-/// Called before handing work to the frontend, so the embedding pipeline only
-/// ever sees true cache misses. Returns how many chunks were satisfied locally.
-pub fn backfill_null_embeddings(
-    conn: &mut Connection,
-    limit: usize,
-) -> rusqlite::Result<BackfillStats> {
-    let mut stats = BackfillStats::default();
-
-    // Collect candidates first — we cannot hold a read statement open while
-    // writing to the same table inside a transaction.
-    let candidates: Vec<(i64, String)> = {
-        let mut stmt =
-            conn.prepare("SELECT id, content FROM chunks WHERE embedding IS NULL LIMIT ?1")?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    stats.scanned = candidates.len();
-    if candidates.is_empty() {
-        return Ok(stats);
-    }
-
-    // Resolve hits before opening the write transaction.
-    let mut hits: Vec<(i64, Vec<u8>)> = Vec::new();
-    for (id, content) in &candidates {
-        if let Some(blob) = get_blob(conn, content) {
-            hits.push((*id, blob));
-        }
-    }
-    if hits.is_empty() {
-        return Ok(stats);
-    }
-
-    let tx = conn.transaction()?;
-    {
-        let mut upd = tx.prepare("UPDATE chunks SET embedding = ?1 WHERE id = ?2")?;
-        let mut ins =
-            tx.prepare("INSERT OR REPLACE INTO chunks_vec (id, embedding) VALUES (?1, ?2)")?;
-        for (id, blob) in &hits {
-            upd.execute(params![blob, id])?;
-            ins.execute(params![id, blob])?;
-            stats.filled += 1;
-        }
-    }
-    tx.commit()?;
-
-    Ok(stats)
-}
 
 /// Cache size / effectiveness counters for the settings UI.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
