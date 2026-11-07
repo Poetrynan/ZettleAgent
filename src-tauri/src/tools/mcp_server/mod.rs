@@ -557,6 +557,36 @@ pub fn serve_stdio(db: Arc<Mutex<Connection>>, vault_overrides: Vec<String>) -> 
         EXPOSED_TOOLS.len()
     );
 
+    // No window here, so `search_notes` embeds queries with the bundled model run
+    // natively (or the custom API the index was built with). Loading the model
+    // takes a few seconds: start it now so the first search does not pay it.
+    {
+        let warm = {
+            let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+            let has_vectors: bool = conn
+                .query_row("SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1", [], |r| r.get(0))
+                .unwrap_or(false);
+            has_vectors
+                && crate::db::query_embedding::IndexModel::of_db(&conn)
+                    == crate::db::query_embedding::IndexModel::Local
+        };
+        if warm {
+            std::thread::spawn(|| {
+                if let Err(e) = crate::db::native_embedder::shared() {
+                    log::warn!(
+                        "MCP server: semantic search unavailable ({}); open the ZettelAgent app once so it can \
+                         copy the embedding model to {}, or set {}",
+                        e,
+                        crate::db::native_embedder::extracted_model_dir()
+                            .map(|d| d.display().to_string())
+                            .unwrap_or_default(),
+                        crate::db::native_embedder::MODEL_DIR_ENV
+                    );
+                }
+            });
+        }
+    }
+
     let state = McpServerState::new(db, vault_path, all_vault_paths);
     // One runtime for the whole session; every tool call parks on it briefly.
     let rt = tokio::runtime::Runtime::new()?;

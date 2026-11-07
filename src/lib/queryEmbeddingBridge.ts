@@ -5,8 +5,14 @@
  * run in Rust. Without this bridge they had no query vector and fell back to
  * borrowing the vector of the first full-text hit, which is not semantic
  * search. Rust emits `zettel://embed-query` with `{id, text}`; we embed the text
- * with the same config that built the index (local worker or custom API, both
- * handled by `embedQueryText`) and reply via `resolve_query_embedding`.
+ * with the same config that built the index and reply via
+ * `resolve_query_embedding`.
+ *
+ * Rust asks here only for the bundled local model (this worker is already warm
+ * and matches the stored vectors exactly). A custom API index is queried from
+ * Rust directly, and when this bridge does not answer Rust runs the bundled
+ * model itself (`db/native_embedder.rs`). The custom branch below stays for
+ * callers inside the WebView.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';

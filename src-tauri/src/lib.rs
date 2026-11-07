@@ -29,6 +29,10 @@ mod gpu;
 /// that hands the secret back to the webview — only Rust reads the bytes.
 pub mod secrets;
 
+/// Tauri `identifier` (tauri.conf.json). Code without an app handle (the
+/// stand-alone MCP server) uses it to find the app's data and config folders.
+pub const APP_IDENTIFIER: &str = "com.zettelagent.app";
+
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use tauri::Manager;
@@ -209,6 +213,35 @@ pipeline_log::init(&app_data_dir);
             });
             // Let the approval gate reach `approval_rules` from the agent loop.
             llm::approval::set_active_db(db_arc.clone());
+
+            // Rust-side query embedding (agent search when the WebView cannot
+            // answer) reads the bundled model from the embedded frontend assets.
+            {
+                let handle = app.handle().clone();
+                db::native_embedder::set_asset_loader(Box::new(move |path| {
+                    handle.asset_resolver().get(path.to_string()).map(|a| a.bytes)
+                }));
+            }
+            // The stand-alone `--mcp-server` process has no access to those
+            // assets, so keep a copy of the model on disk for it. Deferred and in
+            // the background: it is a one-time ~160 MB write, skipped when a
+            // complete copy exists or the index was built by a custom API.
+            {
+                let db_for_copy = db_arc.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    let local = db_for_copy
+                        .lock()
+                        .map(|c| db::query_embedding::IndexModel::of_db(&c) == db::query_embedding::IndexModel::Local)
+                        .unwrap_or(false);
+                    if local {
+                        match db::native_embedder::extract_for_headless_use() {
+                            Ok(dir) => log::info!("embedding model available to the MCP server at {}", dir.display()),
+                            Err(e) => log::warn!("could not copy the embedding model for the MCP server: {}", e),
+                        }
+                    }
+                });
+            }
 
 
 

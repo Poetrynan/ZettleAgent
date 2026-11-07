@@ -258,6 +258,22 @@ pub async fn fetch_custom_embeddings(
     // The caller's UI language, so the actionable errors below match the app.
     zh: bool,
 ) -> Result<Vec<Vec<f32>>, String> {
+    request_custom_embeddings(Some(&app), &api_url, &model, &inputs, zh).await
+}
+
+/// The custom-endpoint request itself, shared by the command above and by
+/// Rust-side query embedding (agent tools, the stand-alone MCP server).
+///
+/// `app` is `None` in the MCP process: the key then comes from the credential
+/// store without an app handle, and a small local retry loop stands in for the
+/// app's shared retry policy (which needs the handle for its events).
+pub(crate) async fn request_custom_embeddings(
+    app: Option<&tauri::AppHandle>,
+    api_url: &str,
+    model: &str,
+    inputs: &[String],
+    zh: bool,
+) -> Result<Vec<Vec<f32>>, String> {
     if inputs.is_empty() {
         return Ok(Vec::new());
     }
@@ -266,7 +282,10 @@ pub async fn fetch_custom_embeddings(
     // backend-only accessor; there is deliberately no command handing it to JS.
     // An absent key is not fatal here — some self-hosted endpoints need none, so
     // the request is attempted without the header and the endpoint decides.
-    let api_key = crate::secrets::resolve_api_key(&app);
+    let api_key = match app {
+        Some(app) => crate::secrets::resolve_api_key(app),
+        None => crate::secrets::resolve_api_key_headless(),
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
@@ -277,19 +296,22 @@ pub async fn fetch_custom_embeddings(
         "input": inputs,
         "model": model,
     });
+    let build = || {
+        let mut builder = client.post(api_url).json(&body);
+        if let Some(key) = &api_key {
+            builder = builder.header("Authorization", format!("Bearer {}", key));
+        }
+        builder
+    };
 
     // Reuse the shared retry policy (3 attempts, jittered backoff, Retry-After
     // aware, retries only 408/425/429/5xx + transport errors) and its
     // Ollama-aware connection-refused guidance, rather than opening a second,
     // divergent HTTP path that would drift from the LLM one.
-    let response = crate::llm::send_llm_request_with_retry("Embedding", zh, &app, || {
-        let mut builder = client.post(&api_url).json(&body);
-        if let Some(key) = &api_key {
-            builder = builder.header("Authorization", format!("Bearer {}", key));
-        }
-        builder
-    })
-    .await
+    let response = match app {
+        Some(app) => crate::llm::send_llm_request_with_retry("Embedding", zh, app, build).await,
+        None => send_headless_with_retry(build).await,
+    }
     .map_err(|e| {
         let msg = e.to_string();
         // A rejected credential is the whole reason this command exists: turn the
@@ -339,6 +361,32 @@ pub async fn fetch_custom_embeddings(
     }
     indexed.sort_by_key(|(i, _)| *i);
     Ok(indexed.into_iter().map(|(_, e)| e).collect())
+}
+
+/// Retry loop for callers without an app handle: 3 attempts, retrying only
+/// transport errors and 408/425/429/5xx, with a short linear backoff.
+async fn send_headless_with_retry(
+    build: impl Fn() -> reqwest::RequestBuilder,
+) -> anyhow::Result<reqwest::Response> {
+    let mut last = anyhow::anyhow!("no attempt made");
+    for attempt in 1..=3u64 {
+        match build().send().await {
+            Ok(r) if r.status().is_success() => return Ok(r),
+            Ok(r) => {
+                let status = r.status();
+                let body = r.text().await.unwrap_or_default();
+                last = anyhow::anyhow!("Embedding API error ({}): {}", status, body);
+                if !matches!(status.as_u16(), 408 | 425 | 429 | 500..=599) {
+                    break;
+                }
+            }
+            Err(e) => last = anyhow::anyhow!("Embedding request failed: {}", e),
+        }
+        if attempt < 3 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+        }
+    }
+    Err(last)
 }
 
 // ══════════════════════════════════════════════════════════════════════

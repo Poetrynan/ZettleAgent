@@ -23,16 +23,18 @@ fn escape_like_pattern(s: &str) -> String {
 /// The query vector `search_notes` will use, decided *before* the DB lock is taken
 /// (computing it may await the WebView).
 pub(super) enum QueryVector {
-    /// A real embedding of the query text, from the same model as the index.
-    Ready(Vec<f32>),
+    /// A real embedding of the query text, from the same model as the index,
+    /// and the path that produced it (`webview` | `native_local` | `custom_api`).
+    Ready(Vec<f32>, &'static str),
     /// Semantic search was wanted but no query embedding could be produced.
     Unavailable(String),
     /// Regex mode, or there is no vector index to search.
     NotNeeded,
 }
 
-/// Work out the query vector for a `search_notes` call. Asks the WebView only
-/// when a vector index exists and the call is not a regex lookup.
+/// Work out the query vector for a `search_notes` call, only when a vector
+/// index exists and the call is not a regex lookup. Works without a window too
+/// (stand-alone MCP server): see `db::query_embedding::embed_for_search`.
 pub(super) async fn prepare_query_vector(
     arguments: &str,
     db: &Arc<Mutex<Connection>>,
@@ -46,16 +48,19 @@ pub(super) async fn prepare_query_vector(
     if args["regex"].as_bool().unwrap_or(false) || query.trim().is_empty() {
         return QueryVector::NotNeeded;
     }
-    let has_index = db
-        .lock()
-        .ok()
-        .and_then(|c| c.query_row("SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1", [], |r| r.get(0)).ok())
-        .unwrap_or(false);
-    if !has_index {
-        return QueryVector::NotNeeded;
-    }
-    match crate::db::query_embedding::embed_query(query).await {
-        Ok(v) => QueryVector::Ready(v),
+    // Read both under one short lock; embedding happens after it is released.
+    let index_model = {
+        let Ok(conn) = db.lock() else { return QueryVector::NotNeeded };
+        let has_index: bool = conn
+            .query_row("SELECT COUNT(*) > 0 FROM chunks_vec LIMIT 1", [], |r| r.get(0))
+            .unwrap_or(false);
+        if !has_index {
+            return QueryVector::NotNeeded;
+        }
+        crate::db::query_embedding::IndexModel::of_db(&conn)
+    };
+    match crate::db::query_embedding::embed_for_search(&index_model, query).await {
+        Ok(q) => QueryVector::Ready(q.vector, q.origin),
         Err(reason) => QueryVector::Unavailable(reason),
     }
 }
@@ -79,6 +84,7 @@ pub(super) fn execute_search_notes(
     // (and the user) never sees "hybrid" for a search that was really lexical.
     let mut effective_mode = if use_regex { "regex" } else { "fts5" };
     let mut query_vector_origin = "none";
+    let mut query_embedder: Option<&'static str> = None;
     let mut degradation_reason: Option<String> = None;
 
     let mut results = if use_regex {
@@ -130,9 +136,10 @@ pub(super) fn execute_search_notes(
 
         match (has_embeddings, query_vector) {
             // The real thing: the query's own embedding, same model as the index.
-            (true, QueryVector::Ready(query_emb)) => {
+            (true, QueryVector::Ready(query_emb, embedder)) => {
                 effective_mode = "hybrid";
                 query_vector_origin = "query_embedding";
+                query_embedder = Some(embedder);
                 search::hybrid_search_reranked(&conn, query, &query_emb, fetch_limit, &rerank_config, None)?
             }
             // No query embedding available (no window, timeout, model error...).
@@ -298,6 +305,9 @@ pub(super) fn execute_search_notes(
         "query": query,
         "results": output
     });
+    if let Some(embedder) = query_embedder {
+        response["query_embedder"] = json!(embedder);
+    }
     if let Some(reason) = &degradation_reason {
         response["degradation_reason"] = json!(reason);
     }
@@ -634,9 +644,10 @@ mod query_vector_tests {
         let db = db_with_vectors();
         let mut q = vec![0.0f32; EMBEDDING_DIM];
         q[1] = 1.0; // points at semantic.md
-        let v = parse(&execute_search_notes(r#"{"query":"毫不相干的词","limit":5}"#, &db, QueryVector::Ready(q)).unwrap());
+        let v = parse(&execute_search_notes(r#"{"query":"毫不相干的词","limit":5}"#, &db, QueryVector::Ready(q, "native_local")).unwrap());
         assert_eq!(v["search_mode"], "hybrid");
         assert_eq!(v["query_vector_origin"], "query_embedding");
+        assert_eq!(v["query_embedder"], "native_local");
         assert!(v.get("degradation_reason").is_none());
         let paths: Vec<&str> = v["results"].as_array().unwrap().iter().map(|r| r["file_path"].as_str().unwrap()).collect();
         assert!(paths.contains(&"semantic.md"), "semantic hit expected: {paths:?}");
@@ -689,6 +700,50 @@ mod query_vector_tests {
             prepare_query_vector(r#"{"query":"x","regex":true}"#, &indexed).await,
             QueryVector::NotNeeded
         ));
+    }
+
+    /// End to end, as the stand-alone MCP server runs it: no window, an index
+    /// built by transformers.js, and `search_notes` still does real semantic
+    /// search through the native model. Needs the model and the reference dump
+    /// (ZETTELAGENT_EMBED_MODEL_DIR, ZETTELAGENT_RANK_REF); `--ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn search_without_a_window_is_semantic_via_the_native_model() {
+        let r: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(std::env::var("ZETTELAGENT_RANK_REF").expect("ZETTELAGENT_RANK_REF")).unwrap(),
+        )
+        .unwrap();
+        crate::db::register_sqlite_vec();
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::set_setting(
+            &conn,
+            crate::db::embedding_cache::MODEL_KEY_SETTING,
+            "local:jinaai/jina-embeddings-v2-base-zh",
+        )
+        .unwrap();
+        for (i, (doc, vec)) in r["docs"].as_array().unwrap().iter().zip(r["docVecs"].as_array().unwrap()).enumerate() {
+            let path = format!("note{i}.md");
+            conn.execute("INSERT INTO files (path, hash) VALUES (?1, 'h')", rusqlite::params![path]).unwrap();
+            conn.execute(
+                "INSERT INTO chunks (file_path, chunk_index, content) VALUES (?1, 0, ?2)",
+                rusqlite::params![path, doc.as_str().unwrap()],
+            )
+            .unwrap();
+            let v: Vec<f32> = vec.as_array().unwrap().iter().map(|x| x.as_f64().unwrap() as f32).collect();
+            let id = conn.last_insert_rowid();
+            conn.execute("INSERT INTO chunks_vec (id, embedding) VALUES (?1, ?2)", rusqlite::params![id, vec_to_blob(&v)])
+                .unwrap();
+        }
+        let db = Arc::new(Mutex::new(conn));
+
+        // No word in common with the note it should find (note3: 午饭是牛肉面…).
+        let args = r#"{"query":"晚餐吃点什么好","limit":3}"#;
+        let qv = prepare_query_vector(args, &db).await;
+        let v = parse(&execute_search_notes(args, &db, qv).unwrap());
+        assert_eq!(v["search_mode"], "hybrid", "{v}");
+        assert_eq!(v["query_embedder"], "native_local");
+        assert_eq!(v["results"][0]["file_path"], "note3.md", "{v}");
     }
 }
 

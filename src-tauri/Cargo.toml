@@ -43,6 +43,14 @@ oxidize-pdf = "0.1.4"
 zip = "2.1.0"
 quick-xml = "0.36"
 pure-onnx-ocr = "0.1.0"
+# Native (Rust-side) query embeddings for agent / MCP search: pure-Rust ONNX
+# inference, no native runtime to ship. Pinned to the tract pure-onnx-ocr already
+# compiles, so no second engine is built (0.23 measured identical in speed and
+# output on this model).
+# tokenizers without `onig`: fancy-regex is pure Rust, nothing to build in C.
+tract-onnx = "=0.20.7"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+dirs = "6"
 image = "0.25"
 wgpu = "0.20"
 

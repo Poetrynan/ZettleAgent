@@ -494,6 +494,15 @@ pub fn resolve_api_key(app: &tauri::AppHandle) -> Option<String> {
     store_for(app).ok()?.get().map(|(v, _)| v)
 }
 
+/// [`resolve_api_key`] for code with no app handle (the stand-alone MCP
+/// server). The keyring needs no handle; the fallback file lives in the app's
+/// config dir, which Tauri resolves to `<OS config dir>/<identifier>` — the
+/// same path computed here.
+pub fn resolve_api_key_headless() -> Option<String> {
+    let dir = dirs::config_dir()?.join(crate::APP_IDENTIFIER);
+    SecretStore::new(dir).get().map(|(v, _)| v)
+}
+
 // ── Request-vs-stored precedence ────────────────────────────────────
 //
 // Once `loadLlmConfig` stopped returning `apiKey`, every command that copied
