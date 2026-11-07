@@ -1185,6 +1185,20 @@ export const zh = {
     'search.rerank.degraded.modelUnavailable': 'CrossEncoder 未在超时前给出结果 —— 当前展示的是词法排序。',
     'search.rerank.degraded.tierNotBridged': 'LLM 重排尚未接入搜索 —— 当前展示的是词法排序。',
 
+    // Unlinked mentions (BacklinksPanel) — notes that name this one without a [[link]]
+    'mentions.title': '未链接提及',
+    'mentions.hint': '提到了本笔记、但还没有加 [[链接]] 的地方',
+    'mentions.loading': '正在查找未链接的提及…',
+    'mentions.empty': '没有发现未链接的提及。',
+    'mentions.searchedFor': '查找的名称：{0}',
+    'mentions.truncated': '只显示前 {0} 处',
+    'mentions.link': '链接',
+    'mentions.linkTitle': '把这处提及改成 [[链接]]',
+    'mentions.linked': '已链接',
+    'mentions.undo': '撤销',
+    'mentions.linkFailed': '链接失败',
+    'mentions.undoFailed': '撤销失败',
+
     // Related Notes panel (Task #31) — passive discovery while reading
     'related.title': '相关笔记',
     'related.loading': '正在查找相关笔记…',

@@ -273,6 +273,22 @@ fn build_fts_query(input: &str) -> String {
     if strong.is_empty() { all } else { strong }.join(" OR ")
 }
 
+/// An exact-phrase FTS5 query for `term` against the segmented index: the same
+/// tokens `db::cjk::segment_for_index` would index for it (CJK as bigrams, other
+/// words whole), as one quoted phrase. `None` if nothing in it is indexable.
+/// Used for recall where the caller then verifies on the real text (unlinked
+/// mentions), so it errs on matching too much, never too little.
+pub fn fts_phrase(term: &str) -> Option<String> {
+    let seg = crate::db::cjk::segment_for_index(term);
+    let body = seg.split('\n').next().unwrap_or("");
+    let tokens: Vec<&str> = body.split_whitespace().filter(|t| has_indexable_content(t)).collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(fts_quote(&tokens.join(" ")))
+    }
+}
+
 /// Check if a character is CJK (Chinese/Japanese/Korean)
 fn is_cjk_char(c: char) -> bool {
     matches!(c,

@@ -1,5 +1,6 @@
 pub mod cjk;
 mod cjk_fold_table;
+pub mod mentions;
 pub mod native_embedder;
 pub mod query_embedding;
 pub mod read_pool;

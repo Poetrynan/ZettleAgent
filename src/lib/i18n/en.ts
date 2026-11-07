@@ -1186,6 +1186,20 @@ export const en = {
     'search.rerank.degraded.modelUnavailable': 'The cross-encoder did not answer in time — showing the lexical ordering.',
     'search.rerank.degraded.tierNotBridged': 'LLM reranking is not wired into search — showing the lexical ordering.',
 
+    // Unlinked mentions (BacklinksPanel) — notes that name this one without a [[link]]
+    'mentions.title': 'Unlinked mentions',
+    'mentions.hint': 'Places that name this note without a [[link]]',
+    'mentions.loading': 'Looking for unlinked mentions…',
+    'mentions.empty': 'No unlinked mentions found.',
+    'mentions.searchedFor': 'Names searched: {0}',
+    'mentions.truncated': 'Showing the first {0}',
+    'mentions.link': 'Link',
+    'mentions.linkTitle': 'Turn this mention into a [[link]]',
+    'mentions.linked': 'Linked',
+    'mentions.undo': 'Undo',
+    'mentions.linkFailed': 'Could not link',
+    'mentions.undoFailed': 'Could not undo',
+
     // Related Notes panel (Task #31) — passive discovery while reading
     'related.title': 'Related Notes',
     'related.loading': 'Looking for related notes…',

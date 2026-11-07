@@ -335,6 +335,62 @@ export async function getBacklinks(filePath: string): Promise<BacklinkEntry[]> {
   return invoke('get_backlinks', { filePath });
 }
 
+// ── Unlinked mentions (names a note without [[linking]] it) ───────
+
+export interface UnlinkedMention {
+  filePath: string;
+  title: string;
+  /** 1-based line in the source file. */
+  line: number;
+  /** 0-based char offset within the line. */
+  column: number;
+  /** The text as written in the source (may differ in case or script). */
+  matched: string;
+  before: string;
+  after: string;
+}
+
+export interface MentionsReport {
+  mentions: UnlinkedMention[];
+  /** Names searched for: title, file name, frontmatter aliases. */
+  terms: string[];
+  truncated: boolean;
+}
+
+export interface LinkMentionResult {
+  snapshotId: number;
+  postHash: string;
+  link: string;
+}
+
+export async function getUnlinkedMentions(filePath: string): Promise<MentionsReport> {
+  return invoke('get_unlinked_mentions', { filePath });
+}
+
+/** Rejects with a conflict when the source note changed since it was listed. */
+export async function linkUnlinkedMention(
+  sourcePath: string,
+  targetPath: string,
+  mention: Pick<UnlinkedMention, 'line' | 'column' | 'matched'>,
+): Promise<LinkMentionResult> {
+  return invoke('link_unlinked_mention', {
+    sourcePath,
+    targetPath,
+    line: mention.line,
+    column: mention.column,
+    matched: mention.matched,
+  });
+}
+
+/** Rejects with a conflict when the note was edited after the link was added. */
+export async function undoLinkMention(sourcePath: string, result: LinkMentionResult): Promise<void> {
+  return invoke('undo_link_mention', {
+    sourcePath,
+    snapshotId: result.snapshotId,
+    postHash: result.postHash,
+  });
+}
+
 // ── Related Notes (passive discovery while reading) ────────────────
 
 /** Which signal surfaced a related note. `explicit` > `link` > `semantic` in specificity. */
