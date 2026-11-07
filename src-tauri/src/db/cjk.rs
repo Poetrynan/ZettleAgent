@@ -26,9 +26,40 @@
 //! function, which the FTS triggers call. [`register_functions`] must therefore
 //! run on every connection that writes `chunks`. `setup_database_schema` does this
 //! first, before anything else.
+//!
+//! ## Traditional and simplified Chinese match each other
+//! A note written in traditional characters (`知識圖譜`) and a query typed in
+//! simplified ones (`知识图谱`) share no bigram, so neither found the other.
+//! Every ideograph is therefore folded to its simplified form ([`fold_han`]) on
+//! both sides — when indexing and when building the query — so the bigrams
+//! agree whichever script was used. The table is OpenCC's character-level
+//! traditional→simplified data (Apache-2.0, see `cjk_fold_table.rs`).
+//!
+//! Folding is per character, not per word: OpenCC's phrase tables (`乾隆` keeps
+//! `乾`) are not applied, so the folded index text is not always correct
+//! simplified Chinese. That is fine for matching, because index and query are
+//! folded the same way, and the index text is never shown. Words whose two
+//! scripts differ by more than character substitution (`軟體`/`软件`) are
+//! regional vocabulary, not script, and are out of scope.
 
 use rusqlite::functions::FunctionFlags;
 use rusqlite::Connection;
+
+/// Version of the index text [`segment_for_index`] produces. Bump it whenever
+/// that output changes: `setup_segmented_fts` then rebuilds the index once,
+/// because rows written by the old version would not match new queries.
+/// - 1: bigrams + unigrams
+/// - 2: + traditional→simplified folding
+pub const INDEX_VERSION: i64 = 2;
+
+/// Fold one character to simplified Chinese (identity for everything else).
+pub fn fold_han(c: char) -> char {
+    use super::cjk_fold_table::TRAD_TO_SIMP;
+    match TRAD_TO_SIMP.binary_search_by_key(&c, |&(t, _)| t) {
+        Ok(i) => TRAD_TO_SIMP[i].1,
+        Err(_) => c,
+    }
+}
 
 /// Name of the SQL scalar function used by the segmented-FTS triggers.
 pub const SEGMENT_FN: &str = "zettel_cjk_segment";
@@ -49,9 +80,10 @@ pub fn is_cjk_word_char(c: char) -> bool {
     )
 }
 
-/// Overlapping bigrams of one CJK run. A 1-char run yields itself.
+/// Overlapping bigrams of one CJK run, folded like the index. A 1-char run
+/// yields itself.
 pub fn query_bigrams(run: &str) -> Vec<String> {
-    let chars: Vec<char> = run.chars().collect();
+    let chars: Vec<char> = run.chars().map(fold_han).collect();
     match chars.len() {
         0 => Vec::new(),
         1 => vec![chars[0].to_string()],
@@ -94,7 +126,7 @@ pub fn segment_for_index(text: &str) -> String {
 
     for c in text.chars() {
         if is_cjk_word_char(c) {
-            run.push(c);
+            run.push(fold_han(c));
         } else {
             flush(&mut run, &mut out, &mut unigrams);
             out.push(c);
@@ -162,6 +194,34 @@ mod tests {
     #[test]
     fn plain_english_is_unchanged() {
         assert_eq!(segment_for_index("nomic-embed v1.5"), "nomic-embed v1.5");
+    }
+
+    #[test]
+    fn traditional_and_simplified_produce_the_same_index_text() {
+        assert_eq!(segment_for_index("知識圖譜"), segment_for_index("知识图谱"));
+        assert_eq!(query_bigrams("知識圖譜"), query_bigrams("知识图谱"));
+        // Mixed scripts in one run fold too; ASCII is untouched.
+        assert_eq!(segment_for_index("用BERT構建軟件"), segment_for_index("用BERT构建软件"));
+        assert_eq!(fold_han('A'), 'A');
+        assert_eq!(fold_han('猫'), '猫');
+    }
+
+    #[test]
+    fn fold_table_is_sorted_idempotent_and_never_identity() {
+        use super::super::cjk_fold_table::TRAD_TO_SIMP;
+        assert!(TRAD_TO_SIMP.len() > 3000, "table looks truncated");
+        assert!(TRAD_TO_SIMP.windows(2).all(|w| w[0].0 < w[1].0), "binary search needs sorted keys");
+        for &(t, s) in TRAD_TO_SIMP {
+            assert_ne!(t, s);
+            assert_eq!(fold_han(s), s, "{t} → {s} must not fold again");
+        }
+    }
+
+    #[test]
+    fn common_traditional_characters_fold() {
+        for (t, s) in [('後', '后'), ('發', '发'), ('裡', '里'), ('體', '体'), ('識', '识'), ('譜', '谱'), ('與', '与')] {
+            assert_eq!(fold_han(t), s, "{t}");
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, OptionalExtension, Result};
 
 pub fn setup_database_schema(conn: &Connection) -> Result<()> {
     // The segmented-FTS triggers call `zettel_cjk_segment()`, which is a per-connection
@@ -653,14 +653,49 @@ fn setup_segmented_fts(conn: &Connection) -> Result<()> {
         END;",
     )?;
 
-    if !existed {
-        let n = conn.execute(
-            "INSERT INTO chunks_fts_seg(rowid, content)
-             SELECT id, zettel_cjk_segment(content) FROM chunks",
-            [],
-        )?;
-        if n > 0 {
-            log::info!("Built CJK-segmented FTS index for {} existing chunks", n);
+    // The index text depends on `zettel_cjk_segment`; when its output changes
+    // (bumped `cjk::INDEX_VERSION`), rows written by the old version no longer
+    // match new queries, so the whole index is rebuilt once.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS fts_index_meta (
+            name TEXT PRIMARY KEY,
+            version INTEGER NOT NULL
+        );",
+    )?;
+    let built: Option<i64> = conn
+        .query_row("SELECT version FROM fts_index_meta WHERE name = 'chunks_fts_seg'", [], |r| r.get(0))
+        .optional()?;
+    let current = crate::db::cjk::INDEX_VERSION;
+    if !existed || built != Some(current) {
+        conn.execute_batch("SAVEPOINT cjk_index_rebuild")?;
+        let rebuilt = (|| -> Result<usize> {
+            if existed {
+                conn.execute("INSERT INTO chunks_fts_seg(chunks_fts_seg) VALUES('delete-all')", [])?;
+            }
+            let n = conn.execute(
+                "INSERT INTO chunks_fts_seg(rowid, content)
+                 SELECT id, zettel_cjk_segment(content) FROM chunks",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO fts_index_meta (name, version) VALUES ('chunks_fts_seg', ?1)
+                 ON CONFLICT(name) DO UPDATE SET version = excluded.version",
+                [current],
+            )?;
+            Ok(n)
+        })();
+        match rebuilt {
+            Ok(n) => {
+                conn.execute_batch("RELEASE cjk_index_rebuild")?;
+                if n > 0 {
+                    log::info!("Built CJK-segmented FTS index v{} for {} existing chunks", current, n);
+                }
+            }
+            Err(e) => {
+                // Keep the old index rather than half of a new one.
+                conn.execute_batch("ROLLBACK TO cjk_index_rebuild; RELEASE cjk_index_rebuild")?;
+                return Err(e);
+            }
         }
     }
     Ok(())

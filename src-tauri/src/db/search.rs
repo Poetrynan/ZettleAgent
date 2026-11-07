@@ -214,7 +214,10 @@ fn build_fts_query(input: &str) -> String {
     for c in input.chars() {
         if crate::db::cjk::is_cjk_word_char(c) {
             flush_ascii(&mut ascii, &mut terms);
-            cjk.push(c);
+            // Fold like the index does, so a traditional query matches simplified
+            // notes (and vice versa) and the stop lists below, written in
+            // simplified, apply to both.
+            cjk.push(crate::db::cjk::fold_han(c));
         } else if is_cjk_char(c) || c.is_whitespace() {
             // CJK punctuation / fullwidth forms / spaces separate terms.
             flush_cjk(&mut cjk, &mut terms);
@@ -2077,6 +2080,47 @@ mod cjk_search_tests {
         conn.execute_batch("DROP TABLE chunks_fts_seg;").unwrap();
         crate::db::schema::setup_database_schema(&conn).unwrap();
         assert_eq!(paths(&conn, "知识图谱"), vec!["a.md"]);
+    }
+
+    #[test]
+    fn traditional_and_simplified_find_each_other() {
+        let conn = db_with(&[
+            ("trad.md", "我們正在構建知識圖譜系統，用於語義檢索。"),
+            ("simp.md", "向量数据库适合做语义搜索。"),
+            ("other.md", "今天天氣不錯。"),
+        ]);
+        // Simplified query, traditional note.
+        assert_eq!(paths(&conn, "知识图谱"), vec!["trad.md"]);
+        // Traditional query, simplified note.
+        assert_eq!(paths(&conn, "向量數據庫"), vec!["simp.md"]);
+        // Shared word, both scripts.
+        let mut both = paths(&conn, "語義");
+        both.sort();
+        assert_eq!(both, vec!["simp.md", "trad.md"]);
+        // Stop words apply to traditional questions too ("麼" folds to "么").
+        assert_eq!(paths(&conn, "知識圖譜是什麼"), vec!["trad.md"]);
+    }
+
+    #[test]
+    fn index_built_by_an_older_version_is_rebuilt_once() {
+        let conn = db_with(&[("trad.md", "繁體寫的知識圖譜筆記")]);
+        // Make it look like a v1 database: unfolded index text, version 1.
+        conn.execute_batch(
+            "INSERT INTO chunks_fts_seg(chunks_fts_seg) VALUES('delete-all');
+             INSERT INTO chunks_fts_seg(rowid, content) SELECT id, content FROM chunks;
+             UPDATE fts_index_meta SET version = 1 WHERE name = 'chunks_fts_seg';",
+        )
+        .unwrap();
+        assert!(paths(&conn, "知识图谱").is_empty(), "v1 index cannot match across scripts");
+
+        crate::db::schema::setup_database_schema(&conn).unwrap();
+        assert_eq!(paths(&conn, "知识图谱"), vec!["trad.md"]);
+        let v: i64 = conn
+            .query_row("SELECT version FROM fts_index_meta WHERE name = 'chunks_fts_seg'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, crate::db::cjk::INDEX_VERSION);
+        // No duplicate rows from the rebuild.
+        assert_eq!(full_text_search(&conn, "知识图谱", 10).unwrap().len(), 1);
     }
 }
 

@@ -278,7 +278,13 @@ pub fn tokenize_query(query: &str) -> QueryTerms {
         .filter(|c| !c.is_control())
         .collect::<String>()
         .trim()
-        .to_lowercase();
+        .to_lowercase()
+        // Same traditional→simplified folding as the FTS index (see db::cjk),
+        // applied to the candidate text in `score_lexical` too, so a hit found
+        // across scripts is not scored as a miss here.
+        .chars()
+        .map(crate::db::cjk::fold_han)
+        .collect();
 
     let mut terms: Vec<Vec<char>> = Vec::new();
     let mut ascii = String::new();
@@ -483,16 +489,19 @@ pub fn score_lexical(q: &QueryTerms, content: &str, heading: Option<&str>) -> Le
 
     // Lowercase + char-vector once. `MAX_SCAN_CHARS` caps pathological chunks, and
     // `chars().take()` keeps the cut on a codepoint boundary.
+    // Folding is one char to one char, so char offsets are unchanged.
     let body: Vec<char> = content
         .to_lowercase()
         .chars()
         .take(MAX_SCAN_CHARS)
+        .map(crate::db::cjk::fold_han)
         .collect();
     let head: Vec<char> = heading
         .unwrap_or("")
         .to_lowercase()
         .chars()
         .take(MAX_SCAN_CHARS)
+        .map(crate::db::cjk::fold_han)
         .collect();
 
     let n_terms = q.terms.len() as f64;
@@ -996,6 +1005,16 @@ mod tests {
         for bg in ["知识", "识图", "图谱"] {
             assert!(terms.contains(&bg.to_string()), "missing bigram {}", bg);
         }
+    }
+
+    #[test]
+    fn traditional_text_scores_like_simplified() {
+        let q = tokenize_query("知识图谱");
+        let trad = score_lexical(&q, "知識圖譜把實體和關係組織成網絡。", Some("知識圖譜"));
+        let simp = score_lexical(&q, "知识图谱把实体和关系组织成网络。", Some("知识图谱"));
+        assert!((trad.coverage - 1.0).abs() < 1e-9, "{trad:?}");
+        assert_eq!(trad.phrase, simp.phrase);
+        assert!((trad.score - simp.score).abs() < 1e-9);
     }
 
     #[test]
