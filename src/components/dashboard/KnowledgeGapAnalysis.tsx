@@ -94,7 +94,14 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
   const [aiSummary, setAiSummary] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Remember whether the user folded this section away.
+  const [isExpanded, setIsExpandedState] = useState(() => {
+    try { return localStorage.getItem('zettel:dash-gaps-expanded') !== 'false'; } catch { return true; }
+  });
+  const setIsExpanded = (next: boolean) => {
+    setIsExpandedState(next);
+    try { localStorage.setItem('zettel:dash-gaps-expanded', String(next)); } catch { /* ignore */ }
+  };
   const [progress, setProgress] = useState({ step: 0, total: 4, label: '' });
 
   // Navigation tabs

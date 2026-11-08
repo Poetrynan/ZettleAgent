@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 
 interface HeadingItem {
   level: number;     // 1-6
@@ -41,6 +41,18 @@ function extractHeadings(markdown: string): HeadingItem[] {
 
 export function OutlinePanel({ content, lang }: OutlinePanelProps) {
   const headings = useMemo(() => extractHeadings(content), [content]);
+  // Collapsed by default so the note body starts near the top (VS Code keeps
+  // the outline out of the editor; here it folds down to a single line).
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('zettel:outline-collapsed') !== 'false'; } catch { return true; }
+  });
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('zettel:outline-collapsed', String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const handleClick = useCallback((index: number, text: string) => {
     // Try to find the heading element inside the editor container
@@ -76,25 +88,20 @@ export function OutlinePanel({ content, lang }: OutlinePanelProps) {
     }
   }, []);
 
-  if (headings.length === 0) {
-    return (
-      <div className="outline-panel-empty">
-        <span className="outline-empty-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="21" y1="10" x2="7" y2="10"></line>
-            <line x1="21" y1="6" x2="3" y2="6"></line>
-            <line x1="21" y1="14" x2="3" y2="14"></line>
-            <line x1="21" y1="18" x2="7" y2="18"></line>
-          </svg>
-        </span>
-        <p>{lang === 'zh' ? '暂无大纲标题' : 'No outline headings'}</p>
-      </div>
-    );
-  }
+  // A note without headings has no outline: render nothing rather than an
+  // empty placeholder sitting above the document.
+  if (headings.length === 0) return null;
 
   return (
-    <div className="outline-panel">
-      <div className="outline-panel-header">
+    <div className={`outline-panel ${collapsed ? 'is-collapsed' : ''}`}>
+      <div
+        className="outline-panel-header"
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onClick={toggleCollapsed}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapsed(); } }}
+      >
         <div className="outline-header-left">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="outline-header-icon">
             <line x1="21" y1="10" x2="7" y2="10"></line>
@@ -106,7 +113,7 @@ export function OutlinePanel({ content, lang }: OutlinePanelProps) {
         </div>
         <span className="outline-count-badge">{headings.length}</span>
       </div>
-      <div className="outline-list">
+      {!collapsed && (<div className="outline-list">
         {headings.map((h, i) => (
           <div
             key={i}
@@ -118,7 +125,7 @@ export function OutlinePanel({ content, lang }: OutlinePanelProps) {
             <span className="outline-text">{h.text}</span>
           </div>
         ))}
-      </div>
+      </div>)}
     </div>
   );
 }

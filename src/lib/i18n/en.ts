@@ -23,6 +23,7 @@ export const en = {
     'toolbar.dashboard': 'Dashboard',
     'toolbar.settings': 'Settings',
     'toolbar.chat': 'Toggle Chat',
+    'toolbar.commandCenter': 'Search notes or commands',
     'toolbar.graph': 'Graph',
     'toolbar.note': 'Note',
     'toolbar.canvas': 'Canvas',

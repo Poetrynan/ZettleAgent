@@ -23,6 +23,7 @@ export const zh = {
     'toolbar.dashboard': '仪表盘',
     'toolbar.settings': '设置',
     'toolbar.chat': '切换聊天',
+    'toolbar.commandCenter': '搜索笔记或命令',
     'toolbar.graph': '知识图谱',
     'toolbar.note': '笔记',
     'toolbar.canvas': '白板',

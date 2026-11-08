@@ -209,3 +209,807 @@ input[type="search"],
   background: var(--bg-elevated) !important;
   box-shadow: var(--shadow-control);
 }
+/* ══ Inset panel layout (after Anytype .sidebarPage / AFFiNE / macOS 26) ══
+ * The sidebar and rail sit directly on the window material; the workstage
+ * and the chat inspector are rounded cards floating on it, so no content
+ * area runs into a hard square window edge.
+ * ═════════════════════════════════════════════════════════════════════ */
+.app-shell {
+  background: var(--bg-secondary);
+}
+
+.activity-rail,
+.sidebar {
+  background: transparent !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-right: none !important;
+}
+
+.app-main {
+  margin: 8px 8px 8px 0;
+  border-radius: var(--radius-lg);
+  border: 0.5px solid var(--hairline);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.chat-panel {
+  margin: 8px 8px 8px 0;
+  width: calc(100% - 8px) !important;
+  height: calc(100% - 16px) !important;
+  border: 0.5px solid var(--hairline) !important;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* Gaps between floating panels replace divider lines */
+.app-shell > div > .resize-handle,
+.resize-handle {
+  background: transparent !important;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: color-mix(in srgb, var(--accent-primary) 35%, transparent) !important;
+  border-radius: var(--radius-full);
+}
+
+/* Sidebar groups as soft rounded blocks (after Anytype widgets) */
+.tree-section-block {
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  border-radius: 12px;
+  padding: 2px 4px 4px;
+  margin-bottom: 8px;
+}
+
+.tree-section-block + .tree-section-block {
+  padding-top: 2px;
+}
+
+/* Menus open with a short scale-in (Anytype: 0.95 → 1, 0.2s) */
+@keyframes macMenuIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ctx-menu,
+.kg-context-menu,
+.calendar-picker-menu,
+.overview-columns-menu {
+  animation: macMenuIn var(--duration-normal) var(--ease-out) both;
+  transform-origin: top left;
+}
+
+/* Dialog rhythm (after AFFiNE: 20/24px padding) */
+.modal-header {
+  padding: 18px 24px 8px;
+}
+
+.modal-content {
+  padding: 6px 24px 20px;
+}
+
+.modal-footer {
+  padding: 4px 24px 20px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-menu,
+  .kg-context-menu,
+  .calendar-picker-menu,
+  .overview-columns-menu {
+    animation: none;
+  }
+}
+/* ══ Editor title area (after VS Code workbench) ═══════════════════
+ * Tab bar: scrolling tabs on the left, editor actions pinned on the
+ * right (VS Code "editor actions" toolbar). Below it a 22px breadcrumb
+ * row replaces the old filename header, so the note title is not
+ * repeated above the document.
+ * ═══════════════════════════════════════════════════════════════════ */
+.tab-bar {
+  overflow: visible !important;
+  padding-right: 6px;
+}
+
+.tab-bar-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tab-bar-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+}
+
+.editor-actions .btn-icon-sm {
+  width: 26px;
+  height: 26px;
+  color: var(--text-secondary);
+}
+
+.editor-export-menu {
+  position: absolute !important;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  z-index: 100;
+  transform-origin: top right;
+}
+
+.editor-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 16px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--bg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.editor-breadcrumbs-seg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.editor-breadcrumbs-current {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-breadcrumbs-sep {
+  color: var(--text-quaternary);
+}
+
+.editor-breadcrumbs-badge {
+  margin-left: 6px;
+  font-size: 10px !important;
+  padding: 0 6px !important;
+}
+
+.editor-save-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.editor-save-status.is-saving {
+  color: var(--accent-primary);
+}
+
+.editor-save-status.is-unsaved {
+  color: var(--warning);
+}
+/* Command center (VS Code title bar: 22px, 38vw, max 600px) */
+.swiss-workstage-bar {
+  position: relative;
+  container-type: inline-size;
+}
+
+.command-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(38%, 440px);
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.command-center:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.command-center:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.command-center__label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-center__kbd {
+  flex-shrink: 0;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-quaternary);
+}
+
+@container (max-width: 520px) {
+  .command-center {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .command-center__label,
+  .command-center__kbd {
+    display: none;
+  }
+}
+/* Explorer view header (VS Code: title left, actions right; actions
+   stay quiet until the sidebar is hovered or focused) */
+.explorer-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 8px 2px 14px;
+  flex-shrink: 0;
+}
+
+.explorer-header__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorer-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  opacity: 0.55;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.sidebar:hover .explorer-header__actions,
+.explorer-header__actions:focus-within {
+  opacity: 1;
+}
+
+.explorer-header__actions .btn-icon-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.explorer-sort-dir {
+  font-size: 12px !important;
+  font-weight: 600;
+}
+
+.explorer-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 4px 10px 8px;
+  flex-shrink: 0;
+}
+
+.explorer-search__icon {
+  position: absolute;
+  left: 10px;
+  display: flex;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.explorer-search__input {
+  min-height: 28px !important;
+  padding: 4px 56px 4px 30px !important;
+  border-radius: var(--radius-full) !important;
+  border: none !important;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.explorer-search__input:focus {
+  background: var(--bg-elevated) !important;
+  box-shadow: var(--focus-ring) !important;
+}
+
+.explorer-search__btn {
+  position: absolute;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none;
+  border-radius: var(--radius-full) !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+  cursor: pointer;
+}
+
+.explorer-search__btn + .explorer-search__btn,
+.explorer-search__btn:not(.sidebar-content-search-link) {
+  right: 28px;
+}
+
+.explorer-search__btn.sidebar-content-search-link {
+  right: 4px;
+  width: 22px !important;
+}
+
+.explorer-search__btn:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+/* Menu items rendered as <button>: drop the native button chrome */
+button.ctx-menu-item {
+  width: 100%;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  min-height: 26px;
+  padding: 3px 10px;
+}
+/* Outline & properties: one quiet disclosure line each above the note */
+.outline-panel {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: none;
+}
+
+.outline-panel-header {
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+  margin: 0 -8px;
+}
+
+.outline-panel-header:hover {
+  background: var(--bg-hover);
+}
+
+.outline-panel-header .outline-header-left::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--duration-fast) ease;
+  opacity: 0.7;
+}
+
+.outline-panel.is-collapsed .outline-header-left::before {
+  transform: rotate(-45deg);
+}
+
+.outline-header-icon {
+  display: none;
+}
+/* Activity rail clusters, separated by a short hairline */
+.activity-rail-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.activity-rail-cluster + .activity-rail-cluster {
+  margin-top: 6px;
+  padding-top: 8px;
+  position: relative;
+}
+
+.activity-rail-cluster + .activity-rail-cluster::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 18px;
+  height: 1px;
+  transform: translateX(-50%);
+  background: var(--hairline);
+}
+
+/* ══ AI chat — modern assistant layout ════════════════════════════
+ * After VS Code chat (right-aligned request bubble, large rounded input
+ * with a travelling "working" border) and UI UX Pro Max "AI-Native UI"
+ * (minimal chrome, user right / AI distinct, input always visible).
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* Header: quiet, no material band */
+.chat-panel .chat-header-v2 {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-bottom: 0.5px solid var(--hairline);
+}
+
+.chat-header-icon-btn {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: var(--radius-full) !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+}
+
+.chat-header-icon-btn:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.chat-header-icon-btn.active {
+  background: var(--accent-tint) !important;
+  color: var(--accent-primary) !important;
+}
+
+/* Empty state: a greeting, not a manual */
+.chat-empty-desk {
+  gap: 20px !important;
+  container-type: inline-size;
+}
+
+.chat-empty-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-empty-glyph {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  color: var(--accent-primary);
+  background:
+    radial-gradient(120% 120% at 30% 20%, color-mix(in srgb, var(--accent-primary) 22%, transparent), transparent 70%),
+    var(--accent-tint);
+}
+
+.chat-empty-desk .chat-empty-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.chat-empty-sub {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.chat-empty-desk div:has(> .chat-empty-template-card) {
+  display: grid !important;
+  grid-template-columns: 1fr;
+  gap: 8px !important;
+}
+
+@container (min-width: 300px) {
+  .chat-empty-desk div:has(> .chat-empty-template-card) {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .chat-empty-desk .chat-empty-section-label {
+    grid-column: 1 / -1;
+  }
+}
+
+.chat-empty-template-card {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  min-height: 64px;
+  padding: 10px 12px !important;
+  border-radius: 14px !important;
+  background: var(--bg-secondary) !important;
+  border: 0.5px solid var(--hairline) !important;
+  text-align: left;
+  transition: background-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
+}
+
+.chat-empty-template-card:hover {
+  background: var(--bg-elevated) !important;
+  box-shadow: var(--shadow-md);
+}
+
+.chat-empty-template-label {
+  font-size: 12.5px !important;
+  line-height: 1.35;
+}
+
+/* Turns */
+.chat-turn {
+  padding: 10px 16px !important;
+}
+
+.chat-turn + .chat-turn {
+  padding-top: 6px !important;
+}
+
+/* User: right-aligned bubble (VS Code: max 90%, 8/12 padding) */
+.chat-turn-user .chat-turn-col {
+  align-items: flex-end;
+}
+
+.chat-turn-user .chat-turn-body,
+.chat-turn-body-user {
+  width: fit-content;
+  max-width: 88%;
+  margin-left: auto;
+  padding: 8px 13px !important;
+  border-radius: 18px !important;
+  border-left: none !important;
+  background: var(--bg-tertiary) !important;
+  color: var(--text-primary);
+}
+
+.chat-turn-user .chat-msg-actions {
+  align-self: flex-end;
+}
+
+/* Assistant: plain text with a small byline */
+.chat-turn-byline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chat-turn-byline-glyph {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--accent-primary);
+  background: var(--accent-tint);
+}
+
+.chat-turn-agent .chat-turn-body {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+/* Thinking / tool traces: soft cards, no hard borders */
+.chat-turn-agent [class*="thought-stream"],
+.chat-turn-agent .tool-calls-container > *,
+.chat-turn-agent .thinking-block {
+  border-radius: 12px !important;
+}
+
+/* Composer: one large rounded card with everything inside */
+.chat-panel .panel-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px !important;
+}
+
+.chat-panel .panel-footer .chat-input-container {
+  order: 2;
+}
+
+.chat-panel .panel-footer .chat-context-row {
+  order: 1;
+}
+
+.chat-panel .panel-footer .chat-preflight-bar {
+  order: 3;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: transparent !important;
+  border: none !important;
+}
+
+.chat-input-container {
+  position: relative;
+  isolation: isolate;
+  border-radius: 20px !important;
+  padding: 10px 10px 8px 14px !important;
+  border: 0.5px solid var(--border-strong) !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.chat-input-container:focus-within {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-strong)) !important;
+  box-shadow: var(--shadow-md), 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent) !important;
+}
+
+.chat-input-container .chat-input-textarea {
+  font-size: 13.5px !important;
+  line-height: 1.55 !important;
+  min-height: 40px !important;
+  padding: 2px 2px 6px !important;
+}
+
+.chat-feature-btn,
+.composer-mode-trigger {
+  height: 26px !important;
+  border-radius: var(--radius-full) !important;
+  border: 0.5px solid var(--hairline) !important;
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  padding: 0 10px !important;
+}
+
+.chat-feature-btn:hover,
+.composer-mode-trigger:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.chat-feature-btn.active-search {
+  background: var(--accent-tint) !important;
+  border-color: transparent !important;
+  color: var(--accent-primary) !important;
+}
+
+.chat-send-btn-v2 {
+  width: 30px !important;
+  height: 30px !important;
+}
+
+/* Working state: a gradient travels around the border while the
+   assistant runs (VS Code chat input "comet"). Border-only via mask. */
+@property --chat-ring-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.chat-input-working-ring {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1.5px;
+  opacity: 0;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--chat-ring-angle),
+    transparent 0deg,
+    color-mix(in srgb, var(--accent-primary) 85%, transparent) 40deg,
+    var(--sys-purple) 80deg,
+    transparent 130deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  transition: opacity var(--duration-normal) ease;
+}
+
+.chat-input-container.is-working .chat-input-working-ring {
+  opacity: 1;
+  animation: chatRingSpin 3.2s linear infinite;
+}
+
+@keyframes chatRingSpin {
+  to { --chat-ring-angle: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-input-container.is-working .chat-input-working-ring {
+    animation: none;
+    background: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  }
+}
+
+/* Typing indicator: three soft dots */
+.typing-indicator span,
+.chat-typing-dot {
+  background: var(--text-tertiary) !important;
+}
+/* Primary actions use the accent, never an ink-black fill */
+.gap-btn-primary {
+  background: var(--accent-primary) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  border-radius: var(--radius-full) !important;
+}
+
+.gap-btn-primary:hover:not(:disabled) {
+  background: var(--accent-primary-hover) !important;
+  box-shadow: none !important;
+}
+
+.gap-btn-secondary {
+  border-radius: var(--radius-full) !important;
+}
+/* Agent trace: a light collapsible line ("thinking…" shimmer), not a
+   framed box — the running state is carried by the shimmer and the
+   composer's working ring, not a blue outline. */
+.agent-trace,
+.agent-trace.streaming {
+  margin: 2px 0 8px;
+  border: none !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.agent-trace-header {
+  display: inline-flex !important;
+  width: auto;
+  max-width: 100%;
+  min-height: 26px !important;
+  padding: 3px 10px 3px 8px !important;
+  border-radius: var(--radius-full) !important;
+  background: var(--bg-secondary) !important;
+  border: none !important;
+  font-weight: 500 !important;
+  color: var(--text-secondary) !important;
+}
+
+.agent-trace-header:hover {
+  background: var(--bg-tertiary) !important;
+}
+
+.agent-trace.streaming .agent-trace-header {
+  border-bottom: none !important;
+}
+
+.agent-trace-body {
+  margin: 6px 0 0 12px;
+  padding: 2px 0 2px 12px !important;
+  border-top: none !important;
+  border-left: 1.5px solid var(--hairline) !important;
+  background: transparent !important;
+}
+
+.agent-trace-body .trace-node,
+.agent-trace-pipeline-row {
+  border: none !important;
+  border-radius: var(--radius-md) !important;
+  background: transparent !important;
+}

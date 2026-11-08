@@ -214,6 +214,16 @@ export function QuickSwitcher() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, mode, open]);
 
+  // The title-bar command center opens the same palette as Ctrl+P / Ctrl+Shift+P.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const next = (e as CustomEvent<{ mode?: PaletteMode }>).detail?.mode ?? 'notes';
+      open(next);
+    };
+    window.addEventListener('zettel:open-quick-switcher', onOpen);
+    return () => window.removeEventListener('zettel:open-quick-switcher', onOpen);
+  }, [open]);
+
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 50);
   }, [isOpen]);

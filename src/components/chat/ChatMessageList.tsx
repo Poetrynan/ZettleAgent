@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, RefObject } from 'react';
 import type { ReactNode } from 'react';
 import { Message } from './useChatSessions';
 import {
+  IconSparkle,
   IconRobot,
   IconCheck,
   IconClipboard,
@@ -250,11 +251,12 @@ export function ChatMessageList({
       {messages.length === 0 ? (
         <div className="chat-empty-desk" style={{ margin: 'auto', maxWidth: '360px', width: '100%', padding: '32px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px' }}>
           {/* Header Info */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
+          <div className="chat-empty-hero">
+            <span className="chat-empty-glyph" aria-hidden="true"><IconSparkle size={22} /></span>
             <div className="chat-empty-title">
-              {isZh ? '智能助手' : 'Assistant'}
+              {isZh ? '今天想整理什么？' : 'What shall we work on?'}
             </div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.5, maxWidth: '320px' }}>
+            <div className="chat-empty-sub">
               {isZh 
                 ? '支持自主文件检索、知识图谱推演、笔记批处理与内容重构。随时输入问题或从下方推荐指令开始。'
                 : 'Supports autonomous retrieval, graph reasoning, batch note refactoring and synthesis. Ask a question or pick a command below.'}
@@ -296,6 +298,12 @@ export function ChatMessageList({
               aria-label={msg.role === 'user' ? 'User Message' : 'Assistant Message'}
             >
               <div className="chat-turn-col">
+                {msg.role === 'assistant' && !msg.agentName && (idx === 0 || messages[idx - 1].role !== 'assistant') && (
+                  <div className="chat-turn-byline" aria-hidden="true">
+                    <span className="chat-turn-byline-glyph"><IconSparkle size={11} /></span>
+                    {isZh ? '智能助手' : 'Assistant'}
+                  </div>
+                )}
                 <div className={`chat-turn-body ${msg.role === 'user' ? 'chat-turn-body-user' : ''}`}>
                   {msg.role === 'assistant' && msg.agentName && (
                     <div className="chat-turn-agent-label">{msg.agentName}</div>

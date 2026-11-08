@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp, View } from '../../contexts/AppContext';
-import { IconSidebar, IconChat } from '../icons';
+import { IconSidebar, IconChat, IconSearch } from '../icons';
 import { t } from '../../lib/i18n';
 
 interface WorkstageHeaderProps {
@@ -15,17 +15,16 @@ interface WorkstageHeaderProps {
 }
 
 /**
- * WorkstageHeader — the unified title bar / toolbar of the main window.
+ * WorkstageHeader — the window title bar, laid out like VS Code's:
+ * sidebar toggle and view name on the leading edge, a command center in
+ * the middle (opens the Quick Switcher, same as Ctrl+P), and the
+ * secondary-sidebar (chat) toggle on the trailing edge.
  *
- * macOS layout: sidebar toggle on the leading edge, a bold window title with
- * the open document as a quiet subtitle, and toolbar items on the trailing
- * edge. The bar sits on a translucent toolbar material so content scrolling
- * beneath it stays faintly visible.
+ * The open note's name is not repeated here: the editor's tab bar and
+ * breadcrumbs already say which note is open.
  */
 export function WorkstageHeader({
-  view,
   viewTitle,
-  currentFileName,
   toggleSidebar,
   toggleChat,
   isSidebarOpen,
@@ -34,9 +33,11 @@ export function WorkstageHeader({
 }: WorkstageHeaderProps) {
   const { state } = useApp();
   const isZh = state.lang === 'zh';
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
 
-  const docContext = currentFileName || (state.currentFile ? state.currentFile.split(/[\\/]/).pop() : null);
-  const showDoc = Boolean(docContext && view === 'note');
+  const openCommandCenter = () => {
+    window.dispatchEvent(new CustomEvent('zettel:open-quick-switcher', { detail: { mode: 'notes' } }));
+  };
 
   return (
     <div className="swiss-header-root">
@@ -54,10 +55,20 @@ export function WorkstageHeader({
           </button>
 
           <div className="mac-toolbar-title">
-            <span className="mac-toolbar-title__main">{showDoc ? docContext : viewTitle}</span>
-            {showDoc && <span className="mac-toolbar-title__sub">{viewTitle}</span>}
+            <span className="mac-toolbar-title__main">{viewTitle}</span>
           </div>
         </div>
+
+        <button
+          type="button"
+          className="command-center"
+          onClick={openCommandCenter}
+          aria-label={t('toolbar.commandCenter')}
+        >
+          <IconSearch size={13} />
+          <span className="command-center__label">{t('toolbar.commandCenter')}</span>
+          <kbd className="command-center__kbd">{isMac ? '⌘P' : 'Ctrl+P'}</kbd>
+        </button>
 
         <div className="swiss-workstage-bar__right">
           {actions}

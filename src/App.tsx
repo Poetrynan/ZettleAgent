@@ -448,7 +448,8 @@ function AppLayout() {
         display: state.isChatOpen ? 'flex' : 'none',
         flexShrink: 0,
       }}>
-        <ResizablePanel defaultWidth={360} minWidth={250} maxWidth={700} side="right" storageKey="za-chat-width">
+        {/* 300px default = VS Code's auxiliary bar default (min(300, width / 4)). */}
+        <ResizablePanel defaultWidth={300} minWidth={250} maxWidth={700} side="right" storageKey="za-chat-width">
           <SmartChat />
         </ResizablePanel>
       </div>

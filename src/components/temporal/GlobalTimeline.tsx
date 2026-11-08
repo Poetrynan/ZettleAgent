@@ -72,7 +72,14 @@ export function GlobalTimeline() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, contradicted: 0, superseded: 0 });
   const [loading, setLoading] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Collapsed by default to keep the dashboard short; the choice is remembered.
+  const [isExpanded, setIsExpandedState] = useState(() => {
+    try { return localStorage.getItem('zettel:dash-timeline-expanded') === 'true'; } catch { return false; }
+  });
+  const setIsExpanded = (next: boolean) => {
+    setIsExpandedState(next);
+    try { localStorage.setItem('zettel:dash-timeline-expanded', String(next)); } catch { /* ignore */ }
+  };
   const [filter, setFilter] = useState('all');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const L = state.lang === 'zh' ? LABELS.zh : LABELS.en;

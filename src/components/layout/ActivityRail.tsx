@@ -36,15 +36,23 @@ export function ActivityRail() {
   const { state, setView } = useApp();
   const { counts: inboxCounts } = useInboxCounts();
 
-  const primary: RailItem[] = [
-    { view: 'dashboard', icon: <IconChart size={18} />, label: t('toolbar.dashboard') },
-    { view: 'note', icon: <IconFile size={18} />, label: t('toolbar.note') },
-    { view: 'graph', icon: <IconNetwork size={18} />, label: t('toolbar.graph') },
-    { view: 'canvas', icon: <IconCanvas size={18} />, label: t('toolbar.canvas') },
-    { view: 'bases', icon: <IconStack size={18} />, label: t('toolbar.bases') },
-    { view: 'calendar', icon: <IconCalendar size={18} />, label: t('toolbar.calendar') },
-    { view: 'review', icon: <IconBrain size={18} />, label: t('review.navTitle') },
-    { view: 'knowledge', icon: <IconDatabase size={18} />, label: t('knowledge.navTitle') },
+  // Grouped like an IDE activity bar by what you are doing:
+  // writing, looking at the vault as a whole, and organizing it.
+  const groups: RailItem[][] = [
+    [
+      { view: 'dashboard', icon: <IconChart size={18} />, label: t('toolbar.dashboard') },
+      { view: 'note', icon: <IconFile size={18} />, label: t('toolbar.note') },
+      { view: 'calendar', icon: <IconCalendar size={18} />, label: t('toolbar.calendar') },
+    ],
+    [
+      { view: 'graph', icon: <IconNetwork size={18} />, label: t('toolbar.graph') },
+      { view: 'canvas', icon: <IconCanvas size={18} />, label: t('toolbar.canvas') },
+      { view: 'bases', icon: <IconStack size={18} />, label: t('toolbar.bases') },
+    ],
+    [
+      { view: 'review', icon: <IconBrain size={18} />, label: t('review.navTitle') },
+      { view: 'knowledge', icon: <IconDatabase size={18} />, label: t('knowledge.navTitle') },
+    ],
   ];
 
   const settings: RailItem = {
@@ -75,7 +83,13 @@ export function ActivityRail() {
       className="activity-rail"
       aria-label={state.lang === 'zh' ? '工作台' : 'Workspace'}
     >
-      <div className="activity-rail-group">{primary.map(renderItem)}</div>
+      <div className="activity-rail-group">
+        {groups.map((group, gi) => (
+          <div key={gi} className="activity-rail-cluster" role="group">
+            {group.map(renderItem)}
+          </div>
+        ))}
+      </div>
       {/* Settings is the one destination you leave rather than work in, so it
           sits apart at the bottom — same convention as VS Code's manage gear. */}
       <div className="activity-rail-group activity-rail-group-end">

@@ -2050,7 +2050,9 @@ export function SmartChat() {
             )}
 
             {/* Input container V2 — elevated card (Composer) */}
-            <div className="chat-input-container">
+            <div className={`chat-input-container ${isLoading ? 'is-working' : ''}`}>
+              {/* Travelling gradient on the border while the assistant works (after VS Code's chat input). */}
+              <span className="chat-input-working-ring" aria-hidden="true" />
               <textarea
                 ref={inputRef}
                 className="chat-input-textarea"

@@ -79,7 +79,17 @@ export function KnowledgeGraph() {
   const folderPickerRef = useRef<HTMLDivElement>(null);
   const folderBtnRef = useRef<HTMLDivElement>(null);
   const [hudCollapsed, setHudCollapsed] = useState(false);
-  const [tipsCollapsed, setTipsCollapsed] = useState(false);
+  // Tips start folded so the canvas is clear; the user's choice is remembered.
+  const [tipsCollapsed, setTipsCollapsedState] = useState(() => {
+    try { return localStorage.getItem('zettel:graph-tips-collapsed') !== 'false'; } catch { return true; }
+  });
+  const setTipsCollapsed = (update: (prev: boolean) => boolean) => {
+    setTipsCollapsedState((prev) => {
+      const next = update(prev);
+      try { localStorage.setItem('zettel:graph-tips-collapsed', String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   // ── Force parameters (Obsidian-style live sliders) ──
   const [forceParams, setForceParams] = useState<ForceParams>(DEFAULT_FORCE_PARAMS);

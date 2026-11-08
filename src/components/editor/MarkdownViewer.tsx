@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { readMarkdownFile, writeMarkdownFile } from '../../lib/tauri';
 import { t } from '../../lib/i18n';
@@ -478,11 +478,126 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
     );
   }
 
+  const showTabs = Boolean(!isSecondary && state.openFiles && state.openFiles.length > 0);
+  const breadcrumbSegments = (() => {
+    const norm = activeFile.replace(/\\/g, '/');
+    const root = (state.vaultPath || '').replace(/\\/g, '/').replace(/\/$/, '');
+    const rel = root && norm.startsWith(root + '/') ? norm.slice(root.length + 1) : norm.split('/').slice(-1)[0];
+    const rootName = root ? root.split('/').pop() || root : '';
+    const segs = rel.split('/').filter(Boolean);
+    if (segs.length) segs[segs.length - 1] = segs[segs.length - 1].replace(/\.md$/, '');
+    return rootName ? [rootName, ...segs] : segs;
+  })();
+  const editorActions = (
+    <div className="editor-actions">
+      {/* Split editor toggle (primary pane only) */}
+      {!isSecondary && (
+        <button
+          className="btn btn-ghost btn-icon-sm"
+          onClick={toggleSplitView}
+          title={state.lang === 'zh' ? '分屏编辑 (Split Editor)' : 'Split Editor'}
+          style={{ color: state.isSplitView ? 'var(--accent-primary)' : undefined }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="12" y1="3" x2="12" y2="21" />
+          </svg>
+        </button>
+      )}
+      {state.isSplitView && closeSplitButton(isSecondary ? 'text' : 'icon')}
+      {/* Export dropdown */}
+      <div ref={exportMenuRef} style={{ position: 'relative' }}>
+        <button
+          className="btn btn-ghost btn-icon-sm"
+          onClick={() => setShowExportMenu(!showExportMenu)}
+          title={t('viewer.export') || 'Export'}
+          
+        >
+          {exportStatus === 'exporting' ? (
+            <span className="spinner" style={{ width: '14px', height: '14px' }} />
+          ) : exportStatus === 'success' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          ) : (
+            <IconDownload size={14} />
+          )}
+        </button>
+        {showExportMenu && (
+          <div className="ctx-menu editor-export-menu" role="menu">
+            <button
+              onClick={handleExportHtml}
+              className="ctx-menu-item" role="menuitem"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              {t('viewer.exportHtml') || 'Export as HTML'}
+            </button>
+            <div className="ctx-menu-separator" />
+            <button
+              onClick={handleExportPdf}
+              className="ctx-menu-item" role="menuitem"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h6v2"/><path d="M12 13v5"/></svg>
+              {t('viewer.exportPdf') || 'Export as PDF'}
+            </button>
+          </div>
+        )}
+      </div>
+      {/* Timeline toggle (VS Code-style inline timeline) */}
+      <button
+        className="btn btn-ghost btn-icon-sm"
+        onClick={() => setShowTimelinePanel(!showTimelinePanel)}
+        title={state.lang === 'zh' ? '时间线 (Timeline)' : 'Timeline'}
+        aria-pressed={showTimelinePanel}
+        style={{ color: showTimelinePanel ? 'var(--accent-primary)' : undefined, background: showTimelinePanel ? 'var(--accent-tint)' : undefined }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <circle cx="3.5" cy="6" r="1.5" />
+          <circle cx="3.5" cy="12" r="1.5" />
+          <circle cx="3.5" cy="18" r="1.5" />
+        </svg>
+      </button>
+      <button
+        className="btn btn-ghost btn-icon-sm"
+        onClick={() => {
+          loadSnapshots();
+          setShowRecoveryModal(true);
+        }}
+        title={state.lang === 'zh' ? '文件恢复 (File Recovery)' : 'File Recovery'}
+        
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <polyline points="3 3 3 8 8 8"/>
+          <line x1="12" y1="7" x2="12" y2="12"/>
+          <line x1="12" y1="12" x2="16" y2="14"/>
+        </svg>
+      </button>
+      <button
+        className="btn btn-ghost btn-icon-sm"
+        onClick={() => setShowTimeline(true)}
+        title={t('viewer.timeline') || 'Knowledge Timeline'}
+        
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </button>
+      <button 
+        className="btn btn-ghost btn-icon-sm" 
+        onClick={() => setShowHelpModal(true)} 
+        title={t('viewer.helpTitle')} 
+        
+      >
+        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>?</span>
+      </button>
+    </div>
+  );
   return (
     <div className={`panel ${isSecondary ? 'panel-split-secondary' : ''}`}>
       {/* Tab bar only shown in primary pane */}
       {!isSecondary && state.openFiles && state.openFiles.length > 0 && (
         <div className={`tab-bar ${tabDragState?.dragging ? 'dragging' : ''}`}>
+          <div className="tab-bar-tabs">
           {state.openFiles.map((tpath, tabIdx) => {
             const isActive = activeFile === tpath;
             const parts = tpath.replace(/\\/g, '/').split('/');
@@ -513,9 +628,26 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
               </div>
             );
           })}
+          </div>
+          {editorActions}
         </div>
       )}
-      <div className="panel-header">
+      {showTabs ? (
+        /* VS Code-style breadcrumbs: where this note lives, plus save state */
+        <div className="editor-breadcrumbs" aria-label={state.lang === 'zh' ? '路径' : 'Path'}>
+          {breadcrumbSegments.map((seg, i) => (
+            <Fragment key={i}>
+              {i > 0 && <span className="editor-breadcrumbs-sep" aria-hidden="true">›</span>}
+              <span className={i === breadcrumbSegments.length - 1 ? 'editor-breadcrumbs-current' : 'editor-breadcrumbs-seg'}>{seg}</span>
+            </Fragment>
+          ))}
+          <span className="badge badge-default editor-breadcrumbs-badge">{t('viewer.markdown')}</span>
+          <span className={`editor-save-status is-${saveStatus}`}>
+            {saveStatus === 'saved' ? '' : saveStatus === 'saving' ? t('viewer.saving') : t('viewer.unsaved')}
+          </span>
+        </div>
+      ) : (
+        <div className="panel-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>{getFileName(activeFile)}</span>
           <span className="badge badge-default">{t('viewer.markdown')}</span>
@@ -529,140 +661,9 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
             {saveStatus === 'saved' ? '' : saveStatus === 'saving' ? t('viewer.saving') : t('viewer.unsaved')}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
-          {/* Split editor toggle (primary pane only) */}
-          {!isSecondary && (
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              onClick={toggleSplitView}
-              title={state.lang === 'zh' ? '分屏编辑 (Split Editor)' : 'Split Editor'}
-              style={{ width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)', padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', color: state.isSplitView ? 'var(--accent-primary)' : undefined }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <line x1="12" y1="3" x2="12" y2="21" />
-              </svg>
-            </button>
-          )}
-          {state.isSplitView && closeSplitButton(isSecondary ? 'text' : 'icon')}
-          {/* Export dropdown */}
-          <div ref={exportMenuRef} style={{ position: 'relative' }}>
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              onClick={() => setShowExportMenu(!showExportMenu)}
-              title={t('viewer.export') || 'Export'}
-              style={{ width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)', padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-            >
-              {exportStatus === 'exporting' ? (
-                <span className="spinner" style={{ width: '14px', height: '14px' }} />
-              ) : exportStatus === 'success' ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              ) : (
-                <IconDownload size={14} />
-              )}
-            </button>
-            {showExportMenu && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                right: 0,
-                marginTop: '4px',
-                background: '#FFFFFF',
-                border: '1px solid rgba(0,0,0,0.1)',
-                borderRadius: '8px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                zIndex: 100,
-                minWidth: '160px',
-                overflow: 'hidden',
-                animation: 'fadeIn 0.15s ease-out',
-              }}>
-                <button
-                  onClick={handleExportHtml}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                    width: '100%', padding: '10px 14px',
-                    border: 'none', background: 'none', cursor: 'pointer',
-                    fontSize: '13px', color: '#1E293B', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F1F5F9')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                  {t('viewer.exportHtml') || 'Export as HTML'}
-                </button>
-                <div style={{ height: '1px', background: 'rgba(0,0,0,0.06)' }} />
-                <button
-                  onClick={handleExportPdf}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                    width: '100%', padding: '10px 14px',
-                    border: 'none', background: 'none', cursor: 'pointer',
-                    fontSize: '13px', color: '#1E293B', textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F1F5F9')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h6v2"/><path d="M12 13v5"/></svg>
-                  {t('viewer.exportPdf') || 'Export as PDF'}
-                </button>
-              </div>
-            )}
-          </div>
-          {/* Timeline toggle (VS Code-style inline timeline) */}
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={() => setShowTimelinePanel(!showTimelinePanel)}
-            title={state.lang === 'zh' ? '时间线 (Timeline)' : 'Timeline'}
-            style={{
-              width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)',
-              padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center',
-              color: showTimelinePanel ? 'var(--accent-primary)' : undefined,
-              background: showTimelinePanel ? 'rgba(99, 102, 241, 0.08)' : undefined,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <circle cx="3.5" cy="6" r="1.5" />
-              <circle cx="3.5" cy="12" r="1.5" />
-              <circle cx="3.5" cy="18" r="1.5" />
-            </svg>
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={() => {
-              loadSnapshots();
-              setShowRecoveryModal(true);
-            }}
-            title={state.lang === 'zh' ? '文件恢复 (File Recovery)' : 'File Recovery'}
-            style={{ width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)', padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-              <polyline points="3 3 3 8 8 8"/>
-              <line x1="12" y1="7" x2="12" y2="12"/>
-              <line x1="12" y1="12" x2="16" y2="14"/>
-            </svg>
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={() => setShowTimeline(true)}
-            title={t('viewer.timeline') || 'Knowledge Timeline'}
-            style={{ width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)', padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          </button>
-          <button 
-            className="btn btn-ghost btn-icon-sm" 
-            onClick={() => setShowHelpModal(true)} 
-            title={t('viewer.helpTitle')} 
-            style={{ width: '28px', height: '28px', borderRadius: '50%', border: '1px solid rgba(0,0,0,0.08)', padding: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>?</span>
-          </button>
+          {editorActions}
         </div>
-      </div>
+      )}
 
       <div
         className="panel-content"

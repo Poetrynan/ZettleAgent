@@ -1068,109 +1068,97 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Swiss Sidebar Actions Toolbar */}
-      <div className="sidebar-vault-badge" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <button className="btn btn-ghost btn-icon-sm" onClick={handleSelectVault} title={t('sidebar.selectVault')}>
-            <IconFolder size={14} />
-          </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateNoteInline} title={t('sidebar.newFile')}>
+      {/* Explorer view header (VS Code style): title + every tree action in one row */}
+      <div className="explorer-header">
+        <span className="explorer-header__title">{state.lang === 'zh' ? '资源管理器' : 'Explorer'}</span>
+        <div className="explorer-header__actions">
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateNoteInline} title={t('sidebar.newFile')} aria-label={t('sidebar.newFile')}>
             <IconFilePlus size={14} />
           </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateFolderInline} title={t('sidebar.newFolder')}>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleCreateFolderInline} title={t('sidebar.newFolder')} aria-label={t('sidebar.newFolder')}>
             <IconFolderPlus size={14} />
           </button>
+          <button className="btn btn-ghost btn-icon-sm" onClick={handleSelectVault} title={t('sidebar.selectVault')} aria-label={t('sidebar.selectVault')}>
+            <IconFolder size={14} />
+          </button>
           <button className="btn btn-ghost btn-icon-sm" onClick={handleImportFiles} disabled={!state.vaultPath || isImporting}
-            title={!state.vaultPath ? t('sidebar.tipNoVault') : (state.lang === 'zh' ? '导入文件 / 附件' : 'Import files')}>
+            title={!state.vaultPath ? t('sidebar.tipNoVault') : (state.lang === 'zh' ? '导入文件 / 附件' : 'Import files')}
+            aria-label={state.lang === 'zh' ? '导入文件 / 附件' : 'Import files'}>
             <IconUpload size={14} />
+          </button>
+          <button
+            className="btn btn-ghost btn-icon-sm"
+            onClick={handleSortToggle}
+            title={state.lang === 'zh'
+              ? `切换排序字段（当前：${sortLabel}）`
+              : `Change sort field (current: ${sortLabel})`}
+            aria-label={state.lang === 'zh' ? `排序：${sortLabel}` : `Sort: ${sortLabel}`}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4" />
+            </svg>
+          </button>
+          <button
+            className="btn btn-ghost btn-icon-sm explorer-sort-dir"
+            onClick={handleSortDirectionToggle}
+            title={state.lang === 'zh'
+              ? `${sortLabel}${sortDesc ? '降序' : '升序'}，点击切换${sortDesc ? '升序' : '降序'}`
+              : `${sortLabel} ${sortDesc ? 'descending' : 'ascending'} — click for ${sortDesc ? 'ascending' : 'descending'}`}
+            aria-label={state.lang === 'zh' ? '切换排序方向' : 'Toggle sort direction'}
+          >
+            {sortDesc ? '↓' : '↑'}
+          </button>
+          <button
+            className="btn btn-ghost btn-icon-sm"
+            onClick={expandedFolders.size > 0 ? handleCollapseAll : handleExpandAll}
+            title={state.lang === 'zh'
+              ? (expandedFolders.size > 0 ? '折叠全部文件夹' : '展开全部文件夹')
+              : (expandedFolders.size > 0 ? 'Collapse All Folders' : 'Expand All Folders')}
+            aria-label={state.lang === 'zh'
+              ? (expandedFolders.size > 0 ? '折叠全部文件夹' : '展开全部文件夹')
+              : (expandedFolders.size > 0 ? 'Collapse All Folders' : 'Expand All Folders')}
+          >
+            {expandedFolders.size > 0 ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="7 8 12 13 17 8"/><polyline points="7 3 12 8 17 3"/><line x1="12" y1="13" x2="12" y2="21"/>
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="7 13 12 8 17 13"/><polyline points="7 18 12 13 17 18"/><line x1="12" y1="3" x2="12" y2="8"/>
+              </svg>
+            )}
           </button>
         </div>
       </div>
 
-      {/* Filename Search Input — only filters file tree by name */}
-
-      {/* Filename Search Input — only filters file tree by name */}
-      <div style={{ padding: 'var(--space-2) var(--space-3) var(--space-1)' }}>
-        <div style={{ position: 'relative' }}>
-          <div style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }}>
-            <IconSearch size={14} />
-          </div>
-          <input
-            type="text" className="input"
-            placeholder={t('sidebar.search')}
-            value={state.searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ paddingLeft: 'var(--space-8)' }}
-          />
-          {state.searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              title={state.lang === 'zh' ? '清除' : 'Clear'}
-              style={{
-                position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
-                border: 'none', background: 'none', cursor: 'pointer', padding: '2px',
-                color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center',
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          )}
-        </div>
-        {/* Content search link — opens SearchPanel (Ctrl+Shift+F) */}
+      {/* Filter field: filters the tree by name; the trailing button opens full-text search */}
+      <div className="explorer-search">
+        <span className="explorer-search__icon" aria-hidden="true"><IconSearch size={13} /></span>
+        <input
+          type="text" className="input explorer-search__input"
+          placeholder={t('sidebar.search')}
+          value={state.searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+        {state.searchQuery && (
+          <button
+            className="explorer-search__btn"
+            onClick={() => setSearchQuery('')}
+            title={state.lang === 'zh' ? '清除' : 'Clear'}
+            aria-label={state.lang === 'zh' ? '清除' : 'Clear'}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        )}
         <button
-          className="sidebar-content-search-link"
+          className="explorer-search__btn sidebar-content-search-link"
           onClick={() => window.dispatchEvent(new CustomEvent('zettel:open-search-panel'))}
           title={state.lang === 'zh' ? '搜索笔记内容 (Ctrl+Shift+F)' : 'Search note content (Ctrl+Shift+F)'}
+          aria-label={state.lang === 'zh' ? '内容搜索' : 'Content Search'}
         >
-          <IconSearch size={11} />
-          <span>{state.lang === 'zh' ? '内容搜索' : 'Content Search'}</span>
-          <kbd>Ctrl+Shift+F</kbd>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/><path d="m20.2 18.2 1.8 1.8"/></svg>
         </button>
       </div>
-
-      {/* Tree Toolbar — sort / expand / collapse */}
-      <div className="sidebar-tree-toolbar">
-        <button
-          className="sidebar-tree-toolbar-btn"
-          onClick={handleSortToggle}
-          title={state.lang === 'zh'
-            ? `切换排序字段（当前：${sortLabel}）`
-            : `Change sort field (current: ${sortLabel})`}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 5h10M11 9h7M11 13h4M3 17l3 3 3-3M6 18V4" style={{ transform: sortDesc ? 'scaleY(-1)' : 'none', transformOrigin: 'center' }} />
-          </svg>
-        </button>
-        <button
-          className="sidebar-tree-toolbar-btn"
-          onClick={expandedFolders.size > 0 ? handleCollapseAll : handleExpandAll}
-          title={state.lang === 'zh'
-            ? (expandedFolders.size > 0 ? '折叠全部文件夹' : '展开全部文件夹')
-            : (expandedFolders.size > 0 ? 'Collapse All Folders' : 'Expand All Folders')}
-        >
-          {expandedFolders.size > 0 ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="7 8 12 13 17 8"/><polyline points="7 3 12 8 17 3"/><line x1="12" y1="13" x2="12" y2="21"/>
-            </svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="7 13 12 8 17 13"/><polyline points="7 18 12 13 17 18"/><line x1="12" y1="3" x2="12" y2="8"/>
-            </svg>
-          )}
-        </button>
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          className="sidebar-tree-sort-label"
-          onClick={handleSortDirectionToggle}
-          title={state.lang === 'zh'
-            ? `点击切换${sortDesc ? '升序' : '降序'}`
-            : `Click to sort ${sortDesc ? 'ascending' : 'descending'}`}
-        >
-          {sortLabel}{sortDesc ? ' ↓' : ' ↑'}
-        </button>
-      </div>
-
       {/* Sync Status */}
       {state.isSyncing && (
         <div style={{ padding: 'var(--space-1) var(--space-3)' }}>
