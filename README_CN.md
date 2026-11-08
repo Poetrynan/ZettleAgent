@@ -1,4 +1,4 @@
-![ZettleAgent Banner](./screenshots/zettleagent-readme-swiss-banner.png)
+![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
 
 <div align="center">
 
@@ -92,13 +92,13 @@
 ### 1. 三栏式桌面知识操作系统 & 3D 拓扑图谱
 *交互式 PageRank 节点权重图谱、可折叠文件浏览器与原生自主 Agent Desk。*
 
-![ZettleAgent 三栏式桌面知识操作系统](./screenshots/showcase-workspace-atlas.png)
+![ZettleAgent 三栏式桌面知识操作系统](./screenshots/showcase-workspace.svg)
 
 <br>
 
 | 2. WriteGuard™ 行级 Diff 审批与撤销账本 | 3. 白板空间推理引擎 (Obsidian 兼容) |
 |:---:|:---:|
-| <img src="./screenshots/showcase-writeguard-diff.png" alt="WriteGuard 行级 Diff 审批" width="100%"> | <img src="./screenshots/showcase-canvas-spatial.png" alt="白板空间推理引擎" width="100%"> |
+| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard 行级 Diff 审批" width="100%"> | <img src="./screenshots/showcase-canvas.svg" alt="白板空间推理引擎" width="100%"> |
 | *ReadyWrite 凭证门禁、逐行勾选批准与 100% 一键回滚* | *4 大空间推理目标 (拆解/对比/溯源/聚类) + SQLite 双向编译* |
 
 <br>
@@ -106,7 +106,7 @@
 ### 4. 科学间隔重复系统 (FSRS-4.5 引擎)
 *基于现代 FSRS 记忆算法、严格单调性不变量守护与长效情节记忆库。*
 
-![FSRS-4.5 间隔复习引擎](./screenshots/showcase-fsrs-review.png)
+![FSRS-4.5 间隔复习引擎](./screenshots/showcase-review.svg)
 
 </div>
 

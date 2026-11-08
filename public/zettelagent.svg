@@ -1,18 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="ZettleAgent">
+  <!--
+    ZettleAgent app icon.
+    A single ink "Z" drawn as one line of thought through three linked notes,
+    pressed into warm paper. The middle note — where the idea turns — is the
+    only colour. macOS grid: 1024 canvas, 824 body, 100 margin.
+  -->
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#6366f1"/>
-      <stop offset="100%" stop-color="#8b5cf6"/>
+    <!-- Paper: barely-there top-to-bottom light falloff, no hue shift -->
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FAF8F3"/>
+      <stop offset="1" stop-color="#EFEBE3"/>
     </linearGradient>
+
+    <!-- Fine paper grain -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.35  0 0 0 0 0.30  0 0 0 0 0.24  0 0 0 0.06 0"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+
+    <!-- Soft cast shadow of the tile -->
+    <filter id="tile" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.16"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+
+    <!-- Letterpress: ink sits slightly below the paper (inner shadow on top edge,
+         faint highlight on the bottom edge) -->
+    <filter id="press" x="-10%" y="-10%" width="120%" height="120%">
+      <feOffset in="SourceAlpha" dx="0" dy="5" result="off"/>
+      <feGaussianBlur in="off" stdDeviation="4" result="blur"/>
+      <feComposite in="SourceAlpha" in2="blur" operator="arithmetic" k2="1" k3="-1" result="inner"/>
+      <feFlood flood-color="#000" flood-opacity="0.45"/>
+      <feComposite in2="inner" operator="in" result="innerShadow"/>
+      <feOffset in="SourceAlpha" dx="0" dy="-2" result="up"/>
+      <feComposite in="up" in2="SourceAlpha" operator="out" result="rim"/>
+      <feFlood flood-color="#fff" flood-opacity="0.0"/>
+      <feComposite in2="rim" operator="in" result="rimLight"/>
+      <feMerge>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="innerShadow"/>
+      </feMerge>
+    </filter>
+
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1" flood-color="#fff" flood-opacity="0.9"/>
+    </filter>
+
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
   </defs>
-  <rect width="32" height="32" rx="8" fill="url(#g)"/>
-  <!-- Brain/network icon -->
-  <circle cx="16" cy="12" r="2.5" fill="white" opacity="0.95"/>
-  <circle cx="10" cy="20" r="2" fill="white" opacity="0.8"/>
-  <circle cx="22" cy="20" r="2" fill="white" opacity="0.8"/>
-  <circle cx="16" cy="24" r="1.5" fill="white" opacity="0.6"/>
-  <line x1="16" y1="14.5" x2="10" y2="18" stroke="white" stroke-width="1.2" opacity="0.7"/>
-  <line x1="16" y1="14.5" x2="22" y2="18" stroke="white" stroke-width="1.2" opacity="0.7"/>
-  <line x1="10" y1="22" x2="16" y2="22.5" stroke="white" stroke-width="1" opacity="0.5"/>
-  <line x1="22" y1="22" x2="16" y2="22.5" stroke="white" stroke-width="1" opacity="0.5"/>
+
+  <!-- Tile -->
+  <g filter="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#paper)"/>
+  </g>
+  <g clip-path="url(#body)">
+    <rect x="100" y="100" width="824" height="824" fill="#fff" filter="url(#grain)"/>
+  </g>
+  <!-- Edge: hairline + top highlight, like a sheet with a slight bevel -->
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="2"/>
+  <rect x="104" y="104" width="816" height="816" rx="181" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="3" clip-path="url(#body)" stroke-dasharray="1400 4000" stroke-dashoffset="-120"/>
+
+  <!-- The Z: one continuous stroke -->
+  <g filter="url(#lift)">
+    <g filter="url(#press)">
+      <path d="M318 330 H706 L318 694 H706" fill="none" stroke="#1C1B19" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Three linked notes -->
+      <circle cx="318" cy="330" r="62" fill="#1C1B19"/>
+      <circle cx="706" cy="694" r="62" fill="#1C1B19"/>
+      <circle cx="512" cy="512" r="62" fill="#C8432B"/>
+    </g>
+  </g>
 </svg>

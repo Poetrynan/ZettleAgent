@@ -1,4 +1,4 @@
-![ZettleAgent Banner](./screenshots/zettleagent-readme-swiss-banner.png)
+![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
 
 <div align="center">
 
@@ -92,13 +92,13 @@
 ### 1. The 3-Column Desktop OS & 3D Topology Atlas
 *Interactive PageRank centrality graph, collapsible file explorer, and autonomous Agent Desk.*
 
-![ZettleAgent 3-Column Desktop OS Workspace](./screenshots/showcase-workspace-atlas.png)
+![ZettleAgent 3-Column Desktop OS Workspace](./screenshots/showcase-workspace.svg)
 
 <br>
 
 | 2. WriteGuard™ Line Diff & ChangeSet Ledger | 3. Spatial Reasoning Infinite Canvas |
 |:---:|:---:|
-| <img src="./screenshots/showcase-writeguard-diff.png" alt="WriteGuard Line Diff" width="100%"> | <img src="./screenshots/showcase-canvas-spatial.png" alt="Spatial Reasoning Canvas" width="100%"> |
+| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard Line Diff" width="100%"> | <img src="./screenshots/showcase-canvas.svg" alt="Spatial Reasoning Canvas" width="100%"> |
 | *ReadyWrite gate, line-by-line Diff approval & 1-click undo* | *4 spatial goals (explain, compare, trace, cluster) + SQLite sync* |
 
 <br>
@@ -106,7 +106,7 @@
 ### 4. Scientific Spaced Repetition (FSRS-4.5 Engine)
 *Modern memory retention with strict monotonic invariants and episodic memory store.*
 
-![FSRS-4.5 Spaced Repetition Review Engine](./screenshots/showcase-fsrs-review.png)
+![FSRS-4.5 Spaced Repetition Review Engine](./screenshots/showcase-review.svg)
 
 </div>
 

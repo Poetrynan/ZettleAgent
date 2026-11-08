@@ -1,4 +1,4 @@
-![ZettleAgent Banner](./screenshots/zettleagent-readme-swiss-banner.png)
+![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
 
 <div align="center">
 
@@ -92,13 +92,13 @@
 ### 1. 3 カラム型デスクトップ知識 OS & 3D トポロジーアトラス
 *インタラクティブな PageRank グラフ、折りたたみ式エクスプローラー、自律型 Agent Desk。*
 
-![ZettleAgent 3 カラム型デスクトップ知識 OS](./screenshots/showcase-workspace-atlas.png)
+![ZettleAgent 3 カラム型デスクトップ知識 OS](./screenshots/showcase-workspace.svg)
 
 <br>
 
 | 2. WriteGuard™ 行単位 Diff 承認＆台帳 | 3. 空間推論ホワイトボード (Obsidian 互換) |
 |:---:|:---:|
-| <img src="./screenshots/showcase-writeguard-diff.png" alt="WriteGuard 行単位 Diff 承認" width="100%" /> | <img src="./screenshots/showcase-canvas-spatial.png" alt="空間推論ホワイトボード" width="100%" /> |
+| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard 行単位 Diff 承認" width="100%" /> | <img src="./screenshots/showcase-canvas.svg" alt="空間推論ホワイトボード" width="100%" /> |
 | *ReadyWrite ゲート、行単位チェック承認＆ワンクリック Undo* | *4 つの推論目標 (分解/比較/追跡/クラスタ) + SQLite 同期* |
 
 <br>
@@ -107,7 +107,7 @@
 *最新の FSRS 記憶モデル、厳格な単調性ガード、エピソード記憶ストア。*
 
 <p align="center">
-  <img src="./screenshots/showcase-fsrs-review.png" alt="FSRS-4.5 復習エンジン" width="75%" />
+  <img src="./screenshots/showcase-review.svg" alt="FSRS-4.5 復習エンジン" width="75%" />
 </p>
 
 </div>

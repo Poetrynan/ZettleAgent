@@ -1,4 +1,4 @@
-![ZettleAgent Banner](./screenshots/zettleagent-readme-swiss-banner.png)
+![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
 
 <div align="center">
 
@@ -92,13 +92,13 @@
 ### 1. 3열 데스크톱 지식 OS & 3D 위상 아틀라스
 *인터랙티브 PageRank 그래프, 접이식 탐색기, 자율형 Agent Desk.*
 
-![ZettleAgent 3열 데스크톱 지식 운영체제](./screenshots/showcase-workspace-atlas.png)
+![ZettleAgent 3열 데스크톱 지식 운영체제](./screenshots/showcase-workspace.svg)
 
 <br>
 
 | 2. WriteGuard™ 행 단위 Diff 승인 & 원장 | 3. 공간 추론 화이트보드 (Obsidian 호환) |
 |:---:|:---:|
-| <img src="./screenshots/showcase-writeguard-diff.png" alt="WriteGuard 행 단위 Diff 승인" width="100%" /> | <img src="./screenshots/showcase-canvas-spatial.png" alt="공간 추론 화이트보드" width="100%" /> |
+| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard 행 단위 Diff 승인" width="100%" /> | <img src="./screenshots/showcase-canvas.svg" alt="공간 추론 화이트보드" width="100%" /> |
 | *ReadyWrite 게이트, 행 단위 체크 승인 & 원클릭 Undo* | *4대 추론 목표 (분해/비교/추적/군집) + SQLite 동기화* |
 
 <br>
@@ -107,7 +107,7 @@
 *최신 FSRS 기억 모델, 엄격한 단조성 가드, 장기 에피소드 기억 저장소.*
 
 <p align="center">
-  <img src="./screenshots/showcase-fsrs-review.png" alt="FSRS-4.5 복습 엔진" width="75%" />
+  <img src="./screenshots/showcase-review.svg" alt="FSRS-4.5 복습 엔진" width="75%" />
 </p>
 
 </div>
