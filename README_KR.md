@@ -1,191 +1,135 @@
-![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
+![ZettelAgent](screenshots/zettleagent-banner.svg)
 
-<div align="center">
+# ZettelAgent
 
-  # ZettelAgent
+### 지식 관리를 위한 로컬 우선 AI Agent / IDE
 
-  ### 로컬 우선 · 네이티브 AI 에이전트 기반 카드박스 지식 운영체제
+Markdown으로 쓰고, 관련 아이디어를 찾고, Agent의 변경을 검토하세요.
 
-  *생각하고, 모순을 검증하고, 노트를 스스로 진화시키는 두 번째 두뇌.*  
-  순수 로컬 Markdown 폴더에서 완결 — **Docker 불필요, 클라우드 락인 없음, 원격 측정 0.**
+ZettelAgent는 노트, 검색, 지식 그래프, 무한 캔버스와 간격 반복을 하나의 데스크톱 작업 공간에 모았습니다. 로컬 또는 클라우드 언어 모델을 연결해 대화, 지식 진단과 노트 정리를 수행합니다.
 
-  <!-- Badges -->
-  <p>
-    <a href="https://poetrynan.github.io/zettelagent.org/"><img src="https://img.shields.io/badge/🌐_공식_웹사이트-zettelagent.org-CF2711?style=for-the-badge" alt="공식 웹사이트"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9&logo=github&cacheSeconds=60" alt="Stars"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Release"></a>
-    <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
-    <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
-  </p>
+[![Release](https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?color=C8432B)](https://github.com/Poetrynan/ZettleAgent/releases)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-5C5C61)
+![React 19](https://img.shields.io/badge/React-19-5C5C61)
+![Rust](https://img.shields.io/badge/Rust-stable-5C5C61)
+![Embedding](https://img.shields.io/badge/Embedding-Jina_v2_zh_768d-5C5C61)
+[![License](https://img.shields.io/github/license/Poetrynan/ZettleAgent?color=5C5C61)](https://github.com/Poetrynan/ZettleAgent/blob/master/LICENSE)
 
-  <!-- Tech stack -->
-  <p>
-    <img src="https://img.shields.io/badge/Tauri-2.0-FFC107?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2.0">
-    <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19">
-    <img src="https://img.shields.io/badge/Rust-1.96-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.96">
-    <img src="https://img.shields.io/badge/SQLite-FTS5%20+%20Vec-0EA5E9?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
-    <img src="https://img.shields.io/badge/Embedding-nomic--v1.5%20WebGPU%2FWASM-10B981?style=flat-square" alt="Embedding">
-    <img src="https://img.shields.io/badge/Algorithm-FSRS--4.5-8B5CF6?style=flat-square" alt="FSRS-4.5">
-  </p>
+[English](README.md) · [中文](README_CN.md) · [日本語](README_JP.md) · **한국어**
 
-  <!-- Language switcher -->
-  <p>
-    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> · <a href="README_JP.md">日本語</a> · <strong>한국어</strong>
-  </p>
+[Releases](https://github.com/Poetrynan/ZettleAgent/releases) · [Website](https://poetrynan.github.io/zettelagent.org/) · [v0.3.0 Release Notes](.github/release-notes/v0.3.0.md)
 
-</div>
+[이번 업데이트](#new) · [주요 기능](#features) · [화면 안내](#showcase) · [빠른 시작](#start) · [소스에서 빌드](#build) · [대상 플랫폼](#platforms) · [기여](#contributing)
 
----
+<a id="new"></a>
 
-> ### 🚀 [Releases에서 다운로드](https://github.com/Poetrynan/ZettleAgent/releases) · 🌐 [공식 웹사이트 · zettelagent.org](https://poetrynan.github.io/zettelagent.org/)
-> 
-> Node.js, Docker, 추가 모델 다운로드 불필요. 약 300MB 독립형 설치 패키지에 nomic 임베딩 모델, ONNX Runtime WASM, 오프라인 OCR이 내장되어 있어 설치 후 완전한 오프라인 환경에서 로컬 Markdown 노트를 관리할 수 있습니다.
+## 이번 업데이트 — v0.3.0
 
----
+v0.3.0은 작업 중심 Dashboard, 검색 가능한 11개 설정 섹션, 캔버스 연결과 스냅, 중국어 검색, 노트 이력 및 안전한 실행 취소를 개선합니다.
 
-## 📑 목차
+<a id="features"></a>
 
-- [✨ 핵심 아키텍처 및 기능](#-핵심-아키텍처-및-기능)
-- [📸 인터페이스 소개 (새롭게 단장된 데스크톱 UI)](#-인터페이스-소개-새롭게-단장된-데스크톱-ui)
-- [⚔️ 심층 아키텍처 및 경쟁 비교](#️-심층-아키텍처-및-경쟁-비교)
-- [🏁 빠른 시작 (최종 사용자)](#-빠른-시작-최종-사용자)
-- [🛠 소스에서 빌드 (개발자)](#-소스에서-빌드-개발자)
-- [💻 시스템 요구 사항](#-시스템-요구-사항)
-- [🤝 기여하기](#-기여하기)
-- [🙏 감사의 말](#-감사의-말)
-- [📜 라이선스](#-라이선스)
+## 주요 기능
 
----
+| 작업 흐름 | 할 수 있는 일 |
+| :--- | :--- |
+| **Markdown 보관함** | 로컬 폴더, 일일 노트, 위키 링크와 연결되지 않은 언급을 활용합니다. 노트 파일은 다른 편집기에서도 열 수 있습니다. |
+| **Dashboard** | 보관함 수치, 색인 진행, 백그라운드 정리, 최근 변경과 진단을 확인합니다. 유지보수 작업은 접어서 표시합니다. |
+| **Agent와 지식 센터** | 검색된 문맥으로 질문하고 변경 제안, 기억, 작업과 그래프 공백 계획을 검토합니다. 외부 MCP 도구와 스킬 디렉터리를 연결할 수 있습니다. |
+| **하이브리드 검색** | FTS5, 로컬 768차원 Jina 임베딩, 그래프 신호와 BCE 재순위를 결합합니다. 중국어 간체·번체 상호 검색과 `.zettelignore` 제외 규칙을 지원합니다. |
+| **캔버스와 그래프** | 드래그 연결과 스냅 정렬, 설명·비교·추적·군집화 계획을 사용합니다. 링크, PageRank와 커뮤니티를 탐색하고 Obsidian `.canvas` 파일을 다룹니다. |
+| **설정 작업 공간** | Workbench, Agent, System의 11개 섹션을 검색합니다. 저장된 모델 연결 테스트, 섹션 간 초안 유지, 규칙·권한·검색·저장소 설정을 제공합니다. |
+| **간격 반복** | FSRS-4.5 복습 일정과 목표 유지율, 일일 한도, 최대 간격을 설정합니다. |
+| **변경 검토와 복구** | 지원되는 Agent 변경에는 권한 검사가 적용되며 미리보기와 변경 이력을 확인할 수 있습니다. 실행 취소는 이후 편집을 검사하고 충돌 시 복원을 거부할 수 있습니다. |
 
-## ✨ 핵심 아키텍처 및 기능
+### 로컬 데이터와 모델 연결
 
-### 🛡️ WriteGuard 쓰기 보호 및 100% 가역 ChangeSet (데이터 주권 보호)
-- **Human-in-the-Loop 승인 게이트**: 에이전트가 사용자의 파일을 무단으로 덮어쓰지 않습니다. 모든 수정 제안은 `READYWRITE` 토큰을 받아야 하며, 행 단위 Diff(Line Diff) 미리보기를 통해 사용자가 직접 검토하고 개별 승인할 수 있습니다.
-- **100% 가역 ChangeSet 원장**: 모든 변경 작업에 대해 완전한 역방향 패치를 SQLite에 저장합니다. 수정된 텍스트, 삭제된 노드, 끊어진 연결선을 클릭 한 번으로 원래 좌표로 복원할 수 있습니다.
+노트, 검색 데이터베이스와 내장 임베딩·OCR 처리는 로컬에 유지됩니다. AI 대화와 정리에는 모델 연결이 필요합니다. 클라우드를 선택하면 요청과 포함된 노트 문맥이 해당 서비스로 전송됩니다. 로컬 모델 서비스에 연결하면 이 요청을 기기 안에 유지할 수 있습니다. 사용자 지정 원격 임베딩 서비스에도 색인과 검색에 사용하는 텍스트가 전송됩니다. 외부 도구는 각자의 연결을 사용합니다.
 
-### 🤖 네이티브 자율형 Multi-Agent (6대 전용 도메인 툴킷)
-- **도메인 툴 팩 (Packs)**: 노트 원자 작업, 벡터 및 하이브리드 검색, 그래프 구조 진단, 화이트보드 공간 추론, 워크스페이스 상태 감사, Web 심층 검색.
-- **3단계 하이브리드 의도 라우팅 (L0/L1/L2)**: 명확한 명령은 L0 규칙 직통(0ms, 0 Token), 복잡한 작업만 L2 거대 모델 계획으로 승격.
-- **로컬 7B/14B 소형 모델 심층 최적화**: 툴 스키마를 동적으로 정리하여 턴당 4,000+ 토큰을 절약하고, 로컬 Ollama/vLLM에서 도구 호출 환각률 0%를 달성합니다.
+API 키는 사용 가능한 OS 자격 증명 저장소에 저장합니다. 저장소를 사용할 수 없으면 설정에서 보호되지 않은 대체 저장 상태를 알립니다. 자동 정리 전에 **Permissions & recovery**를 확인하세요. 승인 요구는 권한 모드에 따라 달라집니다. 실행 취소 이력은 백업을 대신하지 않습니다.
 
-### 🧠 수학적 그래프 위상 및 사각지대 진단 (GraphPlan)
-- **그래프 이론 알고리즘**: **PageRank 중심성 점수**, **Louvain 커뮤니티 탐지 군집화**, 최단 개념 경로를 실시간 계산.
-- **GraphPlan 사각지대 복구**: 고립된 노트, 깨진 링크, 의미론적 사각지대를 자동 탐지하고 구조적 복구 계획을 일괄 생성합니다.
+<a id="showcase"></a>
 
-### 🎨 공간 추론 무한 화이트보드 (Obsidian Canvas 호환)
-- **4가지 공간 추론 목표**: `explain` (계층 분해), `compare` (비교 매트릭스), `trace` (인과/시계열 추적), `cluster` (주제별 군집).
-- **양방향 컴파일**: 무한 화이트보드 연결선과 SQLite 데이터베이스가 실시간으로 양방향 동기화 및 컴파일됩니다.
+## 화면 안내
 
-### 🔐 OS 하드웨어 키링 보안 기반 (OS Keyring Substrate)
-- **하드웨어 레벨 암호화**: API 키와 모델 자격 증명은 Windows DPAPI 및 macOS Keychain으로 안전하게 암호화되며, WebView나 로컬 JSON 설정 파일에 평문 토큰이 전혀 남지 않습니다.
-- **순수 오프라인 벡터 스토어**: SQLite-vec + FTS5 로컬 임베딩으로 클라우드 텔레메트리가 전혀 없습니다.
+아래 SVG는 예시 데이터로 그린 화면 설명도이며 실제 스크린샷이 아닙니다. 작업 흐름과 정보 구조를 보여 주며 테마와 플랫폼에 따라 외관이 달라질 수 있습니다.
 
-### 📈 과학적 간격 반복 시스템 (FSRS-4.5)
-- **최신 기억 유지 알고리즘**: 엄격한 단조성 불변 가드를 갖춘 FSRS-4.5 현대적 간격 반복 알고리즘 및 에피소드 기억 저장소를 내장했습니다.
+### 1. Dashboard: 상태, 다음 작업, 색인과 최근 변경
 
----
+![Dashboard: 상태, 다음 작업, 색인과 최근 변경](screenshots/showcase-dashboard.svg)
 
-## 📸 인터페이스 소개 (새롭게 단장된 데스크톱 UI)
+### 2. 설정: 검색, 그룹 탐색과 명시적으로 저장하는 연결 초안
 
-<div align="center">
+![설정: 검색, 그룹 탐색과 명시적으로 저장하는 연결 초안](screenshots/showcase-settings.svg)
 
-### 1. 3열 데스크톱 지식 OS & 3D 위상 아틀라스
-*인터랙티브 PageRank 그래프, 접이식 탐색기, 자율형 Agent Desk.*
+### 3. 작업 공간: 탐색기, 그래프와 Agent 대화
 
-![ZettleAgent 3열 데스크톱 지식 운영체제](./screenshots/showcase-workspace.svg)
+![작업 공간: 탐색기, 그래프와 Agent 대화](screenshots/showcase-workspace.svg)
 
-<br>
+### 4. 캔버스: 노트 카드, 연결과 정렬 안내선
 
-| 2. WriteGuard™ 행 단위 Diff 승인 & 원장 | 3. 공간 추론 화이트보드 (Obsidian 호환) |
-|:---:|:---:|
-| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard 행 단위 Diff 승인" width="100%" /> | <img src="./screenshots/showcase-canvas.svg" alt="공간 추론 화이트보드" width="100%" /> |
-| *ReadyWrite 게이트, 행 단위 체크 승인 & 원클릭 Undo* | *4대 추론 목표 (분해/비교/추적/군집) + SQLite 동기화* |
+![캔버스: 노트 카드, 연결과 정렬 안내선](screenshots/showcase-canvas.svg)
 
-<br>
+### 5. 변경 검토: 편집 제안과 이후 편집을 보호하는 복구
 
-### 4. 과학적 간격 반복 시스템 (FSRS-4.5 엔진)
-*최신 FSRS 기억 모델, 엄격한 단조성 가드, 장기 에피소드 기억 저장소.*
+![변경 검토: 편집 제안과 이후 편집을 보호하는 복구](screenshots/showcase-writeguard.svg)
 
-<p align="center">
-  <img src="./screenshots/showcase-review.svg" alt="FSRS-4.5 복습 엔진" width="75%" />
-</p>
+### 6. 복습: 능동 회상과 FSRS 일정
 
-</div>
+![복습: 능동 회상과 FSRS 일정](screenshots/showcase-review.svg)
 
----
+<a id="start"></a>
 
-## ⚔️ 심층 아키텍처 및 경쟁 비교
+## 빠른 시작
 
-| 비교 항목 | **ZETTLEAGENT (추천)** | **OBSIDIAN** | **LOGSEQ** | **NOTION / MEM** |
-| :--- | :--- | :--- | :--- | :--- |
-| **AI 작동 모델** | 🚀 **네이티브 자율형 Agent** (6대 툴팩, L0-L2 라우팅, CoT 스트림) | ⚠️ **서드파티 플러그인 의존** (통일된 상태 머신 없음) | ⚠️ **실험적 플러그인만 지원** (자율 루프 없음) | ☁️ **클라우드 텍스트 도우미** (단순 완성, 도구 연동 불가) |
-| **로컬 7B/14B 최적화** | ⚡ **스키마 경량화 최적화** (4000+ 토큰 절약, 환각 0%) | ⚠️ **클라우드 API 전제** (소형 모델 호출 시 잦은 오류) | ❌ **소형 모델 최적화 없음** | ❌ **로컬 Ollama 연결 불가** |
-| **파일 변경 안전성** | 🛡️ **WriteGuard 게이트** (행 단위 Diff 승인, ReadyWrite 토큰) | ⚠️ **파일 직접 덮어쓰기** (단순 파일 이력 의존) | ⚠️ **파일 직접 덮어쓰기** (Git 플러그인 의존) | ☁️ **클라우드 블록 교체** (전체 페이지 복원만 가능) |
-| **완전 가역 Undo** | 🔄 **100% 가역 ChangeSet 원장** (노트 및 캔버스 원클릭 복원) | ❌ **역방향 패치 원장 없음** | ❌ **수동 git revert만 가능** | ❌ **세부적인 AI 취소 원장 없음** |
-| **그래프 이론 위상** | 🧠 **PageRank 중심성 + Louvain 군집 + GraphPlan 진단** | ⚠️ **단순 시각화만 지원** (알고리즘 분석 없음) | ⚠️ **기본 2D 관계도** | ❌ **그래프 미지원** (계층형 트리만 지원) |
-| **공간 추론 캔버스** | 🎨 **4대 추론 목표 + 자동 배치 + SQLite 양방향 동기화** | ⚠️ **수동 드래그 앤 드롭** (플러그인은 단순 텍스트 추가) | ⚠️ **기본 화이트보드** (추론 목표 없음) | ❌ **무한 화이트보드 미지원** |
-| **보안 기반** | 🔐 **OS 하드웨어 키링 (DPAPI/Keychain) + 텔레메트리 0** | ⚠️ **플러그인 평문 JSON에 API 키 저장** | ⚠️ **평문 설정** | ☁️ **상업용 클라우드 호스팅** (모든 데이터가 SaaS에 노출) |
-| **간격 반복 시스템** | 📈 **내장 FSRS-4.5 (단조성 가드) + 에피소드 기억** | ⚠️ **플러그인 필수 (레거시 SM-2)** | ⚠️ **기본 플래시카드 (구형)** | ❌ **간격 반복 미지원** |
+1. [Releases](https://github.com/Poetrynan/ZettleAgent/releases)에서 플랫폼에 맞는 패키지를 설치합니다. 설치된 앱에는 Node.js나 Docker가 필요하지 않습니다.
+2. 로컬 Markdown 폴더를 보관함으로 엽니다.
+3. Dashboard에서 검색 색인을 업데이트합니다. 내장 모델은 필요할 때 로드하므로 처음에는 시간이 걸릴 수 있습니다.
+4. AI 대화와 정리는 **Settings → Models & connections**에서 서비스를 선택하고 연결을 저장한 뒤 테스트합니다. 대화용 LLM은 앱에 포함되지 않습니다.
+5. 자동 정리 전에 **Agent behavior**, **Rules & memory**, **Permissions & recovery**를 확인합니다.
 
----
+벡터 색인은 **768차원**을 사용합니다. 사용자 지정 임베딩 서비스도 같은 차원을 반환해야 합니다. 업데이트는 대기 중인 내용을 처리하고, 전체 벡터 재구축은 파생 벡터와 캐시를 지운 뒤 다시 생성합니다. 원격 서비스 요청이 다시 발생하므로 전체 재구축 전에 백그라운드 정리를 일시 정지하세요.
 
-## 🏁 빠른 시작 (최종 사용자)
+<a id="build"></a>
 
-1. [Releases 페이지](https://github.com/Poetrynan/ZettleAgent/releases) 에서 사용 중인 OS에 맞는 설치 파일(Windows `.exe`, macOS `.dmg`)을 다운로드합니다.
-2. 설치 후 실행 — **추가적인 환경 설정이나 다운로드가 전혀 필요 없습니다**.
-3. 로컬 Markdown 폴더를 보관소(Vault)로 지정합니다.
-4. (선택 사항) 「설정」에서 LLM API 키(DeepSeek / OpenAI / Claude / Gemini / Ollama 등)를 설정합니다.
+## 소스에서 빌드
 
----
-
-## 🛠 소스에서 빌드 (개발자)
+Node.js **20.19+ 또는 22.12+**, Rust stable과 플랫폼별 Tauri 빌드 의존성이 필요합니다. Linux 의존성은 [릴리스 워크플로](.github/workflows/release.yml)에 나와 있습니다.
 
 ```bash
-# 1. 저장소 클론
 git clone https://github.com/Poetrynan/ZettleAgent.git
 cd ZettleAgent
-
-# 2. 의존성 설치
-npm install
-
-# 3. 개발 서버 실행 (Tauri 2.0 + Vite + React 19)
+npm ci
+npm run download-model
 npm run tauri dev
 ```
 
-> **참고:** `src-tauri/gen/` 은 Tauri에 의해 자동 생성됩니다. 최초 `npm run tauri dev` 실행 시 `capabilities/default.json` 이 참조하는 스키마 파일이 생성됩니다.
-
-릴리스 설치 프로그램 생성:
-
 ```bash
-npm run tauri build  # 오프라인 모델을 번들링하여 바이너리 빌드
+npm test -- --maxWorkers=4
+npm run build
+npm run tauri build
 ```
 
----
+프로덕션 빌드는 임베딩, 재순위, WASM, 글꼴과 PDF 리소스를 다운로드하고 오프라인 리소스를 패키징합니다. 소스 빌드의 준비 단계에는 네트워크가 필요합니다. Tauri는 처음 실행할 때 `src-tauri/gen/`을 생성합니다.
 
-## 💻 시스템 요구 사항
+<a id="platforms"></a>
 
-| 플랫폼 | 설치 파일 크기 | 권장 RAM |
+## 대상 플랫폼
+
+릴리스 워크플로의 대상 플랫폼은 다음과 같습니다. 실제 패키지와 용량은 각 Release의 첨부 파일을 확인하세요.
+
+| 플랫폼 | 아키텍처 | 패키지 |
 | :--- | :--- | :--- |
-| **Windows 10/11 x64** (완벽 지원) | 약 300MB (모델 내장) | 8GB+ (로컬 벡터 및 그래프 연산) |
-| **macOS (Apple Silicon & Intel)** | 약 280MB | 8GB+ |
-| **Linux (AppImage / deb)** (실험적) | 약 280MB | 8GB+ |
+| Windows | x64 | `.exe`, `.msi` |
+| macOS | Apple Silicon / Intel | `.dmg` |
+| Linux | x64 | `.AppImage`, `.deb` |
 
----
+<a id="contributing"></a>
 
-## 🤝 기여하기
+## 기여
 
-커뮤니티의 기여를 진심으로 환영합니다! 버그 수정, 문서 개선, 새로운 도메인 툴 스키마 설계 등 언제든지 참여해 주세요.
+기여 방법은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요. 문제를 보고할 때 버전, 플랫폼, 재현 단계와 비밀 정보를 제거한 로그를 포함해 주세요.
 
-Pull Request를 제출하기 전에 [기여 가이드라인](CONTRIBUTING.md) 을 확인해 주세요.
+Tauri, React, Rust, SQLite / sqlite-vec, Jina 임베딩, BCE 재순위와 FSRS로 구축했으며 Zettelkasten과 로컬 Markdown 작업 흐름에서 영감을 받았습니다.
 
----
-
-## 🙏 감사의 말
-
-이 프로젝트는 거인들의 어깨 위에서 탄생했습니다: [Zettelkasten](https://luhmann.surge.sh/communicating-with-slip-boxes) · [Obsidian](https://obsidian.md/) · [sqlite-vec](https://github.com/asg017/sqlite-vec) · [Tauri](https://tauri.app/) · [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) · [DeepSeek](https://www.deepseek.com/)
-
----
-
-## 📜 라이선스
-
-Apache License 2.0 — 자유롭게 상업적 이용 및 수정이 가능합니다. **상업적 제품에 사용할 경우 원저작자의 저작권 표기를 유지해야 합니다.** 자세한 내용은 [LICENSE](LICENSE) 를 참조하세요.
+[Apache License 2.0](LICENSE)에 따라 배포합니다.

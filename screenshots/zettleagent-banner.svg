@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-label="ZettleAgent — a second brain for Markdown thinkers">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-label="ZettelAgent — a knowledge-management AI Agent / IDE">
   <defs>
     <style>
       text { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: #1d1d1f; }
@@ -31,14 +31,14 @@
   </g>
 
   <!-- Wordmark -->
-  <text x="330" y="236" font-size="92" class="bb" letter-spacing="-3">Zettle<tspan fill="#6b6862">Agent</tspan></text>
-  <text x="334" y="290" font-size="30" class="t2 b">A second brain for Markdown thinkers.</text>
+  <text x="330" y="236" font-size="92" class="bb" letter-spacing="-3">Zettel<tspan fill="#6b6862">Agent</tspan></text>
+  <text x="334" y="290" font-size="30" class="t2 b">An AI Agent / IDE for your knowledge.</text>
   <g class="txt" font-size="16">
     <rect x="334" y="322" width="170" height="34" rx="17" fill="#fff" filter="url(#sm)"/><circle cx="354" cy="339" r="5" fill="#3d7a4a"/><text x="368" y="345" class="b">Local Markdown</text>
     <rect x="514" y="322" width="180" height="34" rx="17" fill="#fff" filter="url(#sm)"/><circle cx="534" cy="339" r="5" fill="#1c1b19"/><text x="548" y="345" class="b">Visible evidence</text>
-    <rect x="704" y="322" width="184" height="34" rx="17" fill="#fff" filter="url(#sm)"/><circle cx="724" cy="339" r="5" fill="#C8432B"/><text x="738" y="345" class="b">You approve writes</text>
+    <rect x="704" y="322" width="184" height="34" rx="17" fill="#fff" filter="url(#sm)"/><circle cx="724" cy="339" r="5" fill="#C8432B"/><text x="738" y="345" class="b">Review changes</text>
   </g>
-  <text x="334" y="420" font-size="16" class="txt t3">Tauri · React · Rust · SQLite FTS5 + vectors · FSRS-4.5</text>
+  <text x="334" y="420" font-size="16" class="txt t3">Local Markdown · Jina embeddings · Canvas · FSRS review</text>
 
   <!-- Mini window -->
   <g transform="translate(1000 110)">
@@ -82,4 +82,6 @@
     <rect x="332" y="364" width="80" height="6" rx="3" fill="#d1d1d6"/>
     <circle cx="462" cy="374" r="10" fill="#007aff"/>
   </g>
+<text x="110" y="596" font-size="16" class="txt t2">ZettelAgent v0.3.0 · Notes, retrieval, and an Agent in one workbench.</text>
+  <text x="1490" y="614" text-anchor="end" font-size="11" class="txt t3">Interface illustration · sample data</text>
 </svg>

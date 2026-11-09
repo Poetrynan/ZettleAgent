@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="940" viewBox="0 0 1480 940" role="img" aria-label="Settings · Knowledge-management Agent">
+<title>Settings · Knowledge-management Agent</title><desc>Searchable grouped settings, application-default scope, and a model connection draft with explicit save and preserved credentials. Interface illustration with sample data, not a screenshot.</desc>
+<defs><style>text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }</style><filter id="shadow" x="-5%" y="-5%" width="110%" height="120%"><feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#1c1b19" flood-opacity="0.10"/></filter></defs>
+<rect x="30" y="24" width="1420" height="880" rx="14" fill="#fff" filter="url(#shadow)"/>
+<rect x="30" y="24" width="1420" height="880" rx="14" fill="#fff" stroke="#dededb" stroke-width="1"/>
+<rect x="30" y="24" width="1420" height="46" rx="14" fill="#f5f5f7" stroke="#f5f5f7" stroke-width="1"/>
+<rect x="30" y="54" width="1420" height="16" fill="#f5f5f7"/>
+<path d="M30 70H1450" fill="none" stroke="#dededb"/>
+<circle cx="54" cy="47" r="6" fill="#ff5f57"/><circle cx="76" cy="47" r="6" fill="#febc2e"/><circle cx="98" cy="47" r="6" fill="#28c840"/>
+<text x="740" y="52" font-size="13" fill="#5c5c61" font-weight="600" text-anchor="middle">Settings · Knowledge-management Agent</text>
+<text x="66" y="112" font-size="26" fill="#1d1d1f" font-weight="600" text-anchor="start">Settings</text>
+<text x="66" y="138" font-size="13" fill="#6e6e73" font-weight="400" text-anchor="start">Configure your knowledge-management Agent</text>
+<rect x="1212" y="92" width="200" height="30" rx="7" fill="#f5f5f7" stroke="#f5f5f7" stroke-width="1"/>
+<text x="1312" y="112" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="middle">Application defaults</text>
+<rect x="66" y="158" width="1346" height="38" rx="8" fill="#f5f5f7" stroke="#dededb" stroke-width="1"/>
+<text x="82" y="182" font-size="13" fill="#6e6e73" font-weight="400" text-anchor="start">⌕   Search settings, e.g. model, permissions, daily notes</text>
+<text x="1396" y="182" font-size="11" fill="#8e8e93" font-weight="400" text-anchor="end">Ctrl / ⌘ F</text>
+<path d="M30 216H1450" fill="none" stroke="#dededb"/>
+<rect x="30" y="217" width="246" height="643" fill="#f5f5f7"/>
+<path d="M276 216L276 860" fill="none" stroke="#dededb"/>
+<text x="52" y="247" font-size="11" fill="#777772" font-weight="600" text-anchor="start">WORKBENCH</text>
+<text x="58" y="285" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">General</text>
+<text x="58" y="318" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Vaults &amp; note rules</text>
+<text x="58" y="351" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Review</text>
+<text x="52" y="390" font-size="11" fill="#777772" font-weight="600" text-anchor="start">AGENT</text>
+<rect x="42" y="407" width="224" height="31" rx="7" fill="#e5e5e9" stroke="#e5e5e9" stroke-width="1"/>
+<circle cx="250" cy="422" r="3" fill="#007aff"/>
+<text x="58" y="428" font-size="13" fill="#1d1d1f" font-weight="600" text-anchor="start">Models &amp; connections</text>
+<text x="58" y="461" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Agent behavior</text>
+<text x="58" y="494" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Rules &amp; memory</text>
+<text x="58" y="527" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Tools &amp; integrations</text>
+<text x="52" y="566" font-size="11" fill="#777772" font-weight="600" text-anchor="start">SYSTEM</text>
+<text x="58" y="604" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Indexing &amp; retrieval</text>
+<text x="58" y="637" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Permissions &amp; recovery</text>
+<text x="58" y="670" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Data &amp; storage</text>
+<text x="58" y="703" font-size="13" fill="#1d1d1f" font-weight="400" text-anchor="start">Keyboard shortcuts</text>
+<text x="312" y="257" font-size="23" fill="#1d1d1f" font-weight="600" text-anchor="start">Models &amp; connections</text>
+<text x="312" y="283" font-size="13" fill="#6e6e73" font-weight="400" text-anchor="start">Model provider, API endpoint, credential, and reasoning capability.</text>
+<rect x="312" y="310" width="1100" height="524" rx="10" fill="#fff" stroke="#dededb" stroke-width="1"/>
+<text x="336" y="340" font-size="15" fill="#1d1d1f" font-weight="600" text-anchor="start">Current model connection</text>
+<text x="1388" y="340" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="end">Draft · applies after saving</text>
+<text x="336" y="365" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Used for chat, diagnosis, and organization. Embedding models are configured separately.</text>
+<path d="M336 387H1388" fill="none" stroke="#dededb"/>
+<text x="336" y="414" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="start">Provider</text>
+<text x="336" y="436" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Choose a model service.</text>
+<rect x="746" y="402" width="642" height="34" rx="6" fill="#f9f9fb" stroke="#dededb" stroke-width="1"/>
+<text x="758" y="424" font-size="12" fill="#1d1d1f" font-weight="400" text-anchor="start">Compatible API</text>
+<path d="M336 456H1388" fill="none" stroke="#dededb"/>
+<text x="336" y="483" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="start">API endpoint</text>
+<text x="336" y="505" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Full model API endpoint.</text>
+<rect x="746" y="471" width="642" height="34" rx="6" fill="#f9f9fb" stroke="#dededb" stroke-width="1"/>
+<text x="758" y="493" font-size="12" fill="#1d1d1f" font-weight="400" text-anchor="start">https://api.example.com/v1/chat/completions</text>
+<path d="M336 525H1388" fill="none" stroke="#dededb"/>
+<text x="336" y="552" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="start">Model name</text>
+<text x="336" y="574" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Choose a suggestion or enter an ID.</text>
+<rect x="746" y="540" width="642" height="34" rx="6" fill="#f9f9fb" stroke="#dededb" stroke-width="1"/>
+<text x="758" y="562" font-size="12" fill="#1d1d1f" font-weight="400" text-anchor="start">knowledge-model</text>
+<path d="M336 594H1388" fill="none" stroke="#dededb"/>
+<text x="336" y="621" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="start">API Key</text>
+<text x="336" y="643" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Leave blank to keep the saved key.</text>
+<rect x="746" y="609" width="642" height="34" rx="6" fill="#f9f9fb" stroke="#dededb" stroke-width="1"/>
+<text x="758" y="631" font-size="12" fill="#8e8e93" font-weight="400" text-anchor="start">Keep saved credential</text>
+<path d="M336 663H1388" fill="none" stroke="#dededb"/>
+<text x="336" y="690" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="start">Reasoning capability</text>
+<text x="336" y="712" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Match the selected model.</text>
+<rect x="746" y="678" width="642" height="34" rx="6" fill="#f9f9fb" stroke="#dededb" stroke-width="1"/>
+<text x="758" y="700" font-size="12" fill="#1d1d1f" font-weight="400" text-anchor="start">Standard output</text>
+<path d="M336 731H1388" fill="none" stroke="#dededb"/>
+<rect x="336" y="747" width="145" height="34" rx="8" fill="#007aff" stroke="#007aff" stroke-width="1"/><text x="408.5" y="769" font-size="13" fill="#fff" font-weight="500" text-anchor="middle">Save connection</text>
+<rect x="493" y="747" width="120" height="34" rx="8" fill="#f5f5f7" stroke="#f5f5f7" stroke-width="1"/><text x="553.0" y="769" font-size="13" fill="#1d1d1f" font-weight="500" text-anchor="middle">Discard draft</text>
+<rect x="625" y="747" width="132" height="34" rx="8" fill="#f5f5f7" stroke="#f5f5f7" stroke-width="1"/><text x="691.0" y="769" font-size="13" fill="#929296" font-weight="500" text-anchor="middle">Test connection</text>
+<text x="336" y="810" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Save before testing. The test sends one fixed message without note content.</text>
+<rect x="30" y="860" width="1420" height="43" fill="#f5f5f7"/>
+<path d="M30 860H1450" fill="none" stroke="#dededb"/>
+<text x="54" y="886" font-size="12" fill="#6e6e73" font-weight="400" text-anchor="start">Unsaved changes. Your drafts are kept when switching settings categories.</text>
+<text x="1430" y="925" font-size="11" fill="#777772" font-weight="400" text-anchor="end">v0.3.0 · Interface illustration · sample data</text>
+</svg>

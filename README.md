@@ -1,189 +1,135 @@
-![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
+![ZettelAgent](screenshots/zettleagent-banner.svg)
 
-<div align="center">
+# ZettelAgent
 
-  # ZettelAgent
+### A local-first AI Agent / IDE for knowledge management
 
-  ### Local-First, Agent-Native Knowledge Operating System
+Write in Markdown. Find related ideas. Review what your Agent changes.
 
-  *Your second brain that thinks, audits contradictions, and evolves your local notes.*  
-  All from a pure Markdown folder — **No Docker, no cloud lock-in, no telemetry.**
+ZettelAgent brings notes, retrieval, a knowledge graph, an infinite canvas, and spaced repetition into one desktop workbench. Connect a local or cloud language model for conversations, diagnosis, and note organization.
 
-  <!-- Badges -->
-  <p>
-    <a href="https://poetrynan.github.io/zettelagent.org/"><img src="https://img.shields.io/badge/🌐_Website-zettelagent.org-CF2711?style=for-the-badge" alt="Website"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9&logo=github&cacheSeconds=60" alt="Stars"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Release"></a>
-    <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
-    <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
-  </p>
+[![Release](https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?color=C8432B)](https://github.com/Poetrynan/ZettleAgent/releases)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-5C5C61)
+![React 19](https://img.shields.io/badge/React-19-5C5C61)
+![Rust](https://img.shields.io/badge/Rust-stable-5C5C61)
+![Embedding](https://img.shields.io/badge/Embedding-Jina_v2_zh_768d-5C5C61)
+[![License](https://img.shields.io/github/license/Poetrynan/ZettleAgent?color=5C5C61)](https://github.com/Poetrynan/ZettleAgent/blob/master/LICENSE)
 
-  <!-- Tech stack -->
-  <p>
-    <img src="https://img.shields.io/badge/Tauri-2.0-FFC107?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2.0">
-    <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19">
-    <img src="https://img.shields.io/badge/Rust-1.96-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.96">
-    <img src="https://img.shields.io/badge/SQLite-FTS5%20+%20Vec-0EA5E9?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
-    <img src="https://img.shields.io/badge/Embedding-nomic--v1.5%20WebGPU%2FWASM-10B981?style=flat-square" alt="Embedding">
-    <img src="https://img.shields.io/badge/Algorithm-FSRS--4.5-8B5CF6?style=flat-square" alt="FSRS-4.5">
-  </p>
+**English** · [中文](README_CN.md) · [日本語](README_JP.md) · [한국어](README_KR.md)
 
-  <!-- Language switcher -->
-  <p>
-    <strong>English</strong> · <a href="README_CN.md">中文</a> · <a href="README_JP.md">日本語</a> · <a href="README_KR.md">한국어</a>
-  </p>
+[Releases](https://github.com/Poetrynan/ZettleAgent/releases) · [Website](https://poetrynan.github.io/zettelagent.org/) · [v0.3.0 Release Notes](.github/release-notes/v0.3.0.md)
 
-</div>
+[What is new](#new) · [Capabilities](#features) · [Interface guide](#showcase) · [Quick start](#start) · [Build from source](#build) · [Platforms](#platforms) · [Contributing](#contributing)
 
----
+<a id="new"></a>
 
-> ### 🚀 [Download from Releases](https://github.com/Poetrynan/ZettleAgent/releases) · 🌐 [Live Showcase · zettelagent.org](https://poetrynan.github.io/zettelagent.org/)
-> 
-> No Node.js, no Docker, no extra model downloads. The standalone installer already includes the bundled nomic embedding engine, ONNX Runtime WASM, and offline OCR — fully private on your local Markdown files.
+## What is new — v0.3.0
 
----
+v0.3.0 focuses on the knowledge-management workbench: a task-oriented Dashboard, 11 searchable settings sections, improved canvas connections and snapping, Chinese search, and stronger history and undo handling.
 
-## 📑 Table of Contents
+<a id="features"></a>
 
-- [✨ Core Architecture & Capabilities](#-core-architecture--capabilities)
-- [📸 Interface Showcase](#-interface-showcase)
-- [⚔️ Architectural Comparison](#️-architectural-comparison)
-- [🏁 Quick Start (End Users)](#-quick-start-end-users)
-- [🛠 Build from Source (Developers)](#-build-from-source-developers)
-- [💻 System Requirements](#-system-requirements)
-- [🤝 Contributing](#-contributing)
-- [🙏 Acknowledgments](#-acknowledgments)
-- [📜 License](#-license)
+## Capabilities
 
----
+| Workflow | What you can do |
+| :--- | :--- |
+| **Markdown vaults** | Use local folders, daily notes, wikilinks, and unlinked mentions. Keep your note files accessible outside the app. |
+| **Dashboard** | See vault counts, indexing progress, background organization, recent changes, and knowledge diagnostics. Keep maintenance actions out of the everyday path. |
+| **Agent and knowledge center** | Ask questions with retrieved context; inspect proposed changes, memories, tasks, and graph-gap plans. Connect external MCP tools and skill directories. |
+| **Hybrid retrieval** | Combine FTS5 keyword search, local 768-dimensional Jina embeddings, graph signals, and BCE reranking. Match Simplified and Traditional Chinese and exclude content with `.zettelignore`. |
+| **Canvas and graph** | Connect and align cards with snapping guides; use explain, compare, trace, and cluster plans. Explore graph links, PageRank, and communities; work with Obsidian `.canvas` files. |
+| **Settings workbench** | Search 11 sections under Workbench, Agent, and System. Test saved model connections, keep drafts across categories, and configure rules, permissions, retrieval, and storage. |
+| **Review** | Use FSRS-4.5 review scheduling with configurable retention, daily limits, and maximum intervals. |
+| **Change review and recovery** | Inspect supported Agent mutations through permission checks, previews, and change history. Undo checks for later edits and can refuse a conflicting restoration. |
 
-## ✨ Core Architecture & Capabilities
+### Local data and model connections
 
-### 🛡️ WriteGuard & Reversible ChangeSet (100% Data Sovereignty)
-- **Human-in-the-Loop Write Gate**: The Agent never silently overwrites your files. Every modification requires a `READYWRITE` token and presents an interactive line-by-line Diff preview for you to inspect and approve.
-- **100% Reversible ChangeSet Ledger**: Every operation stores its exact mathematical reverse patch. Modified lines can be restored, deleted nodes recreated, and disconnected edges returned to their coordinates with a single click.
+Notes, the search database, and bundled embedding / OCR processing stay local. AI chat and organization require a model connection: a cloud provider receives the request and the note context included in it; a local service can keep those requests on your machine. A custom remote embedding service also receives the text sent for indexing and search. External tools follow their own connections.
 
-### 🤖 Native Autonomous Agent (6 Domain Toolkits)
-- **Domain Tool Packs**: Note Mutation, Hybrid Search & Retrieval, Graph Topology Diagnostics, Canvas Spatial Reasoning, Workspace Health Audit, and Web Deep Search.
-- **3-Layer Intent Routing (L0/L1/L2)**: High-confidence commands execute deterministically (0ms, 0 Token); only ambiguous tasks trigger model planning.
-- **Local Small Model Optimization (7B/14B)**: Dynamically loads domain schemas to save 4,000+ Tokens per turn, eliminating tool hallucinations on local Ollama/vLLM models.
+API keys use the OS credential store when available. If it is unavailable, Settings reports an unprotected fallback. Check **Permissions & recovery** before enabling automation: approval requirements depend on the permission mode. An undo history is not a substitute for a backup.
 
-### 🧠 Mathematical Graph Topology & Blind Spot Diagnosis
-- **Graph Algorithms**: Calculates **PageRank centrality scores**, runs **Louvain community clustering**, and discovers shortest conceptual paths.
-- **GraphPlan**: Automatically diagnoses orphan subgraphs, dead links, and knowledge blind spots, generating actionable bridging plans.
+<a id="showcase"></a>
 
-### 🎨 Spatial Reasoning Infinite Canvas (Obsidian Compatible)
-- **4 Spatial Reasoning Goals**: `explain` (hierarchical breakdown), `compare` (matrix juxtaposition), `trace` (chronological causal lineage), and `cluster` (thematic clustering).
-- **Bi-directional Compilation**: Seamlessly translates canvas nodes into SQLite database entries and vice versa.
+## Interface guide
 
-### 🔐 OS Keyring Security Substrate
-- **Hardware-Level Encryption**: API keys and model credentials are encrypted via Windows DPAPI and macOS Keychain. 0 plain-text tokens in WebView or settings JSON.
-- **100% Offline Vector Store**: SQLite-vec + FTS5 running purely locally with zero cloud telemetry.
+These SVGs are interface illustrations with sample data, not captured screenshots. They show workflows and information hierarchy; appearance varies by theme and platform.
 
-### 📈 Scientific Spaced Repetition (FSRS-4.5)
-- **Modern Memory Retention**: Built-in modern FSRS-4.5 spaced repetition algorithm with strict monotonic invariant guards and episodic memory store.
+### 1. Dashboard — status, next steps, indexing, and recent changes
 
----
+![Dashboard — status, next steps, indexing, and recent changes](screenshots/showcase-dashboard.svg)
 
-## 📸 Interface Showcase (Redesigned Desktop Workspace)
+### 2. Settings — search, grouped navigation, and an explicit connection draft
 
-<div align="center">
+![Settings — search, grouped navigation, and an explicit connection draft](screenshots/showcase-settings.svg)
 
-### 1. The 3-Column Desktop OS & 3D Topology Atlas
-*Interactive PageRank centrality graph, collapsible file explorer, and autonomous Agent Desk.*
+### 3. Workspace — explorer, graph, and Agent conversation
 
-![ZettleAgent 3-Column Desktop OS Workspace](./screenshots/showcase-workspace.svg)
+![Workspace — explorer, graph, and Agent conversation](screenshots/showcase-workspace.svg)
 
-<br>
+### 4. Canvas — note cards, connections, and alignment guides
 
-| 2. WriteGuard™ Line Diff & ChangeSet Ledger | 3. Spatial Reasoning Infinite Canvas |
-|:---:|:---:|
-| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard Line Diff" width="100%"> | <img src="./screenshots/showcase-canvas.svg" alt="Spatial Reasoning Canvas" width="100%"> |
-| *ReadyWrite gate, line-by-line Diff approval & 1-click undo* | *4 spatial goals (explain, compare, trace, cluster) + SQLite sync* |
+![Canvas — note cards, connections, and alignment guides](screenshots/showcase-canvas.svg)
 
-<br>
+### 5. Change review — proposed edits and conflict-aware recovery
 
-### 4. Scientific Spaced Repetition (FSRS-4.5 Engine)
-*Modern memory retention with strict monotonic invariants and episodic memory store.*
+![Change review — proposed edits and conflict-aware recovery](screenshots/showcase-writeguard.svg)
 
-![FSRS-4.5 Spaced Repetition Review Engine](./screenshots/showcase-review.svg)
+### 6. Review — recall and FSRS scheduling
 
-</div>
+![Review — recall and FSRS scheduling](screenshots/showcase-review.svg)
 
----
+<a id="start"></a>
 
-## ⚔️ Architectural Comparison
+## Quick start
 
-| Capability & Dimension | **ZETTLEAGENT** | **OBSIDIAN** | **LOGSEQ** | **NOTION / MEM** |
-| :--- | :--- | :--- | :--- | :--- |
-| **AI Operating Model** | 🚀 **Native Autonomous Agent** (6 toolkits, L0-L2 routing, CoT stream) | ⚠️ **Fragmented 3rd-party plugins** (no unified state machine) | ⚠️ **Experimental plugins only** (no tool loop) | ☁️ **Cloud text assistant** (simple completion, no tool orchestration) |
-| **Local 7B/14B Models** | ⚡ **Deeply optimized** (schema pruning, saves 4000+ tokens, 0% hallucination) | ⚠️ **Assumes cloud APIs** (local small models often hallucinate) | ❌ **No small model optimizations** | ❌ **Cloud proprietary only** (cannot connect Ollama) |
-| **Write Safety Guard** | 🛡️ **WriteGuard Gate** (Line Diff approval, ReadyWrite tokens) | ⚠️ **Direct file writes** (relies on basic file history) | ⚠️ **Direct file writes** (relies on Git plugin) | ☁️ **Replaces cloud blocks** (whole-page revert only) |
-| **Reversible Undo** | 🔄 **100% Reversible ChangeSet ledger** (1-click rollback across notes & canvas) | ❌ **No reverse patch ledger** | ❌ **Manual git revert only** | ❌ **No fine-grained AI rollback** |
-| **Graph Topology** | 🧠 **PageRank centrality + Louvain clustering + GraphPlan** | ⚠️ **Visual view only** (no topology algorithms) | ⚠️ **Basic 2D graph** (no metrics) | ❌ **No graph view** (hierarchical tree only) |
-| **Spatial Canvas** | 🎨 **4 Reasoning Goals + Auto-layout + SQLite sync** | ⚠️ **Manual drag-and-drop** (plugins append text boxes) | ⚠️ **Basic whiteboard** (no reasoning goals) | ❌ **No infinite canvas** |
-| **Security Substrate** | 🔐 **OS Hardware Keyring (DPAPI/Keychain) + 0 telemetry** | ⚠️ **Plaintext API keys in plugin .json** | ⚠️ **Plaintext configs** | ☁️ **Commercial cloud hosted** (data exposed to SaaS) |
-| **Spaced Repetition** | 📈 **Built-in FSRS-4.5 (monotonic guards) + Episodic memory** | ⚠️ **Requires plugin (legacy SM-2)** | ⚠️ **Basic flashcards (legacy)** | ❌ **No spaced repetition** |
+1. Download a package for your platform from [Releases](https://github.com/Poetrynan/ZettleAgent/releases) and install it. Node.js and Docker are not required for the installed app.
+2. Open a local Markdown folder as a vault.
+3. Open Dashboard and update the search index. The bundled model loads on demand, so first use may take a moment.
+4. For AI chat and organization, open **Settings → Models & connections**, choose a provider, save the connection, and test it. A chat model is not bundled with the app.
+5. Review **Agent behavior**, **Rules & memory**, and **Permissions & recovery** before running automated organization.
 
----
+The vector index uses **768 dimensions**. Custom embedding services must return that size. Updating the index processes pending content; **Rebuild all vectors** clears derived vectors and caches before regenerating them. Remote services incur new requests. Pause background organization before a full rebuild.
 
-## 🏁 Quick Start (End Users)
+<a id="build"></a>
 
-1. Download the installer from [Releases](https://github.com/Poetrynan/ZettleAgent/releases) (`.exe` for Windows, `.dmg` for macOS).
-2. Install and open the app — **zero extra downloads required**.
-3. Select your local Markdown folder as your vault.
-4. (Optional) Configure your LLM API in Settings (DeepSeek / OpenAI / Claude / Gemini / Ollama and more).
+## Build from source
 
----
-
-## 🛠 Build from Source (Developers)
+Use Node.js **20.19+ or 22.12+**, Rust stable, and the Tauri build prerequisites for your platform. Linux build dependencies are listed in [the release workflow](.github/workflows/release.yml).
 
 ```bash
-# 1. Clone repository
 git clone https://github.com/Poetrynan/ZettleAgent.git
 cd ZettleAgent
-
-# 2. Install dependencies
-npm install
-
-# 3. Start development server (Tauri 2.0 + Vite + React 19)
+npm ci
+npm run download-model
 npm run tauri dev
 ```
 
-> **Note:** `src-tauri/gen/` is auto-generated by Tauri. The first `npm run tauri dev` run creates the schema files referenced by `capabilities/default.json`.
-
-To produce a production Release installer:
-
 ```bash
-npm run tauri build  # Bundles offline models and builds release binary
+npm test -- --maxWorkers=4
+npm run build
+npm run tauri build
 ```
 
----
+The production build downloads embedding, reranking, WASM, font, and PDF assets and bundles the offline resources. Source builds require network access during preparation. Tauri generates `src-tauri/gen/` on first use.
 
-## 💻 System Requirements
+<a id="platforms"></a>
 
-| Platform | Installer Size | Recommended RAM |
+## Platforms
+
+The release workflow targets the following platforms. Available packages and sizes are listed with the actual release assets; no fixed installer size is promised.
+
+| Platform | Architecture | Packages |
 | :--- | :--- | :--- |
-| **Windows 10/11 x64** (Fully Supported) | ~300MB (Bundled models) | 8GB+ (Local embedding & graph rendering) |
-| **macOS (Apple Silicon & Intel)** (Supported) | ~280MB | 8GB+ |
-| **Linux (AppImage / deb)** (Experimental) | ~280MB | 8GB+ |
+| Windows | x64 | `.exe`, `.msi` |
+| macOS | Apple Silicon / Intel | `.dmg` |
+| Linux | x64 | `.AppImage`, `.deb` |
 
----
+<a id="contributing"></a>
 
-## 🤝 Contributing
+## Contributing
 
-We welcome contributions from the community! Whether you're fixing bugs, improving documentation, or optimizing Agent tool schemas, your help is appreciated.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance. Bug reports are most useful with the app version, platform, reproduction steps, and relevant redacted logs.
 
-Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting a pull request.
+Built with Tauri, React, Rust, SQLite / sqlite-vec, Jina embeddings, BCE reranking, and FSRS; inspired by Zettelkasten and local Markdown workflows.
 
----
-
-## 🙏 Acknowledgments
-
-Built on the shoulders of: [Zettelkasten](https://luhmann.surge.sh/communicating-with-slip-boxes) · [Obsidian](https://obsidian.md/) · [sqlite-vec](https://github.com/asg017/sqlite-vec) · [Tauri](https://tauri.app/) · [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) · [DeepSeek](https://www.deepseek.com/)
-
----
-
-## 📜 License
-
-Apache License 2.0 — Free to use and modify. **Credit the original author in commercial products.** See [LICENSE](LICENSE).
+Licensed under [Apache License 2.0](LICENSE).

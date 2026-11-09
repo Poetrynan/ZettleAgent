@@ -1,189 +1,135 @@
-![ZettleAgent Banner](./screenshots/zettleagent-banner.svg)
+![ZettelAgent](screenshots/zettleagent-banner.svg)
 
-<div align="center">
+# ZettelAgent
 
-  # ZettelAgent
+### 专为知识管理打造的本地优先 AI Agent / IDE
 
-  ### 本地优先 · 原生 AI 智能体的卡片盒知识操作系统
+用 Markdown 写作，找回相关想法，审查 Agent 的每次重要改动。
 
-  *你的第二大脑——能思考、能审查矛盾、能让你的笔记自我进化。*  
-  全部基于本地纯文本 Markdown 文件夹 — **无需 Docker、无需云端绑定、零遥测。**
+ZettelAgent 将笔记、检索、知识图谱、无限白板与间隔复习放进同一个桌面工作台。连接本地或云端语言模型后，可进行对话、知识诊断与笔记整理。
 
-  <!-- Badges -->
-  <p>
-    <a href="https://poetrynan.github.io/zettelagent.org/"><img src="https://img.shields.io/badge/🌐_官网·zettelagent.org-CF2711?style=for-the-badge" alt="官网"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/stargazers"><img src="https://img.shields.io/github/stars/Poetrynan/ZettleAgent?style=for-the-badge&color=0EA5E9&logo=github&cacheSeconds=60" alt="Stars"></a>
-    <a href="https://github.com/Poetrynan/ZettleAgent/releases"><img src="https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?style=for-the-badge&color=10B981" alt="Release"></a>
-    <img src="https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-8B5CF6?style=for-the-badge" alt="Platform">
-    <a href="https://github.com/Poetrynan/ZettleAgent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Poetrynan/ZettleAgent?style=for-the-badge&color=F59E0B" alt="License"></a>
-  </p>
+[![Release](https://img.shields.io/github/v/release/Poetrynan/ZettleAgent?color=C8432B)](https://github.com/Poetrynan/ZettleAgent/releases)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-5C5C61)
+![React 19](https://img.shields.io/badge/React-19-5C5C61)
+![Rust](https://img.shields.io/badge/Rust-stable-5C5C61)
+![Embedding](https://img.shields.io/badge/Embedding-Jina_v2_zh_768d-5C5C61)
+[![License](https://img.shields.io/github/license/Poetrynan/ZettleAgent?color=5C5C61)](https://github.com/Poetrynan/ZettleAgent/blob/master/LICENSE)
 
-  <!-- Tech stack -->
-  <p>
-    <img src="https://img.shields.io/badge/Tauri-2.0-FFC107?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2.0">
-    <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 19">
-    <img src="https://img.shields.io/badge/Rust-1.96-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.96">
-    <img src="https://img.shields.io/badge/SQLite-FTS5%20+%20Vec-0EA5E9?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite">
-    <img src="https://img.shields.io/badge/Embedding-nomic--v1.5%20WebGPU%2FWASM-10B981?style=flat-square" alt="Embedding">
-    <img src="https://img.shields.io/badge/Algorithm-FSRS--4.5-8B5CF6?style=flat-square" alt="FSRS-4.5">
-  </p>
+[English](README.md) · **中文** · [日本語](README_JP.md) · [한국어](README_KR.md)
 
-  <!-- Language switcher -->
-  <p>
-    <a href="README.md">English</a> · <strong>中文</strong> · <a href="README_JP.md">日本語</a> · <a href="README_KR.md">한국어</a>
-  </p>
+[Releases](https://github.com/Poetrynan/ZettleAgent/releases) · [Website](https://poetrynan.github.io/zettelagent.org/) · [v0.3.0 Release Notes](.github/release-notes/v0.3.0.md)
 
-</div>
+[本次更新](#new) · [核心能力](#features) · [界面导览](#showcase) · [快速开始](#start) · [从源码构建](#build) · [支持平台](#platforms) · [参与贡献](#contributing)
 
----
+<a id="new"></a>
 
-> ### 🚀 [从 Releases 下载安装包](https://github.com/Poetrynan/ZettleAgent/releases) · 🌐 [访问在线官网 · zettelagent.org](https://poetrynan.github.io/zettelagent.org/)
-> 
-> 无需 Node.js、无需 Docker，也无需额外下载模型。独立安装包已内置离线 nomic 向量引擎、ONNX Runtime WASM 与本地离线 OCR，安装后完全私密离线运行，直接操作本地 Markdown 笔记库。
+## 本次更新 — v0.3.0
 
----
+v0.3.0 围绕知识管理工作台升级：按任务组织的 Dashboard、11 个可搜索的设置分区、白板连线与吸附、中文检索，以及更稳健的历史读取和撤销保护。
 
-## 📑 目录
+<a id="features"></a>
 
-- [✨ 核心架构与能力](#-核心架构与能力)
-- [📸 界面展示](#-界面展示)
-- [⚔️ 深度架构与竞品对比](#️-深度架构与竞品对比)
-- [🏁 快速开始（终端用户）](#-快速开始终端用户)
-- [🛠 从源码构建（开发者）](#-从源码构建开发者)
-- [💻 系统要求](#-系统要求)
-- [🤝 参与贡献](#-参与贡献)
-- [🙏 致谢](#-致谢)
-- [📜 许可证](#-许可证)
+## 核心能力
 
----
+| 工作流 | 可以做什么 |
+| :--- | :--- |
+| **Markdown 知识库** | 使用本地文件夹、每日笔记、双向链接与未链接提及，笔记文件也能在其他编辑器中访问。 |
+| **Dashboard** | 查看知识库数量、索引进度、后台整理、最近变化与知识诊断；维护操作收起显示。 |
+| **Agent 与知识中心** | 基于检索上下文提问，审查变更建议、记忆、任务与图谱盲区计划；连接外部 MCP 工具与技能目录。 |
+| **混合检索** | 结合 FTS5 全文搜索、本地 768 维 Jina 嵌入、图谱信号与 BCE 精排；支持简繁互搜和 `.zettelignore` 排除规则。 |
+| **白板与图谱** | 拖拽连线、吸附对齐，使用拆解、对比、溯源和聚类计划；查看图谱关联、PageRank 与社群，处理 Obsidian `.canvas` 文件。 |
+| **设置工作台** | 在工作台、Agent、系统三组中搜索 11 个分区；测试已保存的模型连接，切换分类保留草稿，配置规则、权限、检索与存储。 |
+| **间隔复习** | 基于 FSRS-4.5 安排复习，配置目标保持率、每日任务上限和最长间隔。 |
+| **变更审查与恢复** | 支持的 Agent 修改经过权限检查，可查看预览与变更记录；撤销会检查后续编辑，冲突时可能拒绝恢复。 |
 
-## ✨ 核心架构与能力
+### 本地数据与模型连接
 
-### 🛡️ WriteGuard 写入守卫与全息可逆撤销 (100% 数据主权)
-- **人机协同写入门禁**：Agent 绝不会静默覆盖你的任何文件。所有修改提议均必须持有 `READYWRITE` 凭证，并提供交互式行级 Diff 预览，供用户逐行勾选确认。
-- **100% 全息可逆撤销账本 (ChangeSet)**：每一次操作均完整保存精确的逆向补丁。被改的文本可秒级还原、删除的节点可重生、断开的连线可精准回到原始坐标。
+笔记、搜索数据库以及内置嵌入和 OCR 处理保存在本地。AI 对话与整理需要模型连接：使用云端服务时，请求及其中包含的笔记上下文会发送给该服务；连接本地模型服务可将这些请求留在本机。自定义远程嵌入服务也会接收用于索引和搜索的文本。外部工具按各自的连接方式工作。
 
-### 🤖 原生自主 Agent (6 大专属领域工具包)
-- **领域工具包 (Domain Packs)**：原子笔记操作、向量与混合检索、图谱拓扑诊断、白板空间推理、工作区健康巡检与网络深度提取。
-- **三层混合意图路由 (L0/L1/L2)**：高置信请求走 L0 规则直通（0ms、0 Token）；仅在复杂长链任务时升级为 L2 大模型自主规划。
-- **本地 7B/14B 小模型深度适配**：动态装载领域 Schema，单回合节省 4,000+ Tokens，在 Ollama / vLLM 本地小模型上做到 0% 工具调用幻觉。
+密钥优先存入操作系统凭据库；凭据库不可用时，设置页会显示未受保护的降级存储状态。启用自动整理前，请检查**权限与恢复**：审批要求取决于权限档位。撤销记录不能代替备份。
 
-### 🧠 数学级图谱拓扑与盲区诊断 (GraphPlan)
-- **图论拓扑算法**：实时计算 **PageRank 节点重要度评分**，运行 **Louvain 社群发现算法**，探索最短概念桥接路径。
-- **GraphPlan 盲区修复**：自动探测孤立笔记、断链与语义盲区，一键生成结构性修复计划。
+<a id="showcase"></a>
 
-### 🎨 白板空间推理引擎 (Obsidian Canvas 兼容)
-- **4 大空间推理目标**：`explain` (层级拆解)、`compare` (矩阵对照)、`trace` (因果与时序溯源)、`cluster` (主题聚类)。
-- **双向编译**：无限白板连线与 SQLite 数据库实现双向编译，支持 AI 自动力导向布局与增量更新。
+## 界面导览
 
-### 🔐 操作系统级硬件凭据保护 (OS Keyring Substrate)
-- **硬件级安全存储**：API 密钥与模型凭据直接通过 Windows DPAPI 与 macOS Keychain 硬件级加密，前端 WebView 与本地 JSON 配置文件中 0 明文。
-- **纯离线向量数据库**：SQLite-vec + FTS5 纯本地嵌入与混洗，零云端遥测。
+以下 SVG 为使用示例数据绘制的界面示意图，并非实际截图，用于说明工作流和信息层级；不同主题与平台的外观可能不同。
 
-### 📈 科学间隔重复系统 (FSRS-4.5)
-- **现代记忆保持算法**：内置最新 FSRS-4.5 现代间隔重复算法，具备严格的单调性不变量守护与长期情节记忆库。
+### 1. Dashboard：状态、下一步操作、索引与最近变化
 
----
+![Dashboard：状态、下一步操作、索引与最近变化](screenshots/showcase-dashboard.svg)
 
-## 📸 界面展示（全新改版桌面端工作台）
+### 2. 设置：搜索、分组导航与显式保存的连接草稿
 
-<div align="center">
+![设置：搜索、分组导航与显式保存的连接草稿](screenshots/showcase-settings.svg)
 
-### 1. 三栏式桌面知识操作系统 & 3D 拓扑图谱
-*交互式 PageRank 节点权重图谱、可折叠文件浏览器与原生自主 Agent Desk。*
+### 3. 工作区：文件浏览器、图谱与 Agent 对话
 
-![ZettleAgent 三栏式桌面知识操作系统](./screenshots/showcase-workspace.svg)
+![工作区：文件浏览器、图谱与 Agent 对话](screenshots/showcase-workspace.svg)
 
-<br>
+### 4. 白板：笔记卡片、连线与对齐参考线
 
-| 2. WriteGuard™ 行级 Diff 审批与撤销账本 | 3. 白板空间推理引擎 (Obsidian 兼容) |
-|:---:|:---:|
-| <img src="./screenshots/showcase-writeguard.svg" alt="WriteGuard 行级 Diff 审批" width="100%"> | <img src="./screenshots/showcase-canvas.svg" alt="白板空间推理引擎" width="100%"> |
-| *ReadyWrite 凭证门禁、逐行勾选批准与 100% 一键回滚* | *4 大空间推理目标 (拆解/对比/溯源/聚类) + SQLite 双向编译* |
+![白板：笔记卡片、连线与对齐参考线](screenshots/showcase-canvas.svg)
 
-<br>
+### 5. 变更审查：修改建议与避免覆盖后续编辑的恢复
 
-### 4. 科学间隔重复系统 (FSRS-4.5 引擎)
-*基于现代 FSRS 记忆算法、严格单调性不变量守护与长效情节记忆库。*
+![变更审查：修改建议与避免覆盖后续编辑的恢复](screenshots/showcase-writeguard.svg)
 
-![FSRS-4.5 间隔复习引擎](./screenshots/showcase-review.svg)
+### 6. 复习：主动回忆与 FSRS 计划
 
-</div>
+![复习：主动回忆与 FSRS 计划](screenshots/showcase-review.svg)
 
----
+<a id="start"></a>
 
-## ⚔️ 深度架构与竞品对比
+## 快速开始
 
-| 对比维度 | **ZETTLEAGENT (推荐)** | **OBSIDIAN** | **LOGSEQ** | **NOTION / MEM** |
-| :--- | :--- | :--- | :--- | :--- |
-| **AI 工作模式** | 🚀 **原生自主 Agent**（6大领域专属工具包、三层混合路由、思维链实时流） | ⚠️ **高度依赖第三方插件**（Smart Connections/Copilot 碎片化，无统一状态机） | ⚠️ **仅实验性插件**（无自主工具闭环与上下文预算守卫） | ☁️ **云端黑盒写作辅助**（简单续写/总结，无法自主调用多维工具链） |
-| **本地 7B/14B 小模型优化** | ⚡ **深度剪裁与 Schema 优化**（动态装载领域包省 4000+ Tokens，0% 工具调用幻觉） | ⚠️ **插件普遍预设云端 GPT-4**（本地小模型极易报错、幻觉或超窗崩溃） | ❌ **无本地小模型优化** | ❌ **不支持本地 Ollama 私有模型** |
-| **文件修改安全门禁** | 🛡️ **WriteGuard 门禁 + 行级 Diff 局部勾选批准 + ReadyWrite 凭据** | ⚠️ **插件直接覆写文件**（仅依赖简易文件历史，无 AI 差异审查门） | ⚠️ **直接覆写文件**（依赖手工 Git 提交或备份） | ☁️ **直接替换云端块**（只能全篇历史回滚，无逐行审查） |
-| **全息可逆撤销 (Undo)** | 🔄 **100% 可逆 ChangeSet 账本**（一键无损撤销文本、白板节点与图谱连线） | ❌ **无跨文件与画板的逆向补丁账本** | ❌ **仅能通过命令行 git revert** | ❌ **无细粒度 AI 操作回滚账本** |
-| **图谱计算与拓扑算法** | 🧠 **3D/2D 拓扑 + PageRank 权重 + Louvain 社群发现 + GraphPlan 盲区诊断** | ⚠️ **仅普通可视化图谱**（无原生 PageRank 权重与社群发现算法） | ⚠️ **基础 2D 关系图**（无网络拓扑分析与盲区诊断） | ❌ **不支持网络图谱**（仅层级树状目录） |
-| **白板空间推理引擎** | 🎨 **4 大空间推理目标 (拆解/对比/追溯/聚类) + AI 自动布局 + SQLite 双向编译** | ⚠️ **纯手工拖拽白板**（AI 插件仅能追加零散文本框） | ⚠️ **基础白板插件**（无目标驱动的 AI 空间推理） | ❌ **无无限白板空间** |
-| **密钥存储与隐私遥测** | 🔐 **系统硬件级密码库 (DPAPI/Keychain) + 纯离线 SQLite-vec + 零云端遥测** | ⚠️ **本地 Markdown，但插件多以明文 JSON 存储 API Key** | ⚠️ **插件配置多为明文** | ☁️ **商业云端托管**（数据全部对服务商可见） |
-| **科学间隔重复系统** | 📈 **内置最新 FSRS-4.5 现代记忆算法（单调性守护）+ 情节记忆实体库** | ⚠️ **需外挂插件（多基于旧版 SM-2 算法）** | ⚠️ **内置简易 flashcard（旧算法）** | ❌ **无原生间隔复习与记忆系统** |
+1. 从 [Releases](https://github.com/Poetrynan/ZettleAgent/releases) 下载对应平台的安装包并安装。安装后的应用无需 Node.js 或 Docker。
+2. 打开本地 Markdown 文件夹作为知识库。
+3. 在 Dashboard 更新搜索索引。内置模型按需加载，首次使用可能需要等待。
+4. 需要 AI 对话和整理时，打开**设置 → 模型与连接**，选择服务、保存并测试连接。应用不内置对话大模型。
+5. 自动整理前，先检查 **Agent 行为**、**规则与记忆**和**权限与恢复**。
 
----
+向量索引固定为 **768 维**，自定义嵌入服务需返回相同维度。“更新索引”处理待索引内容；“全部重建向量”会清除派生向量和缓存再生成。远程服务会产生新的请求；全部重建前请暂停后台整理。
 
-## 🏁 快速开始（终端用户）
+<a id="build"></a>
 
-1. 从 [Releases 页面](https://github.com/Poetrynan/ZettleAgent/releases) 下载适合你系统的安装包（Windows `.exe`，macOS `.dmg`）。
-2. 安装并启动应用 — **无需任何额外环境或下载**。
-3. 选择你的本地 Markdown 笔记文件夹作为工作区。
-4. （可选）在「设置」中配置你的大模型 API 密钥（支持 DeepSeek / OpenAI / Claude / Gemini / Ollama 等）。
+## 从源码构建
 
----
-
-## 🛠 从源码构建（开发者）
+需要 Node.js **20.19+ 或 22.12+**、Rust stable，以及对应平台的 Tauri 构建依赖。Linux 依赖见[发布工作流](.github/workflows/release.yml)。
 
 ```bash
-# 1. 克隆代码仓库
 git clone https://github.com/Poetrynan/ZettleAgent.git
 cd ZettleAgent
-
-# 2. 安装前端与构建依赖
-npm install
-
-# 3. 启动开发模式 (Tauri 2.0 + Vite + React 19)
+npm ci
+npm run download-model
 npm run tauri dev
 ```
 
-> **说明:** `src-tauri/gen/` 由 Tauri 自动生成。首次运行 `npm run tauri dev` 会自动生成 `capabilities/default.json` 所需的 Schema 文件。
-
-生成生产 Release 安装包：
-
 ```bash
-npm run tauri build  # 自动打包离线向量引擎与依赖，生成独立安装程序
+npm test -- --maxWorkers=4
+npm run build
+npm run tauri build
 ```
 
----
+生产构建会下载嵌入、精排、WASM、字体与 PDF 资源，并将离线资源打包。源码构建的准备阶段需要联网；首次运行 Tauri 会生成 `src-tauri/gen/`。
 
-## 💻 系统要求
+<a id="platforms"></a>
 
-| 操作系统 | 安装包体积 | 推荐运行内存 |
+## 支持平台
+
+发布流程面向下列平台。实际安装包和体积以各次 Release 附件为准，不承诺固定大小。
+
+| 平台 | 架构 | 安装包 |
 | :--- | :--- | :--- |
-| **Windows 10/11 x64**（深度优化支持） | 约 300MB（含内置模型） | 8GB+（本地向量与图谱计算） |
-| **macOS（Apple Silicon & Intel）** | 约 280MB | 8GB+ |
-| **Linux（AppImage / deb）**（实验性） | 约 280MB | 8GB+ |
+| Windows | x64 | `.exe`, `.msi` |
+| macOS | Apple Silicon / Intel | `.dmg` |
+| Linux | x64 | `.AppImage`, `.deb` |
 
----
+<a id="contributing"></a>
 
-## 🤝 参与贡献
+## 参与贡献
 
-我们非常欢迎社区的贡献！无论是提交 Bug 修复、完善使用文档，还是为 Agent 设计新的领域工具 Schema，都期待你的参与。
+参与方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。反馈问题时，请提供版本、平台、复现步骤及已脱敏的相关日志。
 
-在提交 Pull Request 前，请先阅读我们的 [贡献指南](CONTRIBUTING_CN.md)。
+基于 Tauri、React、Rust、SQLite / sqlite-vec、Jina 嵌入、BCE 精排和 FSRS 构建，借鉴卡片盒笔记法与本地 Markdown 工作流。
 
----
-
-## 🙏 致谢
-
-本项目站在巨人的肩膀上诞生：[Zettelkasten](https://luhmann.surge.sh/communicating-with-slip-boxes) · [Obsidian](https://obsidian.md/) · [sqlite-vec](https://github.com/asg017/sqlite-vec) · [Tauri](https://tauri.app/) · [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) · [DeepSeek](https://www.deepseek.com/)
-
----
-
-## 📜 许可证
-
-本项目遵循 Apache License 2.0 许可证 — 免费商用与修改。**在商业产品中使用需保留原作者版权声明。** 详情参见 [LICENSE](LICENSE)。
+采用 [Apache License 2.0](LICENSE) 许可证。

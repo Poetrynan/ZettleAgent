@@ -40,6 +40,9 @@
   </g>
   <text x="430" y="248" font-size="11.5" style="fill:#c26a00">contrasts</text>
 
+  <!-- Alignment guides and connection handles illustrate v0.3 interactions. -->
+  <path d="M128 180H815M128 630H815M140 174V638M520 174V638" fill="none" stroke="#007aff" stroke-width="1" stroke-dasharray="4 6" opacity="0.4"/>
+  <circle cx="420" cy="260" r="5" fill="#fff" stroke="#007aff" stroke-width="2"/><circle cx="520" cy="260" r="5" fill="#fff" stroke="#007aff" stroke-width="2"/>
   <!-- Cards -->
   <g font-size="13">
     <g filter="url(#card)"><rect x="140" y="190" width="280" height="140" rx="14" fill="#fff"/></g>
@@ -83,8 +86,8 @@
   <rect x="1080.5" y="150.5" width="339" height="319" rx="14" class="hair"/>
   <path d="M1106 176l2.2 5.5 5.5 2.2-5.5 2.2-2.2 5.5-2.2-5.5-5.5-2.2 5.5-2.2z" fill="#007aff"/>
   <text x="1124" y="190" font-size="17" class="disp bb">Spatial goals</text>
-  <text x="1100" y="218" font-size="13" class="t2">The Agent arranges ideas on the board,</text>
-  <text x="1100" y="236" font-size="13" class="t2">not just text in a reply.</text>
+  <text x="1100" y="218" font-size="13" class="t2">Drag from a card edge to connect.</text>
+  <text x="1100" y="236" font-size="13" class="t2">Use guides to snap cards into alignment.</text>
   <rect x="1100" y="254" width="300" height="64" rx="16" fill="#ebebee"/>
   <g filter="url(#ctl)"><rect x="1102" y="256" width="148" height="28" rx="14" fill="#fff"/></g>
   <text x="1176" y="275" text-anchor="middle" font-size="12.5" class="b">Explain</text>
@@ -92,9 +95,9 @@
   <text x="1176" y="307" text-anchor="middle" font-size="12.5">Trace</text>
   <text x="1325" y="307" text-anchor="middle" font-size="12.5">Cluster</text>
   <rect x="1100" y="336" width="300" height="114" rx="12" fill="#f5f5f7"/>
-  <text x="1116" y="364" font-size="13" class="b">Two-way sync with your notes</text>
-  <text x="1116" y="386" font-size="12.5" class="t2">Editing a card updates the note;</text>
-  <text x="1116" y="404" font-size="12.5" class="t2">editing the note resizes the card.</text>
+  <text x="1116" y="364" font-size="13" class="b">Cards connected to your notes</text>
+  <text x="1116" y="386" font-size="12.5" class="t2">Preview linked Markdown content;</text>
+  <text x="1116" y="404" font-size="12.5" class="t2">keep board and file changes in sync.</text>
   <text x="1116" y="428" font-size="12" class="t3">Obsidian .canvas compatible</text>
 
   <!-- Controls + minimap -->
@@ -106,4 +109,5 @@
   <rect x="1270" y="816" width="34" height="18" rx="4" fill="#d1d1d6"/><rect x="1316" y="816" width="34" height="18" rx="4" fill="#d1d1d6"/>
   <rect x="1362" y="830" width="26" height="18" rx="4" fill="#fde68a"/>
   <rect x="1262" y="774" width="130" height="84" rx="6" fill="none" stroke="#007aff" stroke-width="1.5"/>
+<text x="1430" y="925" text-anchor="end" font-size="11" class="t3">v0.3.0 · Interface illustration · sample data</text>
 </svg>
