@@ -1,6 +1,68 @@
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Edge } from '@xyflow/react';
-import { t } from '../../lib/i18n';
-import { CARD_COLORS, getRelationTypes, getRelationLabel } from './canvasConstants';
+import { t, getLang } from '../../lib/i18n';
+import { getRelationTypes, getRelationLabel } from './canvasConstants';
+import { CARD_HUES, cardHue } from './cardContent';
+import { Icons, MenuItem } from './CanvasChrome';
+
+const zh = () => getLang() === 'zh';
+
+/**
+ * A menu anchored at a screen point that flips/shifts to stay inside the
+ * window (a menu opened near the bottom-right corner used to run off-screen).
+ */
+function FloatingMenu({ x, y, className = '', children }: { x: number; y: number; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    let left = x;
+    let top = y;
+    if (left + r.width > window.innerWidth - pad) left = Math.max(pad, x - r.width);
+    if (top + r.height > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - pad - r.height);
+    setPos({ left, top });
+  }, [x, y]);
+  return (
+    <div
+      ref={ref}
+      className={`zc-menu zc-menu--context ${className}`}
+      role="menu"
+      style={{ left: pos.left, top: pos.top }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
+    </div>
+  );
+}
+
+function HueRow({ current, onPick }: { current?: string; onPick: (hue: string | undefined) => void }) {
+  const isZh = zh();
+  const cur = current ? cardHue(current, '').toLowerCase() : '';
+  return (
+    <div className="zc-menu-swatches">
+      {CARD_HUES.map((h) => (
+        <button
+          key={h.value}
+          type="button"
+          className={`zc-swatch ${cur === h.value.toLowerCase() ? 'is-active' : ''}`}
+          style={{ ['--dot-hue' as string]: h.value }}
+          title={isZh ? h.nameZh : h.name}
+          onClick={() => onPick(h.value)}
+        />
+      ))}
+      <button
+        type="button"
+        className={`zc-swatch zc-swatch--none ${!cur ? 'is-active' : ''}`}
+        title={isZh ? '无颜色' : 'No color'}
+        onClick={() => onPick(undefined)}
+      />
+    </div>
+  );
+}
 
 // ── Node Context Menu ──
 interface NodeContextMenuProps {
@@ -14,7 +76,7 @@ interface NodeContextMenuProps {
   handleConvertTextToNote: (nodeId: string) => void;
   handleSetNodeColor: (nodeId: string, color: string | undefined) => void;
   selectedNodeCount: number;
-  onAIAnalyzeSelection?: () => void;
+  onDiscussSelection?: () => void;
   onBringToFront?: (nodeId: string) => void;
   onSendToBack?: (nodeId: string) => void;
 }
@@ -30,115 +92,66 @@ export function NodeContextMenu({
   handleConvertTextToNote,
   handleSetNodeColor,
   selectedNodeCount,
-  onAIAnalyzeSelection,
+  onDiscussSelection,
   onBringToFront,
   onSendToBack,
 }: NodeContextMenuProps) {
+  const isZh = zh();
   const node = reactFlowInstance.getNode(contextMenu.nodeId);
+  const close = () => setContextMenu(null);
+  const type = contextMenu.nodeType;
+  const colorable = type !== 'pdf' && type !== 'web' && type !== 'image';
+
   return (
-    <div
-      className="canvas-context-menu"
-      style={{ left: contextMenu.x, top: contextMenu.y }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div
-        className="canvas-context-menu-item danger"
-        onClick={() => handleDeleteNode(contextMenu.nodeId)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        <span>{t('common.delete' as any)}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => handleDuplicateNode(contextMenu.nodeId)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>{t('canvas.duplicate')}</span>
-      </div>
-      {contextMenu.nodeType === 'file' && (
-        <div
-          className="canvas-context-menu-item"
+    <FloatingMenu x={contextMenu.x} y={contextMenu.y}>
+      {type === 'file' && (
+        <MenuItem
+          icon={Icons.open}
+          label={isZh ? '打开笔记' : 'Open note'}
           onClick={() => {
             if (node?.data.file) {
               setCurrentFile(node.data.file as string);
               setView('note');
             }
-            setContextMenu(null);
+            close();
           }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          <span>{t('common.open' as any)}</span>
-        </div>
+        />
       )}
-      {contextMenu.nodeType === 'text' && (
-        <div
-          className="canvas-context-menu-item"
-          onClick={() => handleConvertTextToNote(contextMenu.nodeId)}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
-          <span>{t('canvas.convertToNote')}</span>
-        </div>
+      {type === 'text' && (
+        <MenuItem icon={Icons.note} label={t('canvas.convertToNote')} onClick={() => handleConvertTextToNote(contextMenu.nodeId)} />
       )}
-      {/* Z-order: bring to front / send to back */}
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => { onBringToFront?.(contextMenu.nodeId); setContextMenu(null); }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
-        <span>{t('canvas.bringToFront')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => { onSendToBack?.(contextMenu.nodeId); setContextMenu(null); }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
-        <span>{t('canvas.sendToBack')}</span>
-      </div>
-      {selectedNodeCount >= 2 && (
+      <MenuItem icon={Icons.templates} label={isZh ? '创建副本' : 'Duplicate'} onClick={() => handleDuplicateNode(contextMenu.nodeId)} />
+      {selectedNodeCount >= 2 && onDiscussSelection && (
+        <MenuItem
+          icon={Icons.chat}
+          label={isZh ? `在对话中讨论所选 ${selectedNodeCount} 张` : `Discuss ${selectedNodeCount} selected in chat`}
+          onClick={() => { onDiscussSelection(); close(); }}
+        />
+      )}
+
+      <div className="zc-menu-sep" />
+      <MenuItem
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 4H6a2 2 0 0 0-2 2v10" /></svg>}
+        label={t('canvas.bringToFront')}
+        onClick={() => { onBringToFront?.(contextMenu.nodeId); close(); }}
+      />
+      <MenuItem
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="12" height="12" rx="2" /><path d="M8 20h10a2 2 0 0 0 2-2V8" /></svg>}
+        label={t('canvas.sendToBack')}
+        onClick={() => { onSendToBack?.(contextMenu.nodeId); close(); }}
+      />
+
+      {colorable && (
         <>
-          <div className="canvas-context-menu-divider" />
-          <div
-            className="canvas-context-menu-item ai-action"
-            onClick={() => {
-              onAIAnalyzeSelection?.();
-              setContextMenu(null);
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
-            <span>{t('canvas.aiAnalyzeSelected')}</span>
-          </div>
+          <div className="zc-menu-sep" />
+          <div className="zc-menu-heading">{isZh ? '颜色' : 'Color'}</div>
+          <HueRow current={node?.data.color as string | undefined} onPick={(h) => handleSetNodeColor(contextMenu.nodeId, h)} />
         </>
       )}
-      {contextMenu.nodeType !== 'pdf' && contextMenu.nodeType !== 'web' && (
-        <>
-          <div className="canvas-context-menu-divider" />
-          <div className="canvas-context-menu-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><circle cx="8.5" cy="15.5" r="2.5"/></svg>
-            <span>{t('canvas.cardColor')}</span>
-          </div>
-          <div className="canvas-context-color-row">
-            {CARD_COLORS.map(c => (
-              <div
-                key={c.value}
-                className={`canvas-context-color-dot ${(node?.data.color === c.value) ? 'active' : ''}`}
-                style={{ backgroundColor: c.value }}
-                title={c.name}
-                onClick={() => handleSetNodeColor(contextMenu.nodeId, c.value)}
-              />
-            ))}
-            <div
-              className="canvas-context-color-dot reset"
-              title={t('common.reset')}
-              onClick={() => handleSetNodeColor(contextMenu.nodeId, undefined)}
-            >
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+
+      <div className="zc-menu-sep" />
+      <MenuItem icon={Icons.trash} label={t('common.delete' as any)} shortcut="Del" danger onClick={() => handleDeleteNode(contextMenu.nodeId)} />
+    </FloatingMenu>
   );
 }
 
@@ -151,7 +164,7 @@ interface EdgeContextMenuProps {
   setEditingEdgeId: (id: string | null) => void;
   setEdgeLabelInput: (val: string) => void;
   setEdgeLabelPos: (pos: { x: number; y: number }) => void;
-  handleToggleEdgeArrow: (edgeId: string) => void;
+  handleSetEdgeDirection: (edgeId: string, dir: 'none' | 'forward' | 'both') => void;
   handleSetEdgeRelation: (edgeId: string, relationType: string) => void;
   handleSetEdgeColor: (edgeId: string, color: string | undefined) => void;
   handleDeleteEdge: (edgeId: string) => void;
@@ -164,23 +177,32 @@ export function EdgeContextMenu({
   setEditingEdgeId,
   setEdgeLabelInput,
   setEdgeLabelPos,
-  handleToggleEdgeArrow,
+  handleSetEdgeDirection,
   handleSetEdgeRelation,
   handleSetEdgeColor,
   handleDeleteEdge,
 }: EdgeContextMenuProps) {
+  const isZh = zh();
   const edge = edges.find(e => e.id === edgeContextMenu.edgeId);
-  const currentType = edge?.data?.relationType || 'wikilink';
-  const currentColor = edge?.data?.color || edge?.style?.stroke;
+  const currentType = (edge?.data?.relationType as string) || 'wikilink';
+  const currentColor = (edge?.data?.color as string) || (edge?.style?.stroke as string);
+  const from = (edge?.data?.fromEnd as string) || 'none';
+  const to = (edge?.data?.toEnd as string) || 'arrow';
+  const dir: 'none' | 'forward' | 'both' = from === 'arrow' && to === 'arrow' ? 'both' : to === 'arrow' ? 'forward' : 'none';
+  const id = edgeContextMenu.edgeId;
+
+  const dirs: { k: 'none' | 'forward' | 'both'; label: string; icon: ReactNode }[] = [
+    { k: 'none', label: isZh ? '无方向' : 'None', icon: <svg width="22" height="12" viewBox="0 0 22 12"><line x1="2" y1="6" x2="20" y2="6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg> },
+    { k: 'forward', label: isZh ? '单向' : 'One way', icon: <svg width="22" height="12" viewBox="0 0 22 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="6" x2="19" y2="6" /><polyline points="15 2.5 19 6 15 9.5" /></svg> },
+    { k: 'both', label: isZh ? '双向' : 'Both ways', icon: <svg width="22" height="12" viewBox="0 0 22 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="19" y2="6" /><polyline points="15 2.5 19 6 15 9.5" /><polyline points="7 2.5 3 6 7 9.5" /></svg> },
+  ];
 
   return (
-    <div
-      className="canvas-context-menu canvas-edge-menu-expanded"
-      style={{ left: edgeContextMenu.x, top: edgeContextMenu.y }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div
-        className="canvas-context-menu-item"
+    <FloatingMenu x={edgeContextMenu.x} y={edgeContextMenu.y} className="zc-menu--wide">
+      <MenuItem
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7V5h16v2" /><line x1="12" y1="5" x2="12" y2="19" /><line x1="9" y1="19" x2="15" y2="19" /></svg>}
+        label={edge?.label ? (isZh ? '编辑标签' : 'Edit label') : (isZh ? '添加标签' : 'Add label')}
+        shortcut={isZh ? '双击' : 'Dbl-click'}
         onClick={() => {
           if (edge) {
             setEditingEdgeId(edge.id);
@@ -189,82 +211,46 @@ export function EdgeContextMenu({
           }
           setEdgeContextMenu(null);
         }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span>{t('canvas.editLabel')}</span>
-      </div>
+      />
 
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => handleToggleEdgeArrow(edgeContextMenu.edgeId)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-        </svg>
-        <span>
-          {(() => {
-            const from = edge?.data?.fromEnd || 'none';
-            const to = edge?.data?.toEnd || 'arrow';
-            if (from === 'none' && to === 'arrow') return t('canvas.arrowOneWay');
-            if (from === 'arrow' && to === 'arrow') return t('canvas.arrowBoth');
-            return t('canvas.arrowNone');
-          })()}
-        </span>
-      </div>
-
-      <div className="canvas-context-menu-divider" />
-
-      <div className="canvas-context-menu-label">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        <span>{t('canvas.relationType')}</span>
-      </div>
-      <div className="canvas-edge-relation-list">
-        {getRelationTypes().map(rel => (
-          <div
-            key={rel.type}
-            className={`canvas-edge-relation-item ${currentType === rel.type ? 'active' : ''}`}
-            onClick={() => handleSetEdgeRelation(edgeContextMenu.edgeId, rel.type)}
+      <div className="zc-menu-heading">{isZh ? '方向' : 'Direction'}</div>
+      <div className="zc-segmented" role="radiogroup">
+        {dirs.map(d => (
+          <button
+            key={d.k}
+            type="button"
+            role="radio"
+            aria-checked={dir === d.k}
+            className={dir === d.k ? 'is-active' : ''}
+            title={d.label}
+            onClick={() => handleSetEdgeDirection(id, d.k)}
           >
-            <div className="canvas-edge-relation-dot" style={{ backgroundColor: rel.color }} />
-            <span>{getRelationLabel(rel)}</span>
-          </div>
+            {d.icon}
+          </button>
         ))}
       </div>
 
-      <div className="canvas-context-menu-divider" />
-
-      <div className="canvas-context-menu-label">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><circle cx="8.5" cy="15.5" r="2.5"/></svg>
-        <span>{t('canvas.lineColor')}</span>
-      </div>
-      <div className="canvas-context-color-row">
-        {CARD_COLORS.map(c => (
-          <div
-            key={c.value}
-            className={`canvas-context-color-dot ${currentColor === c.value ? 'active' : ''}`}
-            style={{ backgroundColor: c.value }}
-            title={c.name}
-            onClick={() => handleSetEdgeColor(edgeContextMenu.edgeId, c.value)}
+      <div className="zc-menu-sep" />
+      <div className="zc-menu-heading">{t('canvas.relationType')}</div>
+      <div className="zc-menu-grid">
+        {getRelationTypes().map(rel => (
+          <MenuItem
+            key={rel.type}
+            icon={<span className="zc-rel-dot" style={{ ['--dot-hue' as string]: rel.color }} />}
+            label={getRelationLabel(rel)}
+            active={currentType === rel.type}
+            onClick={() => handleSetEdgeRelation(id, rel.type)}
           />
         ))}
-        <div
-          className="canvas-context-color-dot reset"
-          title={t('common.reset')}
-          onClick={() => handleSetEdgeColor(edgeContextMenu.edgeId, undefined)}
-        >
-          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </div>
       </div>
 
-      <div className="canvas-context-menu-divider" />
-      <div
-        className="canvas-context-menu-item danger"
-        onClick={() => handleDeleteEdge(edgeContextMenu.edgeId)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        <span>{t('canvas.deleteEdge')}</span>
-      </div>
-    </div>
+      <div className="zc-menu-sep" />
+      <div className="zc-menu-heading">{t('canvas.lineColor')}</div>
+      <HueRow current={currentColor} onPick={(h) => handleSetEdgeColor(id, h)} />
+
+      <div className="zc-menu-sep" />
+      <MenuItem icon={Icons.trash} label={t('canvas.deleteEdge')} shortcut="Del" danger onClick={() => handleDeleteEdge(id)} />
+    </FloatingMenu>
   );
 }
 
@@ -274,6 +260,7 @@ interface PaneContextMenuProps {
   paneMenu: { x: number; y: number };
   addNodeAtPosition: (type: 'note' | 'text' | 'group' | 'web', screenX: number, screenY: number) => void;
   handleAddPdfNode: () => void;
+  handleAddImageNode?: () => void;
   setPaneMenu: (menu: any) => void;
 }
 
@@ -281,56 +268,29 @@ export function PaneContextMenu({
   paneMenu,
   addNodeAtPosition,
   handleAddPdfNode,
+  handleAddImageNode,
   setPaneMenu,
 }: PaneContextMenuProps) {
+  const isZh = zh();
+  const at = (type: 'note' | 'text' | 'group' | 'web') => () => addNodeAtPosition(type, paneMenu.x, paneMenu.y);
   return (
-    <div
-      className="canvas-context-menu"
-      style={{ left: paneMenu.x, top: paneMenu.y }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => addNodeAtPosition('note', paneMenu.x, paneMenu.y)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <span>{t('canvas.addNote')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => addNodeAtPosition('text', paneMenu.x, paneMenu.y)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span>{t('canvas.addSticky')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => addNodeAtPosition('group', paneMenu.x, paneMenu.y)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="3 3"/></svg>
-        <span>{t('canvas.addGroup')}</span>
-      </div>
-      <div className="canvas-context-menu-divider" />
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => addNodeAtPosition('web', paneMenu.x, paneMenu.y)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span>{t('canvas.addWeb')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => { handleAddPdfNode(); setPaneMenu(null); }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <span>{t('canvas.addPdf')}</span>
-      </div>
-    </div>
+    <FloatingMenu x={paneMenu.x} y={paneMenu.y}>
+      <div className="zc-menu-heading">{isZh ? '在此处添加' : 'Add here'}</div>
+      <MenuItem icon={Icons.note} label={isZh ? '笔记…' : 'Note…'} onClick={at('note')} />
+      <MenuItem icon={Icons.sticky} label={isZh ? '便签' : 'Sticky'} shortcut={isZh ? '双击空白处' : 'Dbl-click'} onClick={at('text')} />
+      <MenuItem icon={Icons.group} label={isZh ? '分组' : 'Group'} onClick={at('group')} />
+      <div className="zc-menu-sep" />
+      <MenuItem icon={Icons.web} label={isZh ? '网页' : 'Web page'} onClick={at('web')} />
+      <MenuItem icon={Icons.pdf} label="PDF…" onClick={() => { handleAddPdfNode(); setPaneMenu(null); }} />
+      {handleAddImageNode && (
+        <MenuItem icon={Icons.image} label={isZh ? '图片…' : 'Image…'} onClick={() => { handleAddImageNode(); setPaneMenu(null); }} />
+      )}
+    </FloatingMenu>
   );
 }
 
 
-// ── Quick Connect Menu ──
+// ── Quick Connect Menu (a line dropped on empty canvas) ──
 interface QuickConnectMenuProps {
   quickConnectMenu: { x: number; y: number; sourceNodeId: string; sourceHandleId: string | null };
   handleQuickCreate: (type: 'text' | 'file' | 'web') => void;
@@ -344,61 +304,29 @@ export function QuickConnectMenu({
   quickConnectSuggestions,
   handleQuickConnectSimilar,
 }: QuickConnectMenuProps) {
+  const isZh = zh();
   return (
-    <div
-      className="canvas-quick-connect-menu"
-      style={{ left: quickConnectMenu.x, top: quickConnectMenu.y }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="canvas-quick-connect-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"/></svg>
-        <span>{t('canvas.quickCreate')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => handleQuickCreate('text')}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span>{t('canvas.quickCreateSticky')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => handleQuickCreate('file')}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <span>{t('canvas.quickCreateNote')}</span>
-      </div>
-      <div
-        className="canvas-context-menu-item"
-        onClick={() => handleQuickCreate('web')}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        <span>{t('canvas.addWeb')}</span>
-      </div>
+    <FloatingMenu x={quickConnectMenu.x + 6} y={quickConnectMenu.y + 6} className="zc-menu--quick">
+      <div className="zc-menu-heading">{isZh ? '连接到新的…' : 'Connect to a new…'}</div>
+      <MenuItem icon={Icons.sticky} label={isZh ? '便签' : 'Sticky'} onClick={() => handleQuickCreate('text')} />
+      <MenuItem icon={Icons.note} label={isZh ? '笔记…' : 'Note…'} onClick={() => handleQuickCreate('file')} />
+      <MenuItem icon={Icons.web} label={isZh ? '网页' : 'Web page'} onClick={() => handleQuickCreate('web')} />
       {quickConnectSuggestions.length > 0 && (
         <>
-          <div className="canvas-context-menu-divider" />
-          <div className="canvas-context-menu-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            <span>{t('canvas.relatedNotes')}</span>
-          </div>
+          <div className="zc-menu-sep" />
+          <div className="zc-menu-heading">{t('canvas.relatedNotes')}</div>
           {quickConnectSuggestions.map(s => (
-            <div
+            <MenuItem
               key={s.path}
-              className="canvas-context-menu-item canvas-suggest-item"
+              icon={Icons.note}
+              label={<span className="zc-menu-ellipsis">{s.label}</span>}
+              shortcut={s.similarity !== undefined ? `${s.similarity}%` : undefined}
               onClick={() => handleQuickConnectSimilar(s.path)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span className="canvas-suggest-label">{s.label}</span>
-              {s.similarity !== undefined && (
-                <span className="canvas-suggest-score">{s.similarity}%</span>
-              )}
-            </div>
+            />
           ))}
         </>
       )}
-    </div>
+    </FloatingMenu>
   );
 }
 

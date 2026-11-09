@@ -72,23 +72,17 @@ export function WebNode({ id, data, selected }: any) {
 
   return (
     <div
-      className={`web-node-card ${selected ? 'selected' : ''}`}
+      className={`web-node-card zc-card zc-card--embed ${selected ? 'selected' : ''}`}
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
     >
-      <NodeResizer
-        isVisible={selected}
-        minWidth={250}
-        minHeight={200}
-        lineStyle={{ borderColor: 'rgba(148, 163, 184, 0.2)', borderStyle: 'dashed' }}
-        handleStyle={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.85)', border: '1.5px solid rgba(100,116,139,0.4)', zIndex: 10 }}
-      />
+      <NodeResizer isVisible={selected} minWidth={250} minHeight={200} />
       <Handle type="target" position={Position.Left} id="left" />
       <Handle type="target" position={Position.Top} id="top" />
       <Handle type="source" position={Position.Right} id="right" />
       <Handle type="source" position={Position.Bottom} id="bottom" />
 
       {/* Header */}
-      <div className="web-node-header">
+      <div className="web-node-header zc-card-header">
         {isRenamingTitle ? (
           <input
             ref={titleInputRef}
@@ -108,38 +102,41 @@ export function WebNode({ id, data, selected }: any) {
           />
         ) : (
           <span
-            className="web-node-title web-node-title-editable nodrag"
+            className="web-node-title web-node-title-editable zc-card-title nodrag"
             title={displayUrl}
             onClick={(e) => { e.stopPropagation(); setIsRenamingTitle(true); }}
           >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="2" y1="12" x2="22" y2="12"/>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-            </svg>
-            {customTitle || hostname || (isZh ? '网页嵌入' : 'Web Embed')}
+            <span className="zc-card-kind" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+              </svg>
+            </span>
+            <span className="zc-card-title-text">{customTitle || hostname || (isZh ? '网页' : 'Web page')}</span>
+            {customTitle && hostname && <span className="zc-card-subtitle">{hostname}</span>}
           </span>
         )}
-        <div className="web-node-actions">
+        <div className="web-node-actions zc-card-actions">
           {url && (
-            <button className="note-node-btn" onClick={() => { setIsEditing(true); setIsInteracting(false); }} title={isZh ? '编辑链接' : 'Edit URL'}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <button className="note-node-btn zc-icon-btn" onClick={() => { setIsEditing(true); setIsInteracting(false); }} title={isZh ? '编辑链接' : 'Edit URL'}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
             </button>
           )}
           {url && (
-            <button className="note-node-btn" onClick={handleOpenExternal} title={isZh ? '在浏览器中打开' : 'Open in browser'}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <button className="note-node-btn zc-icon-btn" onClick={handleOpenExternal} title={isZh ? '在浏览器中打开' : 'Open in browser'}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                 <polyline points="15 3 21 3 21 9"/>
                 <line x1="10" y1="14" x2="21" y2="3"/>
               </svg>
             </button>
           )}
-          <button className="note-node-btn" onClick={handleDelete} title={t('canvas.removeCard')}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <button className="note-node-btn zc-icon-btn" onClick={handleDelete} title={t('canvas.removeCard')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
             </svg>
           </button>

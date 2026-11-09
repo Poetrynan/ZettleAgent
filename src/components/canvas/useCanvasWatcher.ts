@@ -198,36 +198,43 @@ export function useCanvasWatcher(
         const tgtTitle = tgtNode?.data.title || tgtNode?.id || '';
         const smartType = se.data?._smartType as string;
 
+        const pair: [string, string] = [String(srcTitle), String(tgtTitle)];
         if (smartType === 'suggestion') {
           newSuggestions.push({
             id: se.id,
             type: 'action',
-            title: isZh ? `建议连接: ${srcTitle} ↔ ${tgtTitle}` : `Suggested Link: ${srcTitle} ↔ ${tgtTitle}`,
+            kind: isZh ? '可以连接' : 'Could connect',
+            pair,
+            title: `${srcTitle} ↔ ${tgtTitle}`,
             description: isZh
-              ? `AI 扫描发现这两张卡片有 ${se.data?.similarity}% 的概念语义相关性，建议建立关联。`
-              : `AI detected ${se.data?.similarity}% semantic similarity between these concepts.`,
-            actionLabel: isZh ? '接受连接' : 'Accept Link',
+              ? `内容相似度 ${se.data?.similarity}%，也许值得连在一起。`
+              : `${se.data?.similarity}% similar in content — maybe worth linking.`,
+            actionLabel: isZh ? '连接' : 'Connect',
             actionData: { edge: se },
           });
         } else if (smartType === 'duplicate') {
           newSuggestions.push({
             id: se.id,
             type: 'warning',
-            title: isZh ? `可能重复: ${srcTitle} ↔ ${tgtTitle}` : `Possible Duplicate: ${srcTitle} ↔ ${tgtTitle}`,
+            kind: isZh ? '可能重复' : 'Possible duplicate',
+            pair,
+            title: `${srcTitle} ↔ ${tgtTitle}`,
             description: isZh
-              ? `检测到 ${se.data?.similarity}% 的极高语义重合度，它们可能描述了相同的核心知识概念。`
-              : `Extremely high similarity (${se.data?.similarity}%). They might be duplicates.`,
-            actionLabel: isZh ? '合并卡片' : 'Merge Notes',
+              ? `内容相似度 ${se.data?.similarity}%，可能写的是同一件事。`
+              : `${se.data?.similarity}% similar — they may say the same thing.`,
+            actionLabel: isZh ? '合并' : 'Merge',
             actionData: { edge: se },
           });
         } else if (smartType === 'contradiction') {
           newSuggestions.push({
             id: se.id,
             type: 'warning',
-            title: isZh ? `矛盾警告: ${srcTitle} ↔ ${tgtTitle}` : `Contradiction: ${srcTitle} ↔ ${tgtTitle}`,
+            kind: isZh ? '说法不一致' : 'Disagreement',
+            pair,
+            title: `${srcTitle} ↔ ${tgtTitle}`,
             description: isZh
-              ? '检测到这两张卡片在事实层面上存在潜在冲突或矛盾，请审视其逻辑关联。'
-              : 'Potential factual conflict or contradiction detected between these notes.',
+              ? '两张卡片里有说法对不上的地方，值得对照看看。'
+              : 'These two cards seem to disagree somewhere; worth reading side by side.',
           });
         }
       }
@@ -236,15 +243,15 @@ export function useCanvasWatcher(
         newSuggestions.push({
           id: 'diag-orphans-action',
           type: 'info',
-          title: isZh ? '整理画布上的孤立卡片' : 'Arrange Orphan Cards',
+          kind: isZh ? '未连接' : 'Unconnected',
+          title: isZh ? `${orphanNodeIds.length} 张卡片还没有连线` : `${orphanNodeIds.length} cards have no lines yet`,
           description: isZh
-            ? `当前画布上有 ${orphanNodeIds.length} 张卡片没有建立任何连线。`
-            : `There are ${orphanNodeIds.length} cards with no connections.`,
-          actionLabel: isZh ? '一键智能排版' : 'Run Auto-Layout',
+            ? '自动排列会把它们挪到相关卡片旁边。'
+            : 'Arranging moves them next to related cards.',
+          actionLabel: isZh ? '自动排列' : 'Arrange',
           actionData: { action: 'auto-layout' },
         });
       }
-
       setSuggestions(newSuggestions);
       return { orphanNodeIds, brokenLinkNodeIds, missingMetaNodeIds, totalIssues };
     } catch (err) {

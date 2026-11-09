@@ -1,19 +1,8 @@
-import { useState, useRef, useCallback, useMemo, memo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect, memo } from 'react';
 import { Handle, Position, NodeResizer, useReactFlow } from '@xyflow/react';
 import { t } from '../../lib/i18n';
 import { renderMarkdownSafe } from '../../lib/sanitizeHtml';
-
-// 亮柔色牌 — 两种模式下统一使用。
-// Obsidian 风格：便利签始终为亮色背景 + 深色文字，
-// 在暗色画布上作为亮色斑点存在，辨识度高且不脏。
-const STICKY_COLORS = [
-  { name: 'Cream', value: '#fef9c3' },
-  { name: 'Mint', value: '#d1fae5' },
-  { name: 'Sky', value: '#dbeafe' },
-  { name: 'Rose', value: '#ffe4e6' },
-  { name: 'Lavender', value: '#ede9fe' },
-  { name: 'Peach', value: '#ffedd5' },
-];
+import { CARD_HUES, cardHue, linkifyWikilinks } from './cardContent';
 
 // 性能优化: 自定义比较函数
 const arePropsEqual = (prev: any, next: any) => {
@@ -27,21 +16,29 @@ const arePropsEqual = (prev: any, next: any) => {
   );
 };
 
+/**
+ * Sticky note. One surface: rendered Markdown while you look at it, plain text
+ * while you edit it (click into the note, Esc or click away to finish). The
+ * stored colour is a hue that CSS mixes into the theme's card background.
+ */
 export const TextNode = memo(function TextNode({ id, data, selected }: any) {
   const { deleteElements } = useReactFlow();
   const [text, setText] = useState<string>(data.text || '');
-  const [color, setColor] = useState<string>(data.color || '#fef08a');
+  const [hue, setHue] = useState<string>(cardHue(data.color));
+  const [editing, setEditing] = useState<boolean>(!data.text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const hasMarkdown = useMemo(() => {
-    if (!text) return false;
-    return /(\*\*|__|~~|#{1,6}\s|`|^\s*[-*+]\s|^\s*\d+\.\s|^\s*>\s|\[.*\]\(.*\)|!\[|\|.*\|)/m.test(text);
-  }, [text]);
+  useEffect(() => {
+    if (editing) {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }
+  }, [editing]);
 
-  const renderedHtml = useMemo(() => {
-    if (!text || !hasMarkdown) return '';
-    return renderMarkdownSafe(text);
-  }, [text, hasMarkdown]);
+  const renderedHtml = useMemo(() => (text ? renderMarkdownSafe(linkifyWikilinks(text)) : ''), [text]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
@@ -50,7 +47,7 @@ export const TextNode = memo(function TextNode({ id, data, selected }: any) {
   }, [id, data]);
 
   const handleColorChange = useCallback((newColor: string) => {
-    setColor(newColor);
+    setHue(newColor);
     data.color = newColor;
   }, [data]);
 
@@ -60,78 +57,51 @@ export const TextNode = memo(function TextNode({ id, data, selected }: any) {
 
   return (
     <div
-      className={`text-node-wrapper ${hasMarkdown ? 'text-node-dual' : ''}`}
-      style={{ width: '100%', height: '100%' }}
+      className={`text-node-sticky zc-sticky ${selected ? 'selected' : ''} ${editing ? 'is-editing' : ''}`}
+      style={{ width: '100%', height: '100%', '--sticky-hue': hue } as React.CSSProperties}
     >
-      {/* Editor Card */}
-      <div
-        className={`text-node-sticky ${selected ? 'selected' : ''}`}
-        style={{
-          backgroundColor: color,
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative',
-        }}
-      >
-        <NodeResizer
-          isVisible={selected}
-          minWidth={hasMarkdown ? 240 : 120}
-          minHeight={120}
-          lineStyle={{ borderColor: 'rgba(148, 163, 184, 0.2)', borderStyle: 'dashed' }}
-          handleStyle={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(148,163,184,0.4)' }}
-        />
-        <Handle type="target" position={Position.Left} id="left" />
-        <Handle type="target" position={Position.Top} id="top" />
-        <Handle type="source" position={Position.Right} id="right" />
-        <Handle type="source" position={Position.Bottom} id="bottom" />
+      <NodeResizer isVisible={selected} minWidth={140} minHeight={100} />
+      <Handle type="target" position={Position.Left} id="left" />
+      <Handle type="target" position={Position.Top} id="top" />
+      <Handle type="source" position={Position.Right} id="right" />
+      <Handle type="source" position={Position.Bottom} id="bottom" />
 
-        {/* Color palette + delete */}
-        <div className="sticky-color-palette nodrag">
-          {STICKY_COLORS.map((c) => (
-            <div
-              key={c.value}
-              className={`sticky-color-dot ${color === c.value ? 'active' : ''}`}
-              style={{ backgroundColor: c.value }}
-              title={c.name}
-              onClick={() => handleColorChange(c.value)}
-            />
-          ))}
-          <div className="canvas-toolbar-divider" style={{ height: 12, margin: '0 2px' }} />
-          <div
-            className="sticky-color-dot"
-            style={{ backgroundColor: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            title={t('canvas.removeCard')}
-            onClick={handleDelete}
-          >
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </div>
-        </div>
+      {/* Colour + remove, floating above the note while it is hovered or selected */}
+      <div className="sticky-color-palette zc-sticky-palette nodrag">
+        {CARD_HUES.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            className={`sticky-color-dot ${hue.toLowerCase() === c.value.toLowerCase() ? 'active' : ''}`}
+            style={{ '--dot-hue': c.value } as React.CSSProperties}
+            title={c.name}
+            aria-label={c.name}
+            onClick={() => handleColorChange(c.value)}
+          />
+        ))}
+        <span className="zc-sticky-palette-sep" />
+        <button type="button" className="zc-sticky-remove" title={t('canvas.removeCard')} onClick={handleDelete}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
 
+      {editing || !text ? (
         <textarea
           ref={textareaRef}
           className="text-node-textarea nodrag nowheel"
           value={text}
           onChange={handleChange}
+          onBlur={() => { if (text) setEditing(false); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
           placeholder={t('canvas.stickyPlaceholder')}
         />
-      </div>
-
-      {/* Preview Card — slides in when markdown detected */}
-      {hasMarkdown && renderedHtml && (
-        <div className="text-node-preview-card">
-          <div className="text-node-preview-label">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-            Preview
-          </div>
-          <div
-            className="text-node-markdown nodrag nowheel"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
-        </div>
+      ) : (
+        <div
+          className="zc-sticky-content text-node-markdown nodrag nowheel"
+          onDoubleClick={() => setEditing(true)}
+          onClick={(e) => { if (selected && !(e.target as HTMLElement).closest('a')) setEditing(true); }}
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
       )}
     </div>
   );

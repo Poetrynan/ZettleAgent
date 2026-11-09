@@ -39,7 +39,9 @@ import { t, tf } from '../../lib/i18n';
 import { AgentPanel } from '../common/AgentPanel';
 import { useCanvasWatcher } from './useCanvasWatcher';
 import { useHelperLines } from './useHelperLines';
-import { IconRobot } from '../icons';
+import { CanvasTopBar, CanvasDock, CanvasReviewBar, SelectionBar } from './CanvasChrome';
+import { CanvasConnectionLine } from './CanvasConnectionLine';
+import { SnapGuides } from './SnapGuides';
 
 import { getNoteColorMap, METHODOLOGY_TYPES, mapNoteType } from '../dashboard/graphHelpers';
 import { useVizTheme } from '../../lib/useVizTheme';
@@ -190,17 +192,33 @@ function CanvasInner() {
   const { helperLines, calculateHelperLines, clearHelperLines, onDragStart } = useHelperLines();
 
   // 性能优化: 稳定的回调引用，不依赖 nodes 变化
+  // Holding Ctrl/⌘ while dragging moves freely (tldraw's snap toggle).
+  const snapOffRef = useRef(false);
+  useEffect(() => {
+    const sync = (e: KeyboardEvent) => { snapOffRef.current = e.ctrlKey || e.metaKey; };
+    const reset = () => { snapOffRef.current = false; };
+    window.addEventListener('keydown', sync);
+    window.addEventListener('keyup', sync);
+    window.addEventListener('blur', reset);
+    return () => {
+      window.removeEventListener('keydown', sync);
+      window.removeEventListener('keyup', sync);
+      window.removeEventListener('blur', reset);
+    };
+  }, []);
+
   const onNodesChangeWithAlignment = useCallback((changes: NodeChange[]) => {
     const hasPositionChange = changes.some(c => c.type === 'position');
     if (hasPositionChange) {
       // 使用 ref 获取最新 nodes，避免依赖数组变化导致回调重建
-      const { snappedChanges } = calculateHelperLines(changes, nodesRef.current, 6);
+      // Snap distance: 8 screen px at any zoom.
+      const zoom = reactFlowInstance.getZoom?.() || 1;
+      const { snappedChanges } = calculateHelperLines(changes, nodesRef.current, 8 / zoom, snapOffRef.current);
       onNodesChange(snappedChanges);
     } else {
-      clearHelperLines();
       onNodesChange(changes);
     }
-  }, [onNodesChange, calculateHelperLines, clearHelperLines]);
+  }, [onNodesChange, calculateHelperLines, reactFlowInstance]);
 
   // ── Double-click on pane detection (Phase 29) ──
   const lastPaneClickRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
@@ -210,6 +228,9 @@ function CanvasInner() {
     x: number; y: number; sourceNodeId: string; sourceHandleId: string | null;
   } | null>(null);
   const [quickConnectSuggestions, setQuickConnectSuggestions] = useState<{ path: string; label: string; similarity?: number }[]>([]);
+  // While a line is being dragged out: show every card's connection points and
+  // highlight the card under the pointer as the drop target.
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // ── Extracted Hooks ──
   const {
@@ -232,6 +253,7 @@ function CanvasInner() {
     handleSmartEdgeClick, handleSmartEdgeContextMenu,
     handlePaneClick, handleSetEdgeRelation, handleSetEdgeColor, handleToggleEdgeArrow,
     onConnect, onConnectEnd, handleQuickCreate, handleQuickConnectSimilar,
+    onReconnect, onReconnectStart, onReconnectEnd, handleSetEdgeDirection,
     handleConvertTextToNote, onEdgesDelete,
     handleNodeContextMenu, handlePaneContextMenu, handleEdgeContextMenu,
     handleDeleteNode, handleKeyboardDelete, handleDeleteEdge,
@@ -512,8 +534,10 @@ function CanvasInner() {
   useEffect(() => {
     if (!contextMenu && !paneMenu && !edgeContextMenu && !quickConnectMenu) return;
     const close = () => { setContextMenu(null); setPaneMenu(null); setEdgeContextMenu(null); setQuickConnectMenu(null); };
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
+    // Listen from the next tick: a menu opened on mouseup (a line dropped on empty
+    // canvas) would otherwise be closed by the click of that same mouse release.
+    const timer = window.setTimeout(() => window.addEventListener('click', close), 0);
+    return () => { window.clearTimeout(timer); window.removeEventListener('click', close); };
   }, [contextMenu, paneMenu, edgeContextMenu, quickConnectMenu]);
 
   // ── 自由手绘快捷键：P=pen, E=eraser, Ctrl+Z=undo ──
@@ -1581,9 +1605,12 @@ Return ONLY a JSON array, no markdown, no explanation:
       } else {
         updated.markerStart = undefined;
       }
-      // Sync label color with edge stroke color
-      if (updated.label && edgeColor) {
-        updated.labelStyle = { ...updated.labelStyle, fill: edgeColor };
+      // A line's own colour goes through a CSS variable: the canvas stylesheet
+      // paints every edge path with `!important`, which used to hide picked colours.
+      const ownColor = (e.data?.color as string) || (e.style?.stroke as string) || '';
+      if (ownColor) {
+        updated.style = { ...updated.style, ['--edge-color' as string]: ownColor } as React.CSSProperties;
+        if (updated.label) updated.labelStyle = { ...updated.labelStyle, fill: ownColor };
       }
       return updated;
     };
@@ -1600,77 +1627,97 @@ Return ONLY a JSON array, no markdown, no explanation:
   }, [edges, smartEdges]);
 
   // ── Smart Group Containment: auto-parent nodes dropped inside a GroupNode (Feature 1.2) ──
+  /** Absolute box of a node, in flow coordinates. */
+  const absBox = useCallback((id: string) => {
+    const internal = reactFlowInstance.getInternalNode(id);
+    if (!internal) return null;
+    const p = internal.internals.positionAbsolute;
+    return {
+      x: p.x,
+      y: p.y,
+      w: internal.measured?.width ?? internal.width ?? (internal.style?.width as number) ?? 300,
+      h: internal.measured?.height ?? internal.height ?? (internal.style?.height as number) ?? 200,
+    };
+  }, [reactFlowInstance]);
+
+  /** Smallest group whose box contains the card's centre (absolute coordinates). */
+  const groupUnderCard = useCallback((cardId: string): { id: string; x: number; y: number } | null => {
+    const b = absBox(cardId);
+    if (!b) return null;
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    let best: { id: string; x: number; y: number } | null = null;
+    let bestArea = Infinity;
+    for (const g of nodesRef.current) {
+      if (g.type !== 'group' || g.id === cardId) continue;
+      const gb = absBox(g.id);
+      if (!gb) continue;
+      if (cx >= gb.x && cx <= gb.x + gb.w && cy >= gb.y && cy <= gb.y + gb.h && gb.w * gb.h < bestArea) {
+        bestArea = gb.w * gb.h;
+        best = { id: g.id, x: gb.x, y: gb.y };
+      }
+    }
+    return best;
+  }, [absBox]);
+
+  // While dragging a card over a group, the group lights up as the drop target.
+  // Toggled on the DOM directly so a drag doesn't re-render every card.
+  const dropGroupElRef = useRef<HTMLElement | null>(null);
+  const setDropGroup = useCallback((groupId: string | null) => {
+    const el = groupId
+      ? (document.querySelector(`.interactive-canvas-container .react-flow__node[data-id="${CSS.escape(groupId)}"]`) as HTMLElement | null)
+      : null;
+    if (dropGroupElRef.current === el) return;
+    dropGroupElRef.current?.classList.remove('zc-drop-target');
+    el?.classList.add('zc-drop-target');
+    dropGroupElRef.current = el;
+  }, []);
+
+  // ── Group containment: a card dropped inside a group joins it; dragged out, it leaves ──
+  // Positions are compared in absolute coordinates (a card already in a group has a
+  // position relative to that group). Cards are no longer clamped to their group
+  // (`extent: 'parent'`), which used to make it impossible to drag them back out.
   const handleNodeDragStop = useCallback(
-    (_event: any, draggedNode: Node) => {
-      if (draggedNode.type === 'group') return; // Don't parent groups to groups
+    (_event: any, draggedNode: Node, draggedNodes?: Node[]) => {
+      setDropGroup(null);
+      const moved = (draggedNodes && draggedNodes.length > 0 ? draggedNodes : [draggedNode]).filter(n => n.type !== 'group');
+      if (moved.length === 0) return;
+      const movedIds = new Set((draggedNodes ?? [draggedNode]).map(n => n.id));
 
-      const draggedX = draggedNode.position.x;
-      const draggedY = draggedNode.position.y;
-      const draggedW = draggedNode.width || (draggedNode.style?.width as number) || 300;
-      const draggedH = draggedNode.height || (draggedNode.style?.height as number) || 200;
-      const draggedCenterX = draggedX + draggedW / 2;
-      const draggedCenterY = draggedY + draggedH / 2;
-
-      // Find the smallest group that contains the dragged node's center
-      let bestGroup: Node | null = null;
-      let bestArea = Infinity;
-
-      for (const n of nodes) {
-        if (n.type !== 'group' || n.id === draggedNode.id) continue;
-        const gx = n.position.x;
-        const gy = n.position.y;
-        const gw = n.width || (n.style?.width as number) || 600;
-        const gh = n.height || (n.style?.height as number) || 400;
-
-        if (draggedCenterX >= gx && draggedCenterX <= gx + gw &&
-            draggedCenterY >= gy && draggedCenterY <= gy + gh) {
-          const area = gw * gh;
-          if (area < bestArea) {
-            bestArea = area;
-            bestGroup = n;
-          }
-        }
+      const updates = new Map<string, { parentId: string | undefined; position: { x: number; y: number } }>();
+      for (const n of moved) {
+        // Moving together with its group: it stays where it is.
+        if (n.parentId && movedIds.has(n.parentId)) continue;
+        const b = absBox(n.id);
+        if (!b) continue;
+        const g = groupUnderCard(n.id);
+        const next = g?.id;
+        if ((n.parentId || undefined) === next) continue;
+        updates.set(n.id, {
+          parentId: next,
+          position: g ? { x: b.x - g.x, y: b.y - g.y } : { x: b.x, y: b.y },
+        });
       }
+      if (updates.size === 0) return;
 
-      const currentParent = (draggedNode as any).parentId || (draggedNode as any).parentNode || null;
-      const newParent = bestGroup?.id || undefined;
-
-      if (currentParent !== newParent) {
-        setNodes(nds => nds.map(nd => {
-          if (nd.id !== draggedNode.id) return nd;
-          if (newParent && bestGroup) {
-            // Convert position to be relative to the group
-            return {
-              ...nd,
-              parentId: newParent,
-              position: {
-                x: nd.position.x - bestGroup.position.x,
-                y: nd.position.y - bestGroup.position.y,
-              },
-              extent: 'parent' as const,
-            };
-          } else {
-            // Remove from group — convert position back to absolute
-            const parentNode = currentParent ? nodes.find(n => n.id === currentParent) : null;
-            const absX = parentNode ? nd.position.x + parentNode.position.x : nd.position.x;
-            const absY = parentNode ? nd.position.y + parentNode.position.y : nd.position.y;
-            const { parentId, extent, ...rest } = nd as any;
-            return {
-              ...rest,
-              parentId: undefined,
-              position: { x: absX, y: absY },
-            };
-          }
-        }));
-      }
+      setNodes(nds => {
+        const next = nds.map(nd => {
+          const u = updates.get(nd.id);
+          if (!u) return nd;
+          const { extent: _extent, parentId: _parentId, ...rest } = nd as any;
+          return u.parentId ? { ...rest, parentId: u.parentId, position: u.position } : { ...rest, position: u.position };
+        });
+        // React Flow needs a parent before its children in the array.
+        return [...next.filter(n => n.type === 'group'), ...next.filter(n => n.type !== 'group')];
+      });
     },
-    [nodes, setNodes]
+    [absBox, groupUnderCard, setDropGroup, setNodes]
   );
 
   const handleNodeDragStopWithClear = useCallback(
-    (event: any, draggedNode: Node) => {
+    (event: any, draggedNode: Node, draggedNodes?: Node[]) => {
       clearHelperLines();
-      handleNodeDragStop(event, draggedNode);
+      handleNodeDragStop(event, draggedNode, draggedNodes);
       // 性能优化: 拖拽结束后触发待处理的历史记录推送和自动保存
       isDraggingNodeRef.current = false;
       if (pendingHistoryPushRef.current) {
@@ -1685,164 +1732,66 @@ Return ONLY a JSON array, no markdown, no explanation:
     [clearHelperLines, handleNodeDragStop, pushHistory, edges]
   );
 
-  return (
-    <div className={`interactive-canvas-container canvas-edit-mode${penMode !== 'off' ? ` canvas-pen-active canvas-pen-active--${penMode}` : ''}`} onMouseMove={handleMouseMove}>
-      {/* Floating Toolbar */}
-      <div
-        className="canvas-toolbar"
-        style={{
-          transform: isAgentOpen ? 'translateX(calc(-50% - 172px))' : 'translateX(-50%)',
-          transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-        }}
-      >
-        <button className="canvas-toolbar-btn" onClick={handleNewCanvas} data-tooltip={t('canvas.new')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleOpenCanvas} data-tooltip={t('canvas.open')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleSaveCanvas} data-tooltip={t('canvas.save')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        </button>
-        <div className="canvas-toolbar-divider" />
-        <button className="canvas-toolbar-btn" onClick={openAddNoteModal} data-tooltip={t('canvas.addNote')}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleAddTextNode} data-tooltip={t('canvas.addSticky')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleAddGroupNode} data-tooltip={t('canvas.addGroup')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="3 3"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleAddWebNode} data-tooltip={state.lang === 'zh' ? '嵌入网页' : 'Embed Web Page'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleAddPdfNode} data-tooltip={state.lang === 'zh' ? '嵌入 PDF' : 'Embed PDF'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleAddImageNode} data-tooltip={state.lang === 'zh' ? '嵌入图片' : 'Embed Image'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={() => setIsTemplateOpen(true)} data-tooltip={t('canvas.templates')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        </button>
-        <div className="canvas-toolbar-divider" />
-        {/* Undo / Redo */}
-        <button className="canvas-toolbar-btn" onClick={handleUndo} data-tooltip={state.lang === 'zh' ? '撤销 (Ctrl+Z)' : 'Undo (Ctrl+Z)'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-        </button>
-        <button className="canvas-toolbar-btn" onClick={handleRedo} data-tooltip={state.lang === 'zh' ? '重做 (Ctrl+Shift+Z)' : 'Redo (Ctrl+Shift+Z)'}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        </button>
-        <div className="canvas-toolbar-divider" />
-        <button
-          className={`canvas-toolbar-btn ${penMode === 'pen' ? 'canvas-mode-active' : ''}`}
-          onClick={() => setPenMode(prev => prev === 'pen' ? 'off' : 'pen')}
-          data-tooltip={state.lang === 'zh' ? '手绘 (P)' : 'Freehand Pen (P)'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-        </button>
-        <button
-          className={`canvas-toolbar-btn ${penMode === 'eraser' ? 'canvas-mode-active' : ''}`}
-          onClick={() => setPenMode(prev => prev === 'eraser' ? 'off' : 'eraser')}
-          data-tooltip={state.lang === 'zh' ? '擦除 (E)' : 'Eraser (E)'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14 2.2c.8-.8 2-.8 2.8 0l5 5c.8.8.8 2 0 2.8L12 20"/><path d="M6.5 13.5L16 4"/><line x1="7" y1="20" x2="9" y2="18"/></svg>
-        </button>
-        <div className="canvas-toolbar-divider" />
-        <button
-          className={`canvas-toolbar-btn ${diagnostics ? 'canvas-mode-active' : ''}`}
-          onClick={handleDiagnoseCanvas}
-          disabled={isDiagnosticRunning}
-          data-tooltip={state.lang === 'zh' ? '画布健康诊断' : 'Canvas Diagnostics'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-          </svg>
-        </button>
-        <button
-          className={`canvas-toolbar-btn ${smartCanvasOpen ? 'canvas-mode-active' : ''}`}
-          onClick={() => setSmartCanvasOpen(!smartCanvasOpen)}
-          data-tooltip={state.lang === 'zh' ? 'Smart Canvas (AI 搜索 + 智能排版)' : 'Smart Canvas (AI Search + Layout)'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z"/><path d="M19 16l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/>
-          </svg>
-        </button>
-        <button
-          className={`canvas-toolbar-btn ${canvasPlanOpen ? 'canvas-mode-active' : ''}`}
-          onClick={() => setCanvasPlanOpen(!canvasPlanOpen)}
-          data-tooltip={state.lang === 'zh' ? 'Canvas Plan（目标→预览→批准→验证）' : 'Canvas Plan (goal → preview → approve → verify)'}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>
-          </svg>
-        </button>
+  const selectedNodes = nodes.filter(n => n.selected);
+  const selectionColor = (() => {
+    const cs = new Set(selectedNodes.map(n => (n.data?.color as string | undefined)?.toLowerCase() ?? ''));
+    return cs.size === 1 ? [...cs][0] || undefined : undefined;
+  })();
+  const canvasName = canvasPath
+    ? canvasPath.replace(/\\/g, '/').split('/').pop()?.replace(/\.canvas$/i, '') || null
+    : null;
 
-        {/* Canvas → Chat: 讨论选中的节点 */}
-        {nodes.filter(n => n.selected).length > 0 && (
-          <>
-            <div className="canvas-toolbar-divider" />
-            {/* Multi-select alignment tools */}
-            {nodes.filter(n => n.selected).length >= 2 && (
-              <>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('left')}
-                  data-tooltip={state.lang === 'zh' ? '左对齐' : 'Align Left'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="3" x2="3" y2="21"/><rect x="6" y="5" width="10" height="5" rx="1"/><rect x="6" y="14" width="14" height="5" rx="1"/></svg>
-                </button>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('center-h')}
-                  data-tooltip={state.lang === 'zh' ? '水平居中' : 'Align Center H'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><rect x="7" y="5" width="10" height="5" rx="1"/><rect x="5" y="14" width="14" height="5" rx="1"/></svg>
-                </button>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('right')}
-                  data-tooltip={state.lang === 'zh' ? '右对齐' : 'Align Right'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="3" x2="21" y2="21"/><rect x="8" y="5" width="10" height="5" rx="1"/><rect x="4" y="14" width="14" height="5" rx="1"/></svg>
-                </button>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('top')}
-                  data-tooltip={state.lang === 'zh' ? '顶部对齐' : 'Align Top'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="3" x2="21" y2="3"/><rect x="5" y="6" width="5" height="10" rx="1"/><rect x="14" y="6" width="5" height="14" rx="1"/></svg>
-                </button>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('center-v')}
-                  data-tooltip={state.lang === 'zh' ? '垂直居中' : 'Align Center V'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><rect x="5" y="7" width="5" height="10" rx="1"/><rect x="14" y="5" width="5" height="14" rx="1"/></svg>
-                </button>
-                <button
-                  className="canvas-toolbar-btn"
-                  onClick={() => alignSelectedNodes('bottom')}
-                  data-tooltip={state.lang === 'zh' ? '底部对齐' : 'Align Bottom'}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="8" width="5" height="10" rx="1"/><rect x="14" y="4" width="5" height="14" rx="1"/></svg>
-                </button>
-              </>
-            )}
-            <button
-              className="canvas-toolbar-btn canvas-discuss-btn"
-              onClick={handleDiscussSelectedNodes}
-              data-tooltip={state.lang === 'zh' ? `讨论选中的 ${nodes.filter(n => n.selected).length} 个节点` : `Discuss ${nodes.filter(n => n.selected).length} selected nodes`}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              <span className="canvas-discuss-badge">{nodes.filter(n => n.selected).length}</span>
-            </button>
-          </>
-        )}
-      </div>
+  return (
+    <div
+      className={`interactive-canvas-container canvas-edit-mode${penMode !== 'off' ? ` canvas-pen-active canvas-pen-active--${penMode}` : ''}${isConnecting ? ' is-connecting' : ''}${isAgentOpen ? ' has-side-panel' : ''}`}
+      onMouseMove={handleMouseMove}
+    >
+      {/* Canvas chrome: file (top-left), review + suggestions (top-right),
+          selection (top-center), add dock (bottom-center). */}
+      <CanvasTopBar
+        lang={state.lang}
+        canvasName={canvasName}
+        onNew={handleNewCanvas}
+        onOpen={handleOpenCanvas}
+        onSave={handleSaveCanvas}
+        onTemplates={() => setIsTemplateOpen(true)}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+      />
+      <CanvasReviewBar
+        lang={state.lang}
+        panelOpen={isAgentOpen}
+        checking={isDiagnosticRunning}
+        checkActive={!!diagnostics}
+        onCheck={handleDiagnoseCanvas}
+        addByTopicOpen={smartCanvasOpen}
+        onAddByTopic={() => setSmartCanvasOpen(!smartCanvasOpen)}
+        planOpen={canvasPlanOpen}
+        onPlan={() => setCanvasPlanOpen(!canvasPlanOpen)}
+        suggestionCount={canvasSuggestions.length}
+        onTogglePanel={() => setIsAgentOpen(prev => !prev)}
+      />
+      <SelectionBar
+        lang={state.lang}
+        count={selectedNodes.length}
+        shifted={isAgentOpen}
+        currentColor={selectionColor}
+        onAlign={alignSelectedNodes}
+        onColor={(hue) => selectedNodes.forEach(n => handleSetNodeColor(n.id, hue))}
+        onDiscuss={handleDiscussSelectedNodes}
+        onDelete={() => selectedNodes.forEach(n => handleDeleteNode(n.id))}
+      />
+      <CanvasDock
+        lang={state.lang}
+        onAddNote={() => openAddNoteModal()}
+        onAddSticky={handleAddTextNode}
+        onAddGroup={handleAddGroupNode}
+        onAddWeb={handleAddWebNode}
+        onAddPdf={handleAddPdfNode}
+        onAddImage={handleAddImageNode}
+        penMode={penMode}
+        setPenMode={setPenMode}
+      />
 
       {/* 自由手绘笔刷控件面板 */}
       {penMode !== 'off' && (
@@ -1929,7 +1878,7 @@ Return ONLY a JSON array, no markdown, no explanation:
       {agentProgress && (
         <div style={{
           position: 'absolute',
-          bottom: 'var(--space-6)',
+          bottom: 72, // above the add dock
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 100,
@@ -1937,7 +1886,7 @@ Return ONLY a JSON array, no markdown, no explanation:
           maxWidth: 'calc(100% - var(--space-8))',
         }}>
           <ProgressPanel
-            title={state.lang === 'zh' ? 'AI 智能构建中...' : 'AI Canvas Builder'}
+            title={state.lang === 'zh' ? '正在整理画布' : 'Updating canvas'}
             current={agentProgress.step}
             total={agentProgress.steps.length}
             stage={state.lang === 'zh' 
@@ -1946,7 +1895,6 @@ Return ONLY a JSON array, no markdown, no explanation:
             stageDescription={state.lang === 'zh'
               ? agentProgress.steps[agentProgress.step - 1]?.descZh || ''
               : agentProgress.steps[agentProgress.step - 1]?.desc || ''}
-            stageIcon={<IconRobot size={11} />}
             variant="primary"
             showCancel={false}
             indeterminate={false}
@@ -1961,31 +1909,12 @@ Return ONLY a JSON array, no markdown, no explanation:
         onAddNotes={(results) => {
           // 关闭面板,只显示悬浮进度条
           setSmartCanvasOpen(false);
+          // Plain progress copy: say what is happening, not how clever it is.
           const scSteps = [
-            { 
-              label: 'Analyzing', 
-              labelZh: '分析笔记',
-              desc: 'AI is analyzing note content and extracting key concepts...',
-              descZh: 'AI 正在分析笔记内容，提取核心概念...'
-            },
-            { 
-              label: 'Connecting', 
-              labelZh: '建立关联',
-              desc: 'Discovering semantic relationships and building connections...',
-              descZh: '发现语义关联，构建知识网络...'
-            },
-            { 
-              label: 'Layout', 
-              labelZh: '智能排版',
-              desc: 'AI arranging nodes with force-directed graph algorithm...',
-              descZh: 'AI 使用力导向算法进行智能排版...'
-            },
-            { 
-              label: 'Complete', 
-              labelZh: '完成',
-              desc: 'Canvas is ready with intelligent structure',
-              descZh: '画布已生成，知识结构清晰呈现'
-            },
+            { label: 'Adding notes', labelZh: '添加笔记', desc: 'Placing the notes you picked', descZh: '正在放入选中的笔记' },
+            { label: 'Linking', labelZh: '查找关联', desc: 'Connecting them to related cards', descZh: '正在连到画布上相关的卡片' },
+            { label: 'Arranging', labelZh: '排列卡片', desc: 'Moving cards so nothing overlaps', descZh: '正在调整位置，避免重叠' },
+            { label: 'Done', labelZh: '完成', desc: '', descZh: '' },
           ];
           setAgentProgress({ step: 1, steps: scSteps });
           handleSmartCanvasSearch(undefined, results, (step) => {
@@ -2120,7 +2049,15 @@ Return ONLY a JSON array, no markdown, no explanation:
         onNodesChange={onNodesChangeWithAlignment}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onConnectEnd={onConnectEnd}
+        onConnectStart={() => { setIsConnecting(true); setQuickConnectMenu(null); }}
+        onConnectEnd={(event, connectionState) => { setIsConnecting(false); onConnectEnd(event, connectionState); }}
+        onReconnect={onReconnect}
+        onReconnectStart={() => { setIsConnecting(true); onReconnectStart(); }}
+        onReconnectEnd={(event, edge, handleType, connectionState) => { setIsConnecting(false); onReconnectEnd(event, edge, handleType, connectionState); }}
+        connectionRadius={28}
+        reconnectRadius={14}
+        connectionLineComponent={CanvasConnectionLine}
+        nodeDragThreshold={2}
         onEdgesDelete={onEdgesDelete}
         onNodeContextMenu={handleNodeContextMenu}
         onPaneContextMenu={handlePaneContextMenu}
@@ -2145,11 +2082,14 @@ Return ONLY a JSON array, no markdown, no explanation:
           isDraggingNodeRef.current = true;
           onDragStart('');
         }}
-        onNodeDrag={(_e, node) => {
+        onNodeDrag={(_e, node, dragged) => {
           // 性能优化: 拖拽时同步位置到混合渲染器
           if (hybridRendererRef.current && isDraggingNodeRef.current) {
             hybridRendererRef.current.updateNodePosition(node.id, node.position.x, node.position.y);
           }
+          // Light up the group a dragged card would drop into.
+          const card = (dragged && dragged.length > 0 ? dragged : [node]).find(n => n.type !== 'group');
+          setDropGroup(card ? groupUnderCard(card.id)?.id ?? null : null);
         }}
         onNodeDragStop={handleNodeDragStopWithClear}
         onMoveStart={() => { setContextMenu(null); setPaneMenu(null); setQuickConnectMenu(null); }}
@@ -2161,70 +2101,17 @@ Return ONLY a JSON array, no markdown, no explanation:
         defaultEdgeOptions={{ type: 'default', animated: false, markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: vizPalette.canvasDefaultEdge } }}
         panOnDrag={[1, 2]}
         selectionOnDrag={penMode === 'off' || shiftHeld}
-        snapToGrid
-        snapGrid={[20, 20]}
         minZoom={0.05}
         maxZoom={10}
         fitView
       >
         <Background gap={20} color={vizPalette.surface.grid} />
-        <MiniMap pannable zoomable />
+        {nodes.length > 0 && (
+          <MiniMap pannable zoomable style={{ width: 168, height: 112 }} nodeBorderRadius={6} />
+        )}
+        <SnapGuides lines={helperLines} />
       </ReactFlow>
       </div>
-
-      {/* Visual Alignment Helper Lines Overlay */}
-      {helperLines.length > 0 && (() => {
-        const { x: viewportX, y: viewportY, zoom: viewportZoom } = reactFlowInstance.getViewport();
-        return (
-          <svg
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              pointerEvents: 'none',
-              zIndex: 90,
-            }}
-          >
-            {helperLines.map((line) => {
-              if (line.type === 'vertical') {
-                const xScreen = line.coordinate * viewportZoom + viewportX;
-                const y1Screen = line.min * viewportZoom + viewportY;
-                const y2Screen = line.max * viewportZoom + viewportY;
-                return (
-                  <line
-                    key={line.id}
-                    x1={xScreen}
-                    y1={y1Screen}
-                    x2={xScreen}
-                    y2={y2Screen}
-                    stroke="#3b82f6"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                  />
-                );
-              } else {
-                const yScreen = line.coordinate * viewportZoom + viewportY;
-                const x1Screen = line.min * viewportZoom + viewportX;
-                const x2Screen = line.max * viewportZoom + viewportX;
-                return (
-                  <line
-                    key={line.id}
-                    x1={x1Screen}
-                    y1={yScreen}
-                    x2={x2Screen}
-                    y2={yScreen}
-                    stroke="#3b82f6"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                  />
-                );
-              }
-            })}
-          </svg>
-        );
-      })()}
 
       {/* 自由手绘 SVG 浮层 */}
       <FreehandOverlay
@@ -2261,7 +2148,8 @@ Return ONLY a JSON array, no markdown, no explanation:
           setView={setView}
           handleConvertTextToNote={handleConvertTextToNote}
           handleSetNodeColor={handleSetNodeColor}
-          selectedNodeCount={nodes.filter(n => n.selected).length}
+          selectedNodeCount={selectedNodes.length}
+          onDiscussSelection={handleDiscussSelectedNodes}
           onBringToFront={handleBringToFront}
           onSendToBack={handleSendToBack}
         />
@@ -2276,7 +2164,7 @@ Return ONLY a JSON array, no markdown, no explanation:
           setEditingEdgeId={setEditingEdgeId}
           setEdgeLabelInput={setEdgeLabelInput}
           setEdgeLabelPos={setEdgeLabelPos}
-          handleToggleEdgeArrow={handleToggleEdgeArrow}
+          handleSetEdgeDirection={handleSetEdgeDirection}
           handleSetEdgeRelation={handleSetEdgeRelation}
           handleSetEdgeColor={handleSetEdgeColor}
           handleDeleteEdge={handleDeleteEdge}
@@ -2289,6 +2177,7 @@ Return ONLY a JSON array, no markdown, no explanation:
           paneMenu={paneMenu}
           addNodeAtPosition={addNodeAtPosition}
           handleAddPdfNode={handleAddPdfNode}
+          handleAddImageNode={handleAddImageNode}
           setPaneMenu={setPaneMenu}
         />
       )}
@@ -2310,31 +2199,14 @@ Return ONLY a JSON array, no markdown, no explanation:
         setIsAddNoteOpen={setIsAddNoteOpen}
         noteSearch={noteSearch}
         setNoteSearch={setNoteSearch}
-        filteredNotes={filteredNotes}
+        filteredNotes={vaultNotes}
         handleAddNoteNode={handleAddNoteNode}
         lang={state.lang}
         vaultPaths={state.vaultPaths || []}
+        onCanvasPaths={nodes.filter(n => n.type === 'file').map(n => n.data.file as string)}
       />
 
-      {/* Agent Floating Toggle Button */}
-      <button
-        className={`agent-floating-toggle ${isAgentOpen ? 'active' : ''}`}
-        onClick={() => setIsAgentOpen(prev => !prev)}
-        style={{
-          position: 'absolute',
-          right: isAgentOpen ? 344 : 12,
-          top: 12,
-          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-          pointerEvents: isAgentOpen ? 'none' : 'auto',
-          opacity: isAgentOpen ? 0 : 1,
-          zIndex: 85,
-        }}
-      >
-        <IconRobot size={14} />
-        <span>{state.lang === 'zh' ? 'Agent 建议' : 'Agent Panel'}</span>
-      </button>
-
-      {/* Agent Panel */}
+      {/* Suggestions panel (toggled from the top-right bar) */}
       <AgentPanel
         view="canvas"
         isOpen={isAgentOpen}

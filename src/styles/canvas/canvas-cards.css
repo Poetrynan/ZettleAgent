@@ -1,0 +1,770 @@
+/* ════════════════════════════════════════════════════════════════════
+   Canvas cards — one design language for every node on the canvas.
+   Loaded last (see InteractiveCanvas.css) and scoped under the canvas
+   container so it wins over the older per-file rules. Every colour comes
+   from theme tokens, so light and dark need no separate overrides; a
+   card's own colour is a hue mixed into the theme surface.
+   ════════════════════════════════════════════════════════════════════ */
+
+.interactive-canvas-container {
+  --zc-radius: 12px;
+  --zc-header-h: 36px;
+  --zc-card-bg: var(--bg-elevated);
+  --zc-card-shadow:
+    0 0 0 0.5px var(--hairline),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 6px 18px -8px rgba(0, 0, 0, 0.16);
+  --zc-card-shadow-hover:
+    0 0 0 0.5px var(--hairline),
+    0 2px 4px rgba(0, 0, 0, 0.06),
+    0 14px 30px -12px rgba(0, 0, 0, 0.24);
+  --zc-select-ring:
+    0 0 0 2px var(--accent-primary),
+    0 0 0 6px color-mix(in srgb, var(--accent-primary) 16%, transparent);
+}
+[data-theme="dark"] .interactive-canvas-container {
+  --zc-card-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 8px 22px -8px rgba(0, 0, 0, 0.6);
+  --zc-card-shadow-hover:
+    0 0 0 0.5px rgba(255, 255, 255, 0.14),
+    0 2px 4px rgba(0, 0, 0, 0.5),
+    0 16px 34px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* ── Card surface (note, web, PDF, image) ─────────────────────────── */
+
+.interactive-canvas-container .react-flow .zc-card {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: var(--zc-card-bg);
+  border: none;
+  border-radius: var(--zc-radius);
+  box-shadow: var(--zc-card-shadow);
+  overflow: visible; /* resize handles sit on the edge */
+  transition: box-shadow 0.18s ease;
+}
+.interactive-canvas-container .react-flow .zc-card:hover {
+  box-shadow: var(--zc-card-shadow-hover);
+}
+.interactive-canvas-container .react-flow .zc-card.selected {
+  box-shadow: var(--zc-select-ring), var(--zc-card-shadow-hover);
+}
+
+/* A card's colour is a thin band along the top edge */
+.interactive-canvas-container .react-flow .zc-card--note.has-color::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  border-radius: var(--zc-radius) var(--zc-radius) 0 0;
+  background: var(--card-color);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Header: title + actions that appear on hover / selection ─────── */
+
+.interactive-canvas-container .react-flow .zc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--zc-header-h);
+  padding: 0 6px 0 14px;
+  background: transparent;
+  border-bottom: 0.5px solid var(--hairline);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+.interactive-canvas-container .react-flow .zc-card-header:active { cursor: grabbing; }
+
+.interactive-canvas-container .react-flow .zc-card-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: none;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+  padding: 0;
+  border: none;
+  background: none;
+}
+.interactive-canvas-container .react-flow .zc-card-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.interactive-canvas-container .react-flow .zc-card-subtitle {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.interactive-canvas-container .react-flow .zc-card-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+.interactive-canvas-container .react-flow .zc-card-kind--pdf {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.interactive-canvas-container .react-flow .zc-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.interactive-canvas-container .react-flow .zc-card:hover .zc-card-actions,
+.interactive-canvas-container .react-flow .zc-card.selected .zc-card-actions {
+  opacity: 1;
+}
+
+.interactive-canvas-container .react-flow .zc-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.interactive-canvas-container .react-flow .zc-icon-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.interactive-canvas-container .react-flow .zc-icon-btn.active {
+  background: var(--accent-tint);
+  color: var(--accent-primary);
+}
+
+/* ── Note body ────────────────────────────────────────────────────── */
+
+.interactive-canvas-container .react-flow .zc-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 14px 0;
+  flex-shrink: 0;
+}
+.interactive-canvas-container .react-flow .zc-chip {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  white-space: nowrap;
+}
+.interactive-canvas-container .react-flow .zc-chip--type {
+  color: var(--accent-primary);
+  background: var(--accent-tint);
+  box-shadow: none;
+}
+
+.interactive-canvas-container .react-flow .zc-card--note .zc-card-body {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 14px 16px;
+  overflow: auto;
+  background: transparent;
+  border-radius: 0 0 var(--zc-radius) var(--zc-radius);
+  /* long notes fade out instead of being cut off */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.interactive-canvas-container .react-flow .zc-card--note:hover .zc-card-body {
+  scrollbar-color: var(--border) transparent;
+}
+.interactive-canvas-container .react-flow .zc-card--note.is-editing .zc-card-body {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Markdown inside cards (notes and stickies) */
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown:hover,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown:hover {
+  background: transparent;
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown > :first-child,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown > :first-child { margin-top: 0; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown p,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown p { margin: 0 0 0.6em; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown h1,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown h1 { font-size: 17px; font-weight: 700; margin: 0.4em 0 0.4em; color: var(--text-primary); border: none; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown h2,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown h2 { font-size: 15px; font-weight: 650; margin: 0.9em 0 0.35em; color: var(--text-primary); border: none; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown h3,
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown h4,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown h3 { font-size: 13.5px; font-weight: 650; margin: 0.8em 0 0.3em; color: var(--text-primary); }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown ul,
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown ol,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown ul,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown ol { padding-left: 1.25em; margin: 0 0 0.6em; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown li { margin: 0.15em 0; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown code,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown code {
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown pre {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  overflow: auto;
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown pre code { padding: 0; background: none; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown blockquote,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown blockquote {
+  margin: 0 0 0.6em;
+  padding: 2px 0 2px 12px;
+  border-left: 2.5px solid var(--border);
+  color: var(--text-secondary);
+  background: none;
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown a,
+.interactive-canvas-container .react-flow .zc-sticky .text-node-markdown a {
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+.interactive-canvas-container .react-flow .text-node-markdown a.wikilink {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.interactive-canvas-container .react-flow .text-node-markdown a.wikilink:hover {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+}
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown hr { border: none; border-top: 0.5px solid var(--hairline); margin: 0.8em 0; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown img { max-width: 100%; border-radius: 6px; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown table { border-collapse: collapse; font-size: 12px; }
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown th,
+.interactive-canvas-container .react-flow .zc-card .text-node-markdown td { border: 0.5px solid var(--hairline); padding: 4px 8px; color: var(--text-primary); background: none; }
+
+/* Skeleton while a note loads */
+.interactive-canvas-container .react-flow .zc-card .note-node-skeleton-line {
+  height: 9px;
+  margin: 8px 0;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+}
+.interactive-canvas-container .react-flow .zc-card .note-node-skeleton-line:nth-child(2) { width: 82%; }
+.interactive-canvas-container .react-flow .zc-card .note-node-skeleton-line:nth-child(3) { width: 58%; }
+
+/* Low zoom: title + one line, no chrome */
+.interactive-canvas-container .react-flow .zc-card.note-node-lod-low {
+  padding: 14px 16px;
+  justify-content: center;
+  gap: 6px;
+}
+.interactive-canvas-container .react-flow .zc-card.note-node-lod-low .note-node-lod-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.interactive-canvas-container .react-flow .zc-card.note-node-lod-low .note-node-lod-summary {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Sticky note ──────────────────────────────────────────────────── */
+
+.interactive-canvas-container .react-flow .zc-sticky {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: var(--zc-radius);
+  background: color-mix(in srgb, var(--sticky-hue) 22%, var(--zc-card-bg));
+  box-shadow:
+    0 0 0 0.5px color-mix(in srgb, var(--sticky-hue) 35%, var(--hairline)),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 8px 20px -10px color-mix(in srgb, var(--sticky-hue) 45%, rgba(0, 0, 0, 0.2));
+  transition: box-shadow 0.18s ease;
+}
+/* Dark: a light tint reads as mud on graphite, so keep the surface close to the
+   card colour and let a band along the top carry the hue. */
+[data-theme="dark"] .interactive-canvas-container .react-flow .zc-sticky {
+  background: color-mix(in srgb, var(--sticky-hue) 13%, var(--zc-card-bg));
+  box-shadow:
+    inset 0 3px 0 color-mix(in srgb, var(--sticky-hue) 85%, transparent),
+    0 0 0 0.5px color-mix(in srgb, var(--sticky-hue) 30%, transparent),
+    0 8px 22px -10px rgba(0, 0, 0, 0.6);
+}
+[data-theme="dark"] .interactive-canvas-container .react-flow .zc-sticky.selected {
+  box-shadow:
+    inset 0 3px 0 color-mix(in srgb, var(--sticky-hue) 85%, transparent),
+    0 0 0 2px var(--accent-primary),
+    0 0 0 6px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+.interactive-canvas-container .react-flow .zc-sticky::after,
+.interactive-canvas-container .react-flow .zc-sticky::before { content: none; display: none; }
+.interactive-canvas-container .react-flow .zc-sticky.selected {
+  box-shadow:
+    0 0 0 2px var(--accent-primary),
+    0 0 0 6px color-mix(in srgb, var(--accent-primary) 16%, transparent),
+    0 10px 24px -10px rgba(0, 0, 0, 0.25);
+}
+
+.interactive-canvas-container .react-flow .zc-sticky .text-node-textarea,
+.interactive-canvas-container .react-flow .zc-sticky .zc-sticky-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.interactive-canvas-container .react-flow .zc-sticky .text-node-textarea::placeholder {
+  color: color-mix(in srgb, var(--text-primary) 40%, transparent);
+}
+.interactive-canvas-container .react-flow .zc-sticky .zc-sticky-content { cursor: default; white-space: normal; }
+
+/* Colour palette floats above the note */
+.interactive-canvas-container .react-flow .zc-sticky-palette {
+  position: absolute;
+  left: 0;
+  top: -40px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 5;
+}
+.interactive-canvas-container .react-flow .zc-sticky:hover .zc-sticky-palette,
+.interactive-canvas-container .react-flow .zc-sticky.selected .zc-sticky-palette {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.interactive-canvas-container .react-flow .zc-sticky-palette .sticky-color-dot {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--dot-hue);
+  cursor: pointer;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+  transition: transform 0.12s ease;
+}
+.interactive-canvas-container .react-flow .zc-sticky-palette .sticky-color-dot:hover { transform: scale(1.15); }
+.interactive-canvas-container .react-flow .zc-sticky-palette .sticky-color-dot.active {
+  box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3.5px var(--dot-hue);
+}
+.interactive-canvas-container .react-flow .zc-sticky-palette-sep {
+  width: 0.5px;
+  height: 14px;
+  background: var(--hairline);
+  margin: 0 2px;
+}
+.interactive-canvas-container .react-flow .zc-sticky-remove {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.interactive-canvas-container .react-flow .zc-sticky-remove:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* ── Group frame ──────────────────────────────────────────────────── */
+
+/* Our node type is called "group", which also picks up React Flow's built-in
+   group-node box (border, fill, padding). The frame below draws the group. */
+.interactive-canvas-container .react-flow .react-flow__node-group {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.interactive-canvas-container .react-flow .react-flow__node-group.selected,
+.interactive-canvas-container .react-flow .react-flow__node-group:focus,
+.interactive-canvas-container .react-flow .react-flow__node-group:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.interactive-canvas-container .react-flow .zc-group {
+  position: relative;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--group-hue) 38%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--group-hue) 6%, transparent);
+  box-shadow: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.interactive-canvas-container .react-flow .zc-group::before,
+.interactive-canvas-container .react-flow .zc-group::after { content: none; display: none; }
+.interactive-canvas-container .react-flow .zc-group:hover {
+  border-color: color-mix(in srgb, var(--group-hue) 55%, transparent);
+}
+.interactive-canvas-container .react-flow .react-flow__node-group.selected .zc-group,
+.interactive-canvas-container .react-flow .zc-group.selected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+.interactive-canvas-container .react-flow .zc-group-label {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  width: auto;
+  max-width: calc(100% - 64px);
+  height: 26px;
+  padding: 0 9px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  color: color-mix(in srgb, var(--group-hue) 55%, var(--text-primary));
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  outline: none;
+  box-shadow: none;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.interactive-canvas-container .react-flow .zc-group-label::placeholder { color: var(--text-tertiary); font-weight: 500; }
+.interactive-canvas-container .react-flow .zc-group-label:hover { background: color-mix(in srgb, var(--group-hue) 10%, transparent); }
+.interactive-canvas-container .react-flow .zc-group-label:focus {
+  background: var(--bg-elevated);
+  box-shadow: var(--focus-ring);
+}
+.interactive-canvas-container .react-flow .zc-group-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Web / PDF embeds ─────────────────────────────────────────────── */
+
+.interactive-canvas-container .react-flow .zc-card--embed .web-node-body,
+.interactive-canvas-container .react-flow .zc-card--embed .pdf-node-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-radius: 0 0 var(--zc-radius) var(--zc-radius);
+}
+.interactive-canvas-container .react-flow .web-node-title-editable { cursor: text; border-radius: 6px; padding: 3px 6px; margin-left: -6px; }
+.interactive-canvas-container .react-flow .web-node-title-editable:hover { background: var(--bg-secondary); transform: none; box-shadow: none; border-color: transparent; }
+.interactive-canvas-container .react-flow .web-node-title-input {
+  flex: 1;
+  max-width: none;
+  height: 26px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: none;
+  border-radius: 6px;
+  box-shadow: var(--focus-ring);
+  padding: 0 8px;
+}
+
+/* URL entry: an address field, not a form */
+.interactive-canvas-container .react-flow .web-node-url-form {
+  height: 100%;
+  gap: 12px;
+  padding: 24px;
+  background: var(--bg-secondary);
+}
+.interactive-canvas-container .react-flow .web-node-url-icon { color: var(--text-tertiary); opacity: 0.4; }
+.interactive-canvas-container .react-flow .web-node-url-row {
+  max-width: 420px;
+  height: 36px;
+  background: var(--bg-elevated);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 0 0 0.5px var(--hairline), var(--shadow-sm);
+}
+.interactive-canvas-container .react-flow .web-node-url-row:focus-within {
+  border: none;
+  box-shadow: 0 0 0 0.5px var(--hairline), var(--focus-ring);
+}
+.interactive-canvas-container .react-flow .web-node-url-input {
+  font-size: 13px !important;
+  color: var(--text-primary) !important;
+}
+.interactive-canvas-container .react-flow .web-node-url-btn {
+  height: 28px;
+  margin-right: 4px;
+  padding: 0 14px !important;
+  border-radius: 7px !important;
+  background: var(--accent-primary) !important;
+  color: #fff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0;
+}
+.interactive-canvas-container .react-flow .web-node-url-btn:hover { background: var(--accent-primary-hover, var(--accent-primary)) !important; filter: brightness(1.05); }
+.interactive-canvas-container .react-flow .web-node-url-hint { font-size: 11px; color: var(--text-tertiary); opacity: 1; }
+
+/* Blocked / login-required page: a link card */
+.interactive-canvas-container .react-flow .web-node-fallback {
+  gap: 6px;
+  background: var(--bg-secondary);
+}
+.interactive-canvas-container .react-flow .web-node-fallback-icon { color: var(--text-tertiary); opacity: 0.45; }
+.interactive-canvas-container .react-flow .web-node-fallback-domain { font-size: 15px; font-weight: 650; color: var(--text-primary); }
+.interactive-canvas-container .react-flow .web-node-fallback-msg { font-size: 12.5px; color: var(--text-secondary); }
+.interactive-canvas-container .react-flow .web-node-fallback-reason { font-size: 11.5px; color: var(--text-tertiary); opacity: 1; }
+.interactive-canvas-container .react-flow .web-node-fallback-btn {
+  height: 30px;
+  margin-top: 8px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 12.5px;
+}
+.interactive-canvas-container .react-flow .web-node-fallback-edit { color: var(--accent-primary); font-size: 12px; }
+.interactive-canvas-container .react-flow .web-node-fallback-strip {
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  border-top: 0.5px solid var(--hairline);
+}
+.interactive-canvas-container .react-flow .web-node-fallback-strip button {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  border-radius: 5px;
+  color: var(--accent-primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.interactive-canvas-container .react-flow .web-node-fallback-strip button:hover { background: var(--accent-tint); }
+
+/* Loading */
+.interactive-canvas-container .react-flow .web-node-loading,
+.interactive-canvas-container .react-flow .pdf-node-loading {
+  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+}
+.interactive-canvas-container .react-flow .web-node-spinner,
+.interactive-canvas-container .react-flow .pdf-node-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-secondary);
+}
+
+/* "Double-click to interact" veil over iframes / PDFs */
+.interactive-canvas-container .react-flow .embed-interaction-overlay { background: transparent; }
+.interactive-canvas-container .react-flow .embed-interaction-overlay:hover { background: color-mix(in srgb, var(--bg-primary) 6%, transparent); }
+.interactive-canvas-container .react-flow .embed-overlay-hint {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--material-popover);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-md);
+}
+
+/* Empty / error states inside embeds */
+.interactive-canvas-container .react-flow .zc-card-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.interactive-canvas-container .react-flow .zc-card-empty svg { opacity: 0.5; margin-bottom: 4px; }
+.interactive-canvas-container .react-flow .zc-card-empty-title { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.interactive-canvas-container .react-flow .zc-card-empty-detail { font-size: 11px; color: var(--text-tertiary); word-break: break-all; max-width: 90%; }
+
+/* ── Image: the picture is the card; caption on hover ─────────────── */
+
+.interactive-canvas-container .react-flow .zc-card--image .image-node-body {
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--zc-radius);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+.interactive-canvas-container .react-flow .zc-card--image .image-node-img { object-fit: cover; }
+.interactive-canvas-container .react-flow .zc-image-caption {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 6px 0 12px;
+  border: none;
+  border-radius: 0 0 var(--zc-radius) var(--zc-radius);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  cursor: grab;
+}
+.interactive-canvas-container .react-flow .zc-card--image:hover .zc-image-caption,
+.interactive-canvas-container .react-flow .zc-card--image.selected .zc-image-caption { opacity: 1; }
+.interactive-canvas-container .react-flow .zc-image-caption .zc-card-title { color: #fff; font-weight: 500; font-size: 12px; }
+.interactive-canvas-container .react-flow .zc-image-caption .zc-icon-btn { color: rgba(255, 255, 255, 0.85); }
+.interactive-canvas-container .react-flow .zc-image-caption .zc-icon-btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+
+/* ── Connection points: hidden until you need them ────────────────── */
+
+.interactive-canvas-container .react-flow .react-flow__handle {
+  width: 10px !important;
+  height: 10px !important;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 50% !important;
+  background: var(--bg-elevated) !important;
+  border: 1.5px solid var(--accent-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+  /* canvas-editor.css forces 0.35 with !important; hidden until needed instead */
+  opacity: 0 !important;
+  transition: opacity 0.15s ease, width 0.12s ease, height 0.12s ease, background 0.12s ease;
+}
+.interactive-canvas-container .react-flow .react-flow__node:hover .react-flow__handle,
+.interactive-canvas-container .react-flow .react-flow__node.selected .react-flow__handle,
+.interactive-canvas-container .react-flow:has(.react-flow__connection) .react-flow__handle {
+  opacity: 1 !important;
+}
+/* React Flow centres each handle with a per-side translate, so grow it by size, not transform */
+.interactive-canvas-container .react-flow .react-flow__handle:hover,
+.interactive-canvas-container .react-flow .react-flow__handle.connectingto,
+.interactive-canvas-container .react-flow .react-flow__handle.valid {
+  width: 13px !important;
+  height: 13px !important;
+  background: var(--accent-primary) !important;
+}
+
+/* ── Resize handles ───────────────────────────────────────────────── */
+
+.interactive-canvas-container .react-flow .react-flow__resize-control.handle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 3px !important;
+  background: var(--bg-elevated) !important;
+  border: 1.5px solid var(--accent-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+  opacity: 1;
+}
+.interactive-canvas-container .react-flow .react-flow__resize-control.line {
+  border-color: transparent !important;
+}
+
+/* ── Minimap ──────────────────────────────────────────────────────── */
+
+.interactive-canvas-container .react-flow__minimap {
+  --xy-minimap-background-color: transparent;
+  --xy-minimap-background-color-props: transparent;
+  margin: 0 12px 12px 0;
+  /* older canvas files set these with !important */
+  border: none !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  background: var(--material-popover) !important;
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-md) !important;
+  opacity: 0.8;
+  transition: opacity 0.18s ease;
+}
+.interactive-canvas-container .react-flow__minimap:hover { opacity: 1; }
+.interactive-canvas-container .react-flow__minimap svg { background: transparent !important; }
+.interactive-canvas-container .react-flow__minimap .react-flow__minimap-mask {
+  fill: color-mix(in srgb, var(--bg-primary) 55%, transparent) !important;
+  stroke: none;
+}
+.interactive-canvas-container .react-flow__minimap .react-flow__minimap-node {
+  fill: color-mix(in srgb, var(--text-tertiary) 45%, transparent) !important;
+  stroke: none !important;
+}
+.interactive-canvas-container .react-flow__minimap .react-flow__minimap-node.selected {
+  fill: var(--accent-primary) !important;
+}

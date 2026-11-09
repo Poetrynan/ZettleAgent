@@ -118,9 +118,9 @@ export function SmartCanvasPanel({
       <div className="smart-canvas-header">
         <div className="smart-canvas-title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
+            <circle cx="10.5" cy="10.5" r="6" /><line x1="15" y1="15" x2="20" y2="20" /><line x1="10.5" y1="8" x2="10.5" y2="13" /><line x1="8" y1="10.5" x2="13" y2="10.5" />
           </svg>
-          <span>{isZh ? 'Smart Canvas' : 'Smart Canvas'}</span>
+          <span>{isZh ? '按主题添加笔记' : 'Add notes by topic'}</span>
         </div>
         <button className="smart-canvas-close" onClick={onClose}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -139,7 +139,7 @@ export function SmartCanvasPanel({
             ref={inputRef}
             type="text"
             className="smart-canvas-input"
-            placeholder={isZh ? '搜索主题，自动填充画布...' : 'Search topic to populate canvas...'}
+            placeholder={isZh ? '输入一个主题，例如：间隔重复' : 'A topic, e.g. spaced repetition'}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSearch(); if (e.key === 'Escape') onClose(); }}
@@ -166,7 +166,7 @@ export function SmartCanvasPanel({
         <div className="smart-canvas-results">
           <div className="smart-canvas-results-header">
             <span className="smart-canvas-results-count">
-              {isZh ? `找到 ${results.length} 个相关笔记` : `Found ${results.length} related notes`}
+              {isZh ? `找到 ${results.length} 篇相关笔记` : `Found ${results.length} related notes`}
             </span>
             <button className="smart-canvas-select-all" onClick={toggleAll}>
               {selected.size === results.length
@@ -252,11 +252,11 @@ export function SmartCanvasPanel({
       {!searched && !loading && (
         <div className="smart-canvas-hint">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
+            <circle cx="10.5" cy="10.5" r="6" /><line x1="15" y1="15" x2="20" y2="20" /><line x1="10.5" y1="8" x2="10.5" y2="13" /><line x1="8" y1="10.5" x2="13" y2="10.5" />
           </svg>
-          <span>{isZh ? '输入主题搜索相关笔记' : 'Search for related notes by topic'}</span>
+          <span>{isZh ? '找出与主题相关、还不在画布上的笔记' : 'Find notes on a topic that are not on this canvas yet'}</span>
           <span className="smart-canvas-hint-detail">
-            {isZh ? 'AI 会自动连接到现有笔记' : 'AI will auto-connect to existing notes'}
+            {isZh ? '勾选后添加，会自动连到画布上相关的卡片' : 'Pick the ones you want; they are linked to related cards'}
           </span>
         </div>
       )}

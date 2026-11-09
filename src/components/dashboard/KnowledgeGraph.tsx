@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getKnowledgeGraph, GraphData, GraphNode, deleteFile, syncVault } from '../../lib/tauri';
 import { useApp } from '../../contexts/AppContext';
 import { t } from '../../lib/i18n';
-import { IconBrain, IconLink, IconRobot } from '../icons';
+import { IconBrain, IconLink } from '../icons';
 import {
   RelationFilter,
   mapNoteType,
@@ -797,8 +797,8 @@ export function KnowledgeGraph() {
           opacity: isAgentOpen ? 0 : 1,
         }}
       >
-        <IconRobot size={14} />
-        <span>{isZh ? 'Agent 建议' : 'Agent Panel'}</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 13.5 6.5 5h11l2.5 8.5" /><path d="M4 13.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4.5h-5a3 3 0 0 1-6 0z" /></svg>
+        <span>{isZh ? '建议' : 'Suggestions'}</span>
       </button>
 
       {/* 2D/3D View Mode Toggle */}

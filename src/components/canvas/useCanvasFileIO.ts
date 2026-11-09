@@ -7,8 +7,10 @@
  * Compatible with Obsidian JSON Canvas 1.0 schema.
  */
 
-import { useCallback, useState, type MutableRefObject } from 'react';
+import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import type { Node, Edge } from '@xyflow/react';
+import { OPPOSITE_SIDE, placeAgainst, type AddNoteTarget } from './canvasGeometry';
+import { DEFAULT_STICKY_HUE } from './cardContent';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readMarkdownFile, writeMarkdownFile, listDirectoryTree } from '../../lib/tauri';
 import type { DirTreeNode } from '../../lib/tauri';
@@ -208,7 +210,7 @@ handleAddImageNode: () => Promise<void>;
 
   // Utility
   flattenTree: (node: DirTreeNode) => string[];
-  openAddNoteModal: () => Promise<void>;
+  openAddNoteModal: (target?: AddNoteTarget) => Promise<void>;
 
   // UI state for modals (caller renders the modal UI)
   isAddNoteOpen: boolean;
@@ -240,6 +242,61 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
   const [isTemplateOpen, setIsTemplateOpen] = useState(false);
   const [noteSearch, setNoteSearch] = useState('');
   const [vaultNotes, setVaultNotes] = useState<string[]>([]);
+  /** Where the next picked note goes: a right-click spot, or the end of a dragged line. */
+  const addNoteTargetRef = useRef<AddNoteTarget | null>(null);
+
+  // ────────────────────────────────────────────────
+  //  Where a new card goes: the centre of the visible canvas (not the window,
+  //  which is off-centre with the sidebar open), or the nearest free spot
+  //  around it, so new cards never land on top of each other.
+  // ────────────────────────────────────────────────
+
+  const placeNewNode = useCallback((w: number, h: number, opts: { avoidGroups?: boolean } = {}) => {
+    const el = document.querySelector('.interactive-canvas-container .react-flow') as HTMLElement | null;
+    const r = el?.getBoundingClientRect();
+    const center = reactFlowInstance.screenToFlowPosition({
+      x: r ? r.left + r.width / 2 : window.innerWidth / 2,
+      y: r ? r.top + r.height / 2 : window.innerHeight / 2,
+    });
+    const snap = (v: number) => Math.round(v / 20) * 20;
+    const GAP = 24;
+
+    const boxes: Array<{ x: number; y: number; w: number; h: number }> = [];
+    for (const n of reactFlowInstance.getNodes() as Node[]) {
+      if (n.type === 'group' && !opts.avoidGroups) continue; // cards may go inside groups
+      const abs = reactFlowInstance.getInternalNode?.(n.id)?.internals?.positionAbsolute ?? n.position;
+      boxes.push({
+        x: abs.x,
+        y: abs.y,
+        w: n.measured?.width ?? n.width ?? (n.style?.width as number) ?? 300,
+        h: n.measured?.height ?? n.height ?? (n.style?.height as number) ?? 200,
+      });
+    }
+    const free = (x: number, y: number) =>
+      !boxes.some(b => x < b.x + b.w + GAP && x + w + GAP > b.x && y < b.y + b.h + GAP && y + h + GAP > b.y);
+
+    const x0 = center.x - w / 2;
+    const y0 = center.y - h / 2;
+    if (free(x0, y0)) return { x: snap(x0), y: snap(y0) };
+    // Search rings outward on a grid the size of the new card; nearest free cell wins.
+    const stepX = w + GAP;
+    const stepY = h + GAP;
+    for (let ring = 1; ring <= 8; ring++) {
+      let best: { x: number; y: number; d: number } | null = null;
+      for (let i = -ring; i <= ring; i++) {
+        for (let j = -ring; j <= ring; j++) {
+          if (Math.max(Math.abs(i), Math.abs(j)) !== ring) continue;
+          const x = x0 + i * stepX;
+          const y = y0 + j * stepY;
+          if (!free(x, y)) continue;
+          const d = Math.hypot(i * stepX, j * stepY);
+          if (!best || d < best.d) best = { x, y, d };
+        }
+      }
+      if (best) return { x: snap(best.x), y: snap(best.y) };
+    }
+    return { x: snap(x0), y: snap(y0) };
+  }, [reactFlowInstance]);
 
   // ────────────────────────────────────────────────
   //  Flatten a DirTreeNode into a list of file paths
@@ -257,7 +314,9 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
   //  Open the "Add Note" modal — load vault file list
   // ────────────────────────────────────────────────
 
-  const openAddNoteModal = useCallback(async () => {
+  const openAddNoteModal = useCallback(async (target?: AddNoteTarget) => {
+    // Called straight from onClick handlers too, which pass the click event.
+    addNoteTargetRef.current = target && 'kind' in target ? target : null;
     if (!vaultPaths || vaultPaths.length === 0) {
       showToast(t('canvas.noVault'), 'error');
       return;
@@ -293,10 +352,12 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
         filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/, '') || filePath;
       const ext = filePath.split('.').pop()?.toLowerCase() || '';
 
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: window.innerWidth / 2 - 200,
-        y: window.innerHeight / 2 - 150,
-      });
+      const target = addNoteTargetRef.current;
+      addNoteTargetRef.current = null;
+      const size = ext === 'pdf' ? { w: 420, h: 450 } : ext === 'html' || ext === 'htm' ? { w: 500, h: 400 } : { w: 400, h: 300 };
+      const position = target
+        ? placeAgainst(target.at, size.w, size.h, target.kind === 'connect' ? target.fromSide : undefined)
+        : placeNewNode(size.w, size.h);
 
       let newNode: Node;
 
@@ -327,14 +388,24 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
           id: genId(), type: 'file', position,
           width: 400, height: 300,
           style: { width: 400, height: 300 },
-          data: { file: filePath, title: name, color: '#3b82f6' },
+          data: { file: filePath, title: name },
         };
       }
 
       setNodes((nds) => nds.concat(newNode));
+      if (target?.kind === 'connect') {
+        setEdges((eds) => eds.concat({
+          id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          source: target.sourceNodeId,
+          sourceHandle: target.fromSide,
+          target: newNode.id,
+          targetHandle: OPPOSITE_SIDE[target.fromSide],
+          data: { relationType: 'wikilink', fromEnd: 'none', toEnd: 'arrow' },
+        }));
+      }
       setIsAddNoteOpen(false);
     },
-    [reactFlowInstance, lang, setNodes],
+    [placeNewNode, lang, setNodes, setEdges],
   );
 
   // ────────────────────────────────────────────────
@@ -342,10 +413,7 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
   // ────────────────────────────────────────────────
 
   const handleAddTextNode = useCallback(() => {
-    const position = reactFlowInstance.screenToFlowPosition({
-      x: window.innerWidth / 2 - 125,
-      y: window.innerHeight / 2 - 125,
-    });
+    const position = placeNewNode(250, 250);
 
     const newNode: Node = {
       id: genId(),
@@ -354,21 +422,18 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
       width: 250,
       height: 250,
       style: { width: 250, height: 250 },
-      data: { text: '', color: '#fef08a' },
+      data: { text: '', color: DEFAULT_STICKY_HUE },
     };
 
     setNodes((nds) => nds.concat(newNode));
-  }, [reactFlowInstance, setNodes]);
+  }, [placeNewNode, setNodes]);
 
   // ────────────────────────────────────────────────
   //  Add a dashed group node
   // ────────────────────────────────────────────────
 
   const handleAddGroupNode = useCallback(() => {
-    const position = reactFlowInstance.screenToFlowPosition({
-      x: window.innerWidth / 2 - 300,
-      y: window.innerHeight / 2 - 200,
-    });
+    const position = placeNewNode(600, 400);
 
     const newNode: Node = {
       id: genId(),
@@ -377,7 +442,7 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
       width: 600,
       height: 400,
       style: { width: 600, height: 400 },
-      data: { label: 'New Group', color: 'var(--border-color)' },
+      data: { label: lang === 'zh' ? '新分组' : 'New group' },
     };
 
     setNodes((nds) => nds.concat(newNode));
@@ -388,10 +453,7 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
   // ────────────────────────────────────────────────
 
   const handleAddWebNode = useCallback(() => {
-    const position = reactFlowInstance.screenToFlowPosition({
-      x: window.innerWidth / 2 - 180,
-      y: window.innerHeight / 2 - 140,
-    });
+    const position = placeNewNode(360, 280);
 
     const newNode: Node = {
       id: genId(),
@@ -421,10 +483,7 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
       if (!selected) return;
 
       const filePath = Array.isArray(selected) ? selected[0] : selected;
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: window.innerWidth / 2 - 210,
-        y: window.innerHeight / 2 - 280,
-      });
+      const position = placeNewNode(420, 560);
 
       const newNode: Node = {
         id: genId(),
@@ -457,10 +516,7 @@ export function useCanvasFileIO(params: CanvasFileIOParams): CanvasFileIOReturn 
       if (!selected) return;
 
       const filePath = Array.isArray(selected) ? selected[0] : selected;
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: window.innerWidth / 2 - 200,
-        y: window.innerHeight / 2 - 150,
-      });
+      const position = placeNewNode(400, 300);
 
       const newNode: Node = {
         id: genId(),

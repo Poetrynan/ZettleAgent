@@ -9,3 +9,5 @@
 @import './canvas/canvas-ai.css';
 @import './canvas/canvas-editor.css';
 @import './canvas/canvas-modal.css';
+@import './canvas/canvas-cards.css'; /* the card design language */
+@import './canvas/canvas-chrome.css'; /* last: bars, menus, connect/snap feedback */

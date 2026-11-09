@@ -17,7 +17,10 @@ const arePropsEqual = (prev: any, next: any) => {
 export const GroupNode = memo(function GroupNode({ id, data, selected }: any) {
   const { deleteElements } = useReactFlow();
   const [label, setLabel] = useState<string>(data.label || '');
-  const color = data.color || 'var(--border-color)';
+  // Older groups stored 'var(--border-color)'; treat that (and no colour) as neutral graphite.
+  const hue = typeof data.color === 'string' && data.color && !data.color.includes('border-color')
+    ? data.color
+    : 'var(--text-tertiary)';
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
@@ -33,41 +36,26 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: any) {
 
   return (
     <div
-      className={`group-node-frame ${selected ? 'selected' : ''}`}
-      style={{
-        borderColor: color,
-        width: '100%',
-        height: '100%',
-      }}
+      className={`group-node-frame zc-group ${selected ? 'selected' : ''}`}
+      style={{ width: '100%', height: '100%', '--group-hue': hue } as React.CSSProperties}
     >
-      <NodeResizer
-        isVisible={selected}
-        minWidth={200}
-        minHeight={150}
-        lineStyle={{ borderColor: 'rgba(148, 163, 184, 0.2)', borderStyle: 'dashed' }}
-        handleStyle={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(148,163,184,0.4)' }}
-      />
+      <NodeResizer isVisible={selected} minWidth={200} minHeight={150} />
       <input
         type="text"
-        className="group-node-label-input nodrag nowheel"
+        className="group-node-label-input zc-group-label nodrag nowheel"
         value={label}
         onChange={handleChange}
         placeholder={t('canvas.groupPlaceholder')}
+        size={Math.max(6, Math.min(40, (label || t('canvas.groupPlaceholder')).length + 2))}
       />
-      {/* Delete button — visible on select */}
+      {/* Remove — visible while selected */}
       {selected && (
         <button
-          className="note-node-btn group-node-delete-btn nodrag"
+          className="note-node-btn zc-icon-btn group-node-delete-btn zc-group-remove nodrag"
           onClick={handleDelete}
           title={t('canvas.removeGroup')}
-          style={{
-            position: 'absolute',
-            top: -12,
-            right: 8,
-            pointerEvents: 'auto',
-          }}
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       )}
     </div>

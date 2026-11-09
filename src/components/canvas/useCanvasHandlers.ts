@@ -20,6 +20,11 @@ import {
 } from '../../lib/tauri';
 import { tf } from '../../lib/i18n';
 import { getRelationTypes } from './canvasConstants';
+import { DEFAULT_STICKY_HUE } from './cardContent';
+import {
+  OPPOSITE_SIDE, isSide, placeAgainst, sideFacing,
+  type AddNoteTarget, type Box, type Side,
+} from './canvasGeometry';
 
 // ── Parameter interface ──
 
@@ -57,7 +62,7 @@ export interface CanvasHandlersParams {
   dismissSmartSuggestion: (id: string) => void;
 
   // For add-note modal (context menu "add note" action)
-  openAddNoteModal: () => void;
+  openAddNoteModal: (target?: AddNoteTarget) => void;
 
   // Refs for double-click pane detection
   lastPaneClickRef: React.MutableRefObject<{ time: number; x: number; y: number }>;
@@ -234,7 +239,7 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
           width: 260,
           height: 200,
           style: { width: 260, height: 200 },
-          data: { text: '', color: '#fef08a' },
+          data: { text: '', color: DEFAULT_STICKY_HUE },
         };
         setNodes((nds) => nds.concat(newNode));
         // Reset to prevent triple-click creating two cards
@@ -326,49 +331,112 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
     [setEdges],
   );
 
+  /** Set a line's arrows directly: none (—), forward (→) or both (↔). */
+  const handleSetEdgeDirection = useCallback(
+    (edgeId: string, dir: 'none' | 'forward' | 'both') => {
+      const fromEnd = dir === 'both' ? 'arrow' : 'none';
+      const toEnd = dir === 'none' ? 'none' : 'arrow';
+      setEdges((eds) => eds.map((e) => (e.id === edgeId ? { ...e, data: { ...e.data, fromEnd, toEnd } } : e)));
+    },
+    [setEdges],
+  );
+
   // ────────────────────────────────────────────────────────────────────────
   //  6. onConnect — React Flow new connection handler
   // ────────────────────────────────────────────────────────────────────────
 
-  const onConnect = useCallback(
-    (params: Connection) => {
-      setEdges((eds) => addEdge(params, eds));
-      if (params.source && params.target) {
-        syncEdgeToDb({ source: params.source, target: params.target }, 'add');
+  /** A node's box in flow coordinates (absolute, also for cards inside groups). */
+  const nodeBox = useCallback((id: string): Box | null => {
+    const internal = reactFlowInstance.getInternalNode?.(id);
+    const n = internal ?? reactFlowInstance.getNode(id);
+    if (!n) return null;
+    const abs = internal?.internals?.positionAbsolute ?? n.position;
+    return {
+      x: abs.x,
+      y: abs.y,
+      w: n.measured?.width ?? n.width ?? (n.style?.width as number) ?? 300,
+      h: n.measured?.height ?? n.height ?? (n.style?.height as number) ?? 200,
+    };
+  }, [reactFlowInstance]);
+
+  /** Add a user edge between two cards; no duplicates, no self-loops. */
+  const connectCards = useCallback(
+    (source: string, sourceSide: Side, target: string, targetSide: Side) => {
+      if (source === target) return false;
+      const existing: Edge[] = reactFlowInstance.getEdges();
+      if (existing.some((e) => e.source === source && e.target === target && e.sourceHandle === sourceSide && e.targetHandle === targetSide)) {
+        return false;
       }
+      setEdges((eds) => eds.concat({
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        source,
+        sourceHandle: sourceSide,
+        target,
+        targetHandle: targetSide,
+        data: { relationType: 'wikilink', fromEnd: 'none', toEnd: 'arrow' },
+      }));
+      syncEdgeToDb({ source, target }, 'add', 'wikilink');
+      return true;
     },
-    [setEdges, syncEdgeToDb],
+    [reactFlowInstance, setEdges, syncEdgeToDb],
   );
 
+  const onConnect = useCallback(
+    (params: Connection) => {
+      if (!params.source || !params.target || params.source === params.target) return;
+      const sBox = nodeBox(params.source);
+      const tBox = nodeBox(params.target);
+      const sourceSide = isSide(params.sourceHandle) ? params.sourceHandle : sBox && tBox ? sideFacing(sBox, tBox) : 'right';
+      const targetSide = isSide(params.targetHandle) ? params.targetHandle : sBox && tBox ? sideFacing(tBox, sBox) : 'left';
+      connectCards(params.source, sourceSide, params.target, targetSide);
+    },
+    [connectCards, nodeBox],
+  );
+
+  /** The card under a screen point, if any (groups don't count: their inside is open canvas). */
+  const cardAtPoint = (clientX: number, clientY: number, excludeId?: string): string | null => {
+    const els = document.elementsFromPoint(clientX, clientY);
+    for (const el of els) {
+      const nodeEl = (el as HTMLElement).closest?.('.react-flow__node') as HTMLElement | null;
+      if (!nodeEl) continue;
+      const id = nodeEl.dataset.id;
+      if (!id || id === excludeId || nodeEl.classList.contains('react-flow__node-group')) continue;
+      return id;
+    }
+    return null;
+  };
+
   // ────────────────────────────────────────────────────────────────────────
-  //  7. onConnectEnd — quick-create menu when connection drops on empty canvas
+  //  7. onConnectEnd — dropping on a card connects to it (anywhere on the
+  //     card, not just its small handle); dropping on empty canvas offers to
+  //     create a connected card there, as Obsidian Canvas does.
   // ────────────────────────────────────────────────────────────────────────
 
   const onConnectEnd = useCallback(
-    (event: MouseEvent | TouchEvent) => {
-      // Only trigger if the drop didn't land on a valid handle
-      const target = event.target as HTMLElement;
-      if (target?.classList?.contains('react-flow__handle')) return;
+    (event: MouseEvent | TouchEvent, connectionState?: any) => {
+      if (connectionState?.isValid) return; // landed on a handle: onConnect handled it
 
-      // Resolve the source node from React Flow's internal connection state
-      const connectingNodeId = (reactFlowInstance as any).getState?.()?.connectionNodeId;
-      const connectingHandleId = (reactFlowInstance as any).getState?.()?.connectionHandleId;
-      const store = (reactFlowInstance as any).store;
-      const storeState = store?.getState?.();
-      const sourceNodeId = connectingNodeId || storeState?.connectionNodeId;
-      const sourceHandleId = connectingHandleId || storeState?.connectionHandleId;
+      const sourceNodeId: string | undefined = connectionState?.fromNode?.id;
+      const fromHandleId = connectionState?.fromHandle?.id;
       if (!sourceNodeId) return;
 
-      // Extract client coordinates (mouse or touch)
-      const clientX =
-        'clientX' in event
-          ? event.clientX
-          : event.changedTouches?.[0]?.clientX || 0;
-      const clientY =
-        'clientY' in event
-          ? event.clientY
-          : event.changedTouches?.[0]?.clientY || 0;
+      const clientX = 'clientX' in event ? event.clientX : event.changedTouches?.[0]?.clientX || 0;
+      const clientY = 'clientY' in event ? event.clientY : event.changedTouches?.[0]?.clientY || 0;
 
+      const sBox = nodeBox(sourceNodeId);
+      const targetId = cardAtPoint(clientX, clientY, sourceNodeId);
+      if (targetId) {
+        const tBox = nodeBox(targetId);
+        const sourceSide = isSide(fromHandleId) ? fromHandleId : sBox && tBox ? sideFacing(sBox, tBox) : 'right';
+        const targetSide = sBox && tBox ? sideFacing(tBox, sBox) : OPPOSITE_SIDE[sourceSide];
+        connectCards(sourceNodeId, sourceSide, targetId, targetSide);
+        return;
+      }
+
+      // Dropped on the card it started from: nothing to do.
+      if (cardAtPoint(clientX, clientY) === sourceNodeId) return;
+
+      const sourceHandleId = isSide(fromHandleId) ? fromHandleId : null;
       setQuickConnectMenu({
         x: clientX,
         y: clientY,
@@ -402,6 +470,9 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
                 (s: any) => !canvasFilePaths.has(s.path.replace(/\\/g, '/')),
               )
               .sort((a: any, b: any) => b.weight - a.weight)
+              // A note linked both ways (or both by link and similarity) appears once.
+              .filter((s: any, i: number, all: any[]) =>
+                all.findIndex((o: any) => o.path.replace(/\\/g, '/') === s.path.replace(/\\/g, '/')) === i)
               .slice(0, 5)
               .map((s: any) => ({
                 path: s.path,
@@ -426,9 +497,79 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
     [
       reactFlowInstance,
       nodes,
+      nodeBox,
+      connectCards,
       setQuickConnectMenu,
       setQuickConnectSuggestions,
     ],
+  );
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  7b. Reconnect: drag either end of a line onto another card; drop it on
+  //      empty canvas to disconnect (Obsidian's behaviour).
+  // ────────────────────────────────────────────────────────────────────────
+
+  const reconnectDoneRef = useRef(true);
+
+  const onReconnectStart = useCallback(() => {
+    reconnectDoneRef.current = false;
+  }, []);
+
+  const replaceEdgeEnds = useCallback(
+    (oldEdge: Edge, next: { source: string; sourceHandle: Side; target: string; targetHandle: Side }) => {
+      if (next.source === next.target) return;
+      setEdges((eds) => eds.map((e) => (e.id === oldEdge.id ? { ...e, ...next } : e)));
+      if (oldEdge.source !== next.source || oldEdge.target !== next.target) {
+        syncEdgeToDb({ source: oldEdge.source, target: oldEdge.target }, 'delete', relationTypeOf(oldEdge));
+        syncEdgeToDb({ source: next.source, target: next.target }, 'add', relationTypeOf(oldEdge));
+      }
+    },
+    [setEdges, syncEdgeToDb],
+  );
+
+  const onReconnect = useCallback(
+    (oldEdge: Edge, conn: Connection) => {
+      reconnectDoneRef.current = true;
+      if (!conn.source || !conn.target) return;
+      const sBox = nodeBox(conn.source);
+      const tBox = nodeBox(conn.target);
+      replaceEdgeEnds(oldEdge, {
+        source: conn.source,
+        sourceHandle: isSide(conn.sourceHandle) ? conn.sourceHandle : sBox && tBox ? sideFacing(sBox, tBox) : 'right',
+        target: conn.target,
+        targetHandle: isSide(conn.targetHandle) ? conn.targetHandle : sBox && tBox ? sideFacing(tBox, sBox) : 'left',
+      });
+    },
+    [nodeBox, replaceEdgeEnds],
+  );
+
+  const onReconnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, edge: Edge, _handleType: unknown, connectionState?: any) => {
+      if (reconnectDoneRef.current) return;
+      reconnectDoneRef.current = true;
+      const clientX = 'clientX' in event ? event.clientX : event.changedTouches?.[0]?.clientX || 0;
+      const clientY = 'clientY' in event ? event.clientY : event.changedTouches?.[0]?.clientY || 0;
+      // The end that stays put is where the drag "comes from".
+      const fixedId: string | undefined = connectionState?.fromNode?.id;
+      const movingTarget = fixedId ? fixedId === edge.source : true;
+      const fixed = movingTarget ? edge.source : edge.target;
+      const dropId = cardAtPoint(clientX, clientY, fixed);
+      if (dropId) {
+        const fBox = nodeBox(fixed);
+        const dBox = nodeBox(dropId);
+        const fixedSide = (movingTarget ? edge.sourceHandle : edge.targetHandle) as Side | null | undefined;
+        const keep = isSide(fixedSide) ? fixedSide : fBox && dBox ? sideFacing(fBox, dBox) : 'right';
+        const dropSide = fBox && dBox ? sideFacing(dBox, fBox) : OPPOSITE_SIDE[keep];
+        replaceEdgeEnds(edge, movingTarget
+          ? { source: fixed, sourceHandle: keep, target: dropId, targetHandle: dropSide }
+          : { source: dropId, sourceHandle: dropSide, target: fixed, targetHandle: keep });
+        return;
+      }
+      // Released on empty canvas: the line is removed.
+      setEdges((eds) => eds.filter((e) => e.id !== edge.id));
+      syncEdgeToDb({ source: edge.source, target: edge.target }, 'delete', relationTypeOf(edge));
+    },
+    [nodeBox, replaceEdgeEnds, setEdges, syncEdgeToDb],
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -443,126 +584,89 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
    * Create a new node of the given type at the quick-connect menu position
    * and auto-connect it to the source node.
    */
+  /**
+   * Drop point (flow coords) and the side of the source card that faces it.
+   * The line leaves from that side even if the drag began on another handle,
+   * so a card created to the left of its source isn't joined by a loop.
+   */
+  const quickDropGeometry = (menu: { x: number; y: number; sourceNodeId: string; sourceHandleId: string | null }) => {
+    const at = reactFlowInstance.screenToFlowPosition({ x: menu.x, y: menu.y });
+    const b = nodeBox(menu.sourceNodeId);
+    const fromSide: Side = b
+      ? sideFacing(b, { x: at.x, y: at.y, w: 0, h: 0 })
+      : isSide(menu.sourceHandleId) ? menu.sourceHandleId : 'right';
+    return { at, fromSide };
+  };
+
   const handleQuickCreate = useCallback(
     (type: 'text' | 'file' | 'web') => {
       if (!quickConnectMenu) return;
-      const { x, y, sourceNodeId, sourceHandleId } = quickConnectMenu;
-      const position = reactFlowInstance.screenToFlowPosition({ x, y });
-      const newId = genNodeId();
-      let newNode: Node;
+      const { sourceNodeId } = quickConnectMenu;
+      const { at, fromSide } = quickDropGeometry(quickConnectMenu);
+      setQuickConnectMenu(null);
 
-      if (type === 'text') {
-        newNode = {
-          id: newId,
-          type: 'text',
-          position,
-          width: 250,
-          height: 250,
-          style: { width: 250, height: 250 },
-          data: { text: '', color: '#fef08a' },
-        };
-      } else if (type === 'web') {
-        newNode = {
-          id: newId,
-          type: 'web',
-          position,
-          width: 360,
-          height: 280,
-          style: { width: 360, height: 280 },
-          data: { url: '', lang },
-        };
-      } else {
-        // 'file' — delegate to the note selector modal
-        setQuickConnectMenu(null);
-        openAddNoteModal();
+      if (type === 'file') {
+        // Pick a note; it lands here and connects (see useCanvasFileIO).
+        openAddNoteModal({ kind: 'connect', at, sourceNodeId, fromSide });
         return;
       }
 
-      setNodes((nds) => nds.concat(newNode));
-
-      // Auto-connect: source → new node
-      const newEdge: Edge = {
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-        source: sourceNodeId,
-        sourceHandle: sourceHandleId || 'right',
-        target: newId,
-        targetHandle: 'left',
-        data: {
-          relationType: 'wikilink',
-          fromEnd: 'none',
-          toEnd: 'arrow',
-          color: '#64748b',
-        },
+      const newId = genNodeId();
+      const size = type === 'text' ? { w: 250, h: 250 } : { w: 360, h: 280 };
+      const newNode: Node = {
+        id: newId,
+        type,
+        position: placeAgainst(at, size.w, size.h, fromSide),
+        width: size.w,
+        height: size.h,
+        style: { width: size.w, height: size.h },
+        data: type === 'text' ? { text: '', color: DEFAULT_STICKY_HUE } : { url: '', lang },
       };
-      setEdges((eds) => addEdge(newEdge, eds));
-      setQuickConnectMenu(null);
+      setNodes((nds) => nds.concat(newNode));
+      setEdges((eds) => eds.concat({
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        source: sourceNodeId,
+        sourceHandle: fromSide,
+        target: newId,
+        targetHandle: OPPOSITE_SIDE[fromSide],
+        data: { relationType: 'wikilink', fromEnd: 'none', toEnd: 'arrow' },
+      }));
     },
-    [
-      quickConnectMenu,
-      reactFlowInstance,
-      lang,
-      setNodes,
-      setEdges,
-      setQuickConnectMenu,
-      openAddNoteModal,
-    ],
+    [quickConnectMenu, lang, setNodes, setEdges, setQuickConnectMenu, openAddNoteModal],
   );
 
-  /**
-   * Quick-connect to an existing note suggestion: add a file node for the
-   * suggested path and connect it to the source.
-   */
+  /** Quick-connect to a related note: it lands at the drop point, connected. */
   const handleQuickConnectSimilar = useCallback(
     (filePath: string) => {
       if (!quickConnectMenu) return;
-      const { x, y, sourceNodeId, sourceHandleId } = quickConnectMenu;
-      const position = reactFlowInstance.screenToFlowPosition({ x, y });
-      const name =
-        filePath
-          .replace(/\\/g, '/')
-          .split('/')
-          .pop()
-          ?.replace(/\.md$/, '') || filePath;
+      const { sourceNodeId } = quickConnectMenu;
+      const { at, fromSide } = quickDropGeometry(quickConnectMenu);
+      const name = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.md$/, '') || filePath;
       const newId = genNodeId();
 
-      const newNode: Node = {
+      setNodes((nds) => nds.concat({
         id: newId,
         type: 'file',
-        position,
+        position: placeAgainst(at, 400, 300, fromSide),
         width: 400,
         height: 300,
         style: { width: 400, height: 300 },
-        data: { file: filePath, title: name, color: '#3b82f6' },
-      };
-      setNodes((nds) => nds.concat(newNode));
-
-      const newEdge: Edge = {
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        data: { file: filePath, title: name },
+      }));
+      setEdges((eds) => eds.concat({
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         source: sourceNodeId,
-        sourceHandle: sourceHandleId || 'right',
+        sourceHandle: fromSide,
         target: newId,
-        targetHandle: 'left',
-        data: {
-          relationType: 'wikilink',
-          fromEnd: 'none',
-          toEnd: 'arrow',
-          color: '#64748b',
-        },
-      };
-      setEdges((eds) => addEdge(newEdge, eds));
-      syncEdgeToDb({ source: sourceNodeId, target: newId }, 'add');
+        targetHandle: OPPOSITE_SIDE[fromSide],
+        data: { relationType: 'wikilink', fromEnd: 'none', toEnd: 'arrow' },
+      }));
+      // The new card is in the store on the next tick; sync after it lands.
+      setTimeout(() => syncEdgeToDb({ source: sourceNodeId, target: newId }, 'add', 'wikilink'), 0);
       setQuickConnectMenu(null);
       setQuickConnectSuggestions([]);
     },
-    [
-      quickConnectMenu,
-      reactFlowInstance,
-      setNodes,
-      setEdges,
-      syncEdgeToDb,
-      setQuickConnectMenu,
-      setQuickConnectSuggestions,
-    ],
+    [quickConnectMenu, setNodes, setEdges, syncEdgeToDb, setQuickConnectMenu, setQuickConnectSuggestions],
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -604,7 +708,7 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
             return {
               ...n,
               type: 'file',
-              data: { file: filePath, title: name, color: '#3b82f6' },
+              data: { file: filePath, title: name },
             };
           }),
         );
@@ -968,24 +1072,24 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
       });
 
       if (type === 'note') {
-        // Delegate to the note selector modal (position stored externally)
-        openAddNoteModal();
+        // The picked note lands where the menu was opened.
+        openAddNoteModal({ kind: 'at', at: position });
       } else if (type === 'text') {
         const newNode: Node = {
           id: genNodeId(),
           type: 'text',
-          position,
+          position: placeAgainst(position, 250, 250),
           width: 250,
           height: 250,
           style: { width: 250, height: 250 },
-          data: { text: '', color: '#fef08a' },
+          data: { text: '', color: DEFAULT_STICKY_HUE },
         };
         setNodes((nds) => nds.concat(newNode));
       } else if (type === 'web') {
         const newNode: Node = {
           id: genNodeId(),
           type: 'web',
-          position,
+          position: placeAgainst(position, 360, 280),
           width: 360,
           height: 280,
           style: { width: 360, height: 280 },
@@ -996,11 +1100,11 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
         const newNode: Node = {
           id: genNodeId(),
           type: 'group',
-          position,
+          position: placeAgainst(position, 600, 400),
           width: 600,
           height: 400,
           style: { width: 600, height: 400 },
-          data: { label: 'New Group', color: 'var(--border-color)' },
+          data: { label: lang === 'zh' ? '新分组' : 'New group' },
         };
         setNodes((nds) => nds.concat(newNode));
       }
@@ -1054,6 +1158,10 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
     // Connections
     onConnect,
     onConnectEnd,
+    onReconnect,
+    onReconnectStart,
+    onReconnectEnd,
+    handleSetEdgeDirection,
 
     // Quick-create
     handleQuickCreate,
