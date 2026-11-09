@@ -139,22 +139,24 @@ jobs:
       - name: Verify offline assets (pre-bundle)
         run: npm run verify-offline
 
-      # Rewrites every vX.Y.Z occurrence in the notes to the tag being shipped,
-      # so the notes file never needs a hardcoded version bump. The heredoc
-      # delimiter is deliberately unlikely to appear in release prose.
+      # Prefer immutable notes for this tag. Keep older version numbers and
+      # comparison links intact instead of rewriting every version in the body.
       - name: Load release notes
         id: notes
         shell: bash
         env:
           TAG: ${{ needs.verify-version.outputs.tag }}
         run: |
-          NOTES=.github/release-notes/latest.md
+          NOTES=".github/release-notes/${TAG}.md"
+          if [ ! -f "$NOTES" ]; then
+            NOTES=.github/release-notes/latest.md
+          fi
           if [ ! -f "$NOTES" ]; then
             echo "::warning::$NOTES missing — releasing with an empty body."
             printf 'body=\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          BODY=$(sed -E "s/v[0-9]+\.[0-9]+\.[0-9]+/${TAG}/g" "$NOTES")
+          BODY=$(cat "$NOTES")
           {
             echo "body<<ZETTEL_NOTES_EOF"
             echo "$BODY"
