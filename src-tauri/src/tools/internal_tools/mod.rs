@@ -538,6 +538,42 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
+        // 22b. get_note_history
+        ToolDef {
+            tool_type: "function".to_string(),
+            function: ToolFunction {
+                name: "get_note_history".to_string(),
+                description: "Get a note's historical snapshots and modification events (AI edits, timeline events, fact changes). Returns paginated snapshots with version IDs and a separate time-sorted history list, or full snapshot text when version_id is provided. Missing snapshots do not prove the note was never edited.".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path or filename of the note (e.g. 'Zettelkasten Method.md')"
+                        },
+                        "version_id": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Optional snapshot ID to retrieve the full historical content of a specific version."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 50,
+                            "description": "Page size for each of snapshots and modification events (default 10, max 50).",
+                            "default": 10
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Number of items to skip in each list (default 0).",
+                            "default": 0
+                        }
+                    },
+                    "required": ["file_path"]
+                }),
+            },
+        },
         // 23. read_memory
         ToolDef {
             tool_type: "function".to_string(),
@@ -1269,29 +1305,6 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
-        // 60. get_note_history
-        ToolDef {
-            tool_type: "function".to_string(),
-            function: ToolFunction {
-                name: "get_note_history".to_string(),
-                description: "Get the complete modification history of a note, including AI reconciliation actions, timeline events, and fact changes. Returns a merged, time-sorted list of all recorded changes.".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "note_path": {
-                            "type": "string",
-                            "description": "Path to the note file (relative to vault or absolute)"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of history entries to return (default 20)",
-                            "default": 20
-                        }
-                    },
-                    "required": ["note_path"]
-                }),
-            },
-        },
         // 61. revert_note
         ToolDef {
             tool_type: "function".to_string(),
@@ -1556,6 +1569,7 @@ pub async fn try_execute(
         "move_note" => Some(note_ops::execute_move_note(arguments, vault_path, db, all_vault_paths)),
         "merge_notes" => Some(note_ops::execute_merge_notes(arguments, vault_path, db, all_vault_paths)),
         "batch_read_notes" => Some(note_ops::execute_batch_read_notes(arguments, vault_path, all_vault_paths)),
+        "get_note_history" => Some(note_ops::execute_get_note_history(arguments, vault_path, db, all_vault_paths)),
 
         // Graph operations
         "get_graph" => Some(graph_ops::execute_get_graph(db)),
@@ -1629,7 +1643,6 @@ pub async fn try_execute(
 
         // PDF & Note History
         "extract_pdf_text" => Some(note_ops::execute_extract_pdf_text(arguments, vault_path, all_vault_paths)),
-        "get_note_history" => Some(note_ops::execute_get_note_history(arguments, db, vault_path, all_vault_paths)),
         "revert_note" => Some(note_ops::execute_revert_note(arguments, db, vault_path, all_vault_paths)),
 
         // Canvas Bidirectional Compilation
@@ -1666,6 +1679,14 @@ pub fn get_internal_tool_summaries() -> Vec<(String, String)> {
 
 
 mod tests {
+    #[test]
+    fn history_fix_tool_names_are_unique() {
+        let mut names = std::collections::HashSet::new();
+        for tool in super::get_internal_tool_defs() {
+            assert!(names.insert(tool.function.name.clone()), "duplicate tool: {}", tool.function.name);
+        }
+    }
+
     #[allow(unused_imports)]
     use super::*;
     #[allow(unused_imports)]

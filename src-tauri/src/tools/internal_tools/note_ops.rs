@@ -1060,6 +1060,288 @@ pub(super) fn execute_batch_read_notes(
     }))?)
 }
 
+// ── get_note_history ───────────────────────────────────────────────
+
+pub(super) fn execute_get_note_history(
+    arguments: &str,
+    vault_path: &str,
+    db: &Arc<Mutex<Connection>>,
+    all_vault_paths: &[String],
+) -> anyhow::Result<String> {
+    let args: serde_json::Value = serde_json::from_str(arguments)?;
+    let file_path = args["file_path"]
+        .as_str()
+        .or_else(|| args["note_path"].as_str())
+        .or_else(|| args["path"].as_str())
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'file_path' parameter"))?;
+    let version_id = args.get("version_id").map(|v| {
+        v.as_i64().filter(|id| *id > 0)
+            .ok_or_else(|| anyhow::anyhow!("'version_id' must be a positive integer"))
+    }).transpose()?;
+    let limit = args.get("limit").map(|v| {
+        v.as_u64().filter(|limit| *limit > 0)
+            .ok_or_else(|| anyhow::anyhow!("'limit' must be a positive integer"))
+    }).transpose()?.unwrap_or(10).min(50) as i64;
+    let offset = args.get("offset").map(|v| {
+        v.as_u64().filter(|offset| *offset <= i64::MAX as u64)
+            .ok_or_else(|| anyhow::anyhow!("'offset' must be a non-negative 64-bit integer"))
+    }).transpose()?.unwrap_or(0) as i64;
+
+    // Never recover from a containment rejection by accepting a bare OS path.
+    // Recheck even basename fallbacks, which may have resolved a symlink.
+    let canonical = resolve_path_multi_vault(file_path, vault_path, all_vault_paths)?;
+    if !is_path_in_any_vault(&canonical, vault_path, all_vault_paths) {
+        anyhow::bail!("Access denied: path is outside all vaults");
+    }
+
+    let key = snapshot_path_key(&canonical);
+    let raw_path = canonical.to_string_lossy().to_string();
+    let db_path = normalize_db_path(&canonical);
+    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
+
+    if let Some(vid) = version_id {
+        let mut stmt = conn.prepare(
+            "SELECT id, content, content_length, created_at_ms FROM note_snapshots WHERE id = ?1 AND file_path IN (?2, ?3, ?4)"
+        )?;
+        let mut rows = stmt.query(rusqlite::params![vid, key, raw_path, db_path])?;
+        if let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            let content: String = row.get(1)?;
+            let content_len: i64 = row.get(2)?;
+            let created_at_ms: i64 = row.get(3)?;
+            return Ok(serde_json::to_string_pretty(&json!({
+                "file_path": file_path,
+                "version_id": id,
+                "created_at_ms": created_at_ms,
+                "content_length": content_len,
+                "content": content
+            }))?);
+        } else {
+            return Ok(serde_json::to_string_pretty(&json!({
+                "file_path": file_path,
+                "version_id": vid,
+                "error": "Snapshot not found with that version_id for this note."
+            }))?);
+        }
+    }
+
+    let snapshot_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM note_snapshots WHERE file_path IN (?1, ?2, ?3)",
+        rusqlite::params![key, raw_path, db_path], |row| row.get(0),
+    )?;
+    let mut stmt = conn.prepare(
+        "SELECT id, content_length, created_at_ms, substr(content, 1, 200) FROM note_snapshots WHERE file_path IN (?1, ?2, ?3) ORDER BY created_at_ms DESC, id DESC LIMIT ?4 OFFSET ?5"
+    )?;
+    let rows = stmt.query_map(rusqlite::params![key, raw_path, db_path, limit, offset], |row| {
+        Ok(json!({
+            "version_id": row.get::<_, i64>(0)?,
+            "content_length": row.get::<_, i64>(1)?,
+            "created_at_ms": row.get::<_, i64>(2)?,
+            "preview": row.get::<_, String>(3)?
+        }))
+    })?;
+
+    let mut snapshots = Vec::new();
+    for r in rows {
+        snapshots.push(r?);
+    }
+
+    // Preserve the previous tool's modification events alongside full snapshots.
+    // UNION gives one globally ordered, paginated stream; fact timestamps use
+    // valid_from (the previous implementation accidentally sorted them as "").
+    const ENTRIES: &str = "
+        SELECT 'reconciliation' AS kind, id, created_at AS timestamp,
+            json_object('type','reconciliation','id',id,'action',action,
+                'diff_summary',diff_summary,'timestamp',created_at) AS entry
+        FROM reconciliation_log WHERE file_path IN (?1,?2,?3)
+        UNION ALL
+        SELECT 'timeline', id, event_timestamp,
+            json_object('type','timeline','id',id,'event_type',event_type,
+                'details',event_details,'timestamp',event_timestamp)
+        FROM knowledge_timeline WHERE note_path IN (?1,?2,?3)
+        UNION ALL
+        SELECT 'fact', id, valid_from,
+            json_object('type','fact','id',id,'content',fact_content,
+                'valid_from',valid_from,'valid_to',valid_to,
+                'superseded_by',superseded_by,'created_by',created_by,'timestamp',valid_from)
+        FROM fact_history WHERE note_path IN (?1,?2,?3)";
+    let total_entries: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM ({ENTRIES})"),
+        rusqlite::params![key, raw_path, db_path], |row| row.get(0),
+    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT entry FROM ({ENTRIES}) ORDER BY julianday(timestamp) DESC, id DESC, kind ASC LIMIT ?4 OFFSET ?5"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params![key, raw_path, db_path, limit, offset], |row| row.get::<_, String>(0))?;
+    let mut history = Vec::<serde_json::Value>::new();
+    for row in rows { history.push(serde_json::from_str(&row?)?); }
+
+    use rusqlite::OptionalExtension;
+    let file_info = conn.query_row(
+        "SELECT path,title,last_synced,methodology FROM files WHERE path IN (?1,?2,?3) ORDER BY path LIMIT 1",
+        rusqlite::params![key, raw_path, db_path],
+        |row| Ok(json!({
+            "path": row.get::<_, String>(0)?, "title": row.get::<_, Option<String>>(1)?,
+            "last_synced": row.get::<_, Option<String>>(2)?, "methodology": row.get::<_, Option<String>>(3)?
+        })),
+    ).optional()?;
+    Ok(serde_json::to_string_pretty(&json!({
+        "file_path": file_path, "note_path": file_path, "db_path": db_path,
+        "file_info": file_info, "current_note_exists": canonical.is_file(),
+        "snapshot_count": snapshot_count, "returned_count": snapshots.len(),
+        "has_more": offset.saturating_add(snapshots.len() as i64) < snapshot_count,
+        "snapshots": snapshots, "total_entries": total_entries,
+        "history_has_more": offset.saturating_add(history.len() as i64) < total_entries,
+        "history": history, "limit": limit, "offset": offset,
+        "message": if snapshot_count == 0 { "No historical snapshots are recorded in this database; earlier versions may be unavailable." } else { "Historical snapshots are available." },
+        "hint": "Use version_id to read full snapshot content, or limit and offset to page snapshots and modification events."
+    }))?)
+}
+
+#[cfg(test)]
+mod history_fix_tests {
+    use super::*;
+
+    struct Fixture {
+        root: std::path::PathBuf,
+        vault: String,
+        db: Arc<Mutex<Connection>>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("zettel_history_{}", uuid::Uuid::new_v4()));
+            let vault = root.join("vault");
+            std::fs::create_dir_all(&vault).unwrap();
+            std::fs::write(vault.join("笔记.md"), "current body").unwrap();
+            crate::db::register_sqlite_vec();
+            let conn = Connection::open_in_memory().unwrap();
+            crate::db::schema::setup_database_schema(&conn).unwrap();
+            let path = vault.join("笔记.md");
+            let key = snapshot_path_key(&path);
+            conn.execute("INSERT INTO note_snapshots (id,file_path,content,content_length,created_at_ms) VALUES (1,?1,'旧正文',3,1000),(2,?1,'新正文',3,2000)", [&key]).unwrap();
+            let db_key = normalize_db_path(&path);
+            conn.execute("INSERT INTO files (path,hash,title) VALUES (?1,'h','笔记')", [&db_key]).unwrap();
+            conn.execute("INSERT INTO reconciliation_log (file_path,action,diff_summary,created_at) VALUES (?1,'edit','修改摘要','2026-11-01 10:00:00')", [&db_key]).unwrap();
+            conn.execute("INSERT INTO knowledge_timeline (note_path,event_type,event_details,event_timestamp) VALUES (?1,'updated','更新事件','2026-11-02 10:00:00')", [&db_key]).unwrap();
+            conn.execute("INSERT INTO fact_history (note_path,fact_content,valid_from) VALUES (?1,'历史事实','2026-11-03 10:00:00')", [&db_key]).unwrap();
+            Self { root, vault: vault.to_string_lossy().into_owned(), db: Arc::new(Mutex::new(conn)) }
+        }
+
+        fn call(&self, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            let output = execute_get_note_history(&args.to_string(), &self.vault, &self.db, &[self.vault.clone()])?;
+            Ok(serde_json::from_str(&output)?)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); }
+    }
+
+    #[test]
+    fn history_fix_accepts_legacy_paths_and_reads_versions() {
+        let f = Fixture::new();
+        for alias in ["file_path", "note_path", "path"] {
+            let result = f.call(json!({alias: "笔记.md", "version_id": 1})).unwrap();
+            assert_eq!(result["content"], "旧正文");
+            assert_eq!(result["version_id"], 1);
+        }
+    }
+
+    #[test]
+    fn history_fix_keeps_events_and_reports_snapshot_pagination() {
+        let f = Fixture::new();
+        let result = f.call(json!({"file_path":"笔记.md","limit":1})).unwrap();
+        assert_eq!(result["snapshot_count"], 2);
+        assert_eq!(result["snapshots"].as_array().unwrap().len(), 1);
+        assert_eq!(result["snapshots"][0]["version_id"], 2);
+        assert_eq!(result["has_more"], true);
+        assert_eq!(result["total_entries"], 3);
+        assert_eq!(result["history"][0]["type"], "fact");
+        let page = f.call(json!({"file_path":"笔记.md","limit":1,"offset":1})).unwrap();
+        assert_eq!(page["snapshots"][0]["version_id"], 1);
+        assert_eq!(page["has_more"], false);
+        assert_eq!(page["history"][0]["type"], "timeline");
+        assert_eq!(page["history_has_more"], true);
+    }
+
+    #[test]
+    fn history_fix_rejects_files_outside_all_vaults() {
+        let f = Fixture::new();
+        let outside = f.root.join("outside.md");
+        std::fs::write(&outside, "outside").unwrap();
+        for path in [outside.to_string_lossy().into_owned(), "../outside.md".to_string()] {
+            let error = f.call(json!({"file_path":path})).unwrap_err();
+            assert!(error.to_string().contains("Access denied"), "{error}");
+        }
+    }
+
+    #[test]
+    fn history_fix_cannot_read_another_notes_snapshot() {
+        let f = Fixture::new();
+        std::fs::write(std::path::Path::new(&f.vault).join("other.md"), "other").unwrap();
+        let result = f.call(json!({"file_path":"other.md","version_id":1})).unwrap();
+        assert!(result.get("content").is_none());
+        assert!(result.get("error").is_some());
+    }
+
+    #[test]
+    fn history_fix_empty_history_does_not_claim_initial_revision() {
+        let f = Fixture::new();
+        std::fs::write(std::path::Path::new(&f.vault).join("other.md"), "other").unwrap();
+        let result = f.call(json!({"file_path":"other.md"})).unwrap();
+        assert_eq!(result["snapshot_count"], 0);
+        assert_eq!(result["snapshots"], json!([]));
+        assert_eq!(result["history"], json!([]));
+        assert!(!result["message"].as_str().unwrap().contains("initial revision"));
+    }
+
+    #[test]
+    fn history_fix_invalid_pagination_is_rejected() {
+        let f = Fixture::new();
+        for args in [json!({"limit":0}),json!({"limit":-1}),json!({"offset":-1}),json!({"version_id":"1"})] {
+            let mut args = args;
+            args["file_path"] = json!("笔记.md");
+            assert!(f.call(args).is_err());
+        }
+    }
+
+    #[test]
+    fn history_fix_deleted_notes_and_secondary_vaults_keep_their_snapshots() {
+        let f = Fixture::new();
+        let path = std::path::Path::new(&f.vault).join("笔记.md");
+        std::fs::remove_file(&path).unwrap();
+        let result = f.call(json!({"file_path":path})).unwrap();
+        assert_eq!(result["snapshot_count"], 2);
+        assert_eq!(result["current_note_exists"], false);
+        let secondary = f.root.join("secondary");
+        std::fs::create_dir_all(&secondary).unwrap();
+        let path = secondary.join("second.md");
+        std::fs::write(&path, "secondary").unwrap();
+        let key = snapshot_path_key(&path);
+        f.db.lock().unwrap().execute("INSERT INTO note_snapshots (id,file_path,content,created_at_ms) VALUES (3,?1,'secondary old body',3000)", [&key]).unwrap();
+        let output = execute_get_note_history(&json!({"file_path":path,"version_id":3}).to_string(), &f.vault, &f.db, &[secondary.to_string_lossy().into_owned()]).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&output).unwrap()["content"], "secondary old body");
+    }
+
+    #[test]
+    fn history_fix_pages_ties_deterministically_and_caps_large_limits() {
+        let f = Fixture::new();
+        f.db.lock().unwrap().execute("UPDATE note_snapshots SET created_at_ms = 1000", []).unwrap();
+        let result = f.call(json!({"file_path":"笔记.md","limit":1000})).unwrap();
+        assert_eq!(result["limit"], 50);
+        assert_eq!(result["snapshots"][0]["version_id"], 2);
+        assert_eq!(result["snapshots"][1]["version_id"], 1);
+        assert_eq!(result["history"][2]["type"], "reconciliation");
+        assert_eq!(result["file_info"]["title"], "笔记");
+        let exhausted = f.call(json!({"file_path":"笔记.md","offset":100})).unwrap();
+        assert_eq!(exhausted["snapshot_count"], 2);
+        assert_eq!(exhausted["snapshots"], json!([]));
+        assert_eq!(exhausted["has_more"], false);
+    }
+}
+
 // ── resolve_wikilink ───────────────────────────────────────────────
 
 /// 与前端点击链接同一口径 / the same answer the editor gets when the user clicks.
@@ -1502,129 +1784,6 @@ pub(super) fn execute_extract_pdf_text(
     }
 
     Ok(serde_json::to_string_pretty(&result)?)
-}
-
-// ── execute_get_note_history ──────────────────────────────────────
-
-pub(super) fn execute_get_note_history(
-    arguments: &str,
-    db: &Arc<Mutex<Connection>>,
-    vault_path: &str,
-    all_vault_paths: &[String],
-) -> anyhow::Result<String> {
-    let args: serde_json::Value = serde_json::from_str(arguments)?;
-    let note_path = args["note_path"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("Missing 'note_path' parameter"))?;
-    let limit = args["limit"].as_u64().unwrap_or(20) as usize;
-
-    // Resolve the path to verify it exists
-    let canonical = resolve_path_multi_vault(note_path, vault_path, all_vault_paths)?;
-    let db_path = normalize_db_path(&canonical);
-
-    let conn = db.lock().map_err(|_| anyhow::anyhow!("DB lock error"))?;
-
-    // 1. Get reconciliation log entries (AI edit actions)
-    let mut stmt = conn.prepare(
-        "SELECT id, action, diff_summary, created_at
-         FROM reconciliation_log
-         WHERE file_path = ?1
-         ORDER BY created_at DESC
-         LIMIT ?2"
-    )?;
-
-    let reconciliation_entries: Vec<serde_json::Value> = stmt.query_map(
-        rusqlite::params![&db_path, limit as i64],
-        |row| {
-            Ok(json!({
-                "type": "reconciliation",
-                "id": row.get::<_, i64>(0)?,
-                "action": row.get::<_, String>(1)?,
-                "diff_summary": row.get::<_, Option<String>>(2)?,
-                "timestamp": row.get::<_, String>(3)?,
-            }))
-        },
-    )?.filter_map(|r| r.ok()).collect();
-
-    // 2. Get knowledge_timeline events
-    let mut stmt2 = conn.prepare(
-        "SELECT id, event_type, event_timestamp, event_details
-         FROM knowledge_timeline
-         WHERE note_path = ?1
-         ORDER BY event_timestamp DESC
-         LIMIT ?2"
-    )?;
-
-    let timeline_entries: Vec<serde_json::Value> = stmt2.query_map(
-        rusqlite::params![&db_path, limit as i64],
-        |row| {
-            Ok(json!({
-                "type": "timeline",
-                "id": row.get::<_, i64>(0)?,
-                "event_type": row.get::<_, String>(1)?,
-                "timestamp": row.get::<_, String>(2)?,
-                "details": row.get::<_, Option<String>>(3)?,
-            }))
-        },
-    )?.filter_map(|r| r.ok()).collect();
-
-    // 3. Get fact_history entries
-    let mut stmt3 = conn.prepare(
-        "SELECT id, fact_content, valid_from, valid_to, superseded_by, created_by
-         FROM fact_history
-         WHERE note_path = ?1
-         ORDER BY valid_from DESC
-         LIMIT ?2"
-    )?;
-
-    let fact_entries: Vec<serde_json::Value> = stmt3.query_map(
-        rusqlite::params![&db_path, limit as i64],
-        |row| {
-            Ok(json!({
-                "type": "fact",
-                "id": row.get::<_, i64>(0)?,
-                "content": row.get::<_, String>(1)?,
-                "valid_from": row.get::<_, String>(2)?,
-                "valid_to": row.get::<_, Option<String>>(3)?,
-                "superseded_by": row.get::<_, Option<i64>>(4)?,
-                "created_by": row.get::<_, String>(5)?,
-            }))
-        },
-    )?.filter_map(|r| r.ok()).collect();
-
-    // 4. Get file metadata
-    let file_info: Option<serde_json::Value> = conn.query_row(
-        "SELECT path, title, last_synced, methodology FROM files WHERE path = ?1",
-        rusqlite::params![&db_path],
-        |row| {
-            Ok(json!({
-                "path": row.get::<_, String>(0)?,
-                "title": row.get::<_, Option<String>>(1)?,
-                "last_synced": row.get::<_, String>(2)?,
-                "methodology": row.get::<_, String>(3)?,
-            }))
-        },
-    ).ok();
-
-    // Merge and sort all entries by timestamp (most recent first)
-    let mut all_entries: Vec<serde_json::Value> = Vec::new();
-    all_entries.extend(reconciliation_entries);
-    all_entries.extend(timeline_entries);
-    all_entries.extend(fact_entries);
-    all_entries.sort_by(|a, b| {
-        let ts_a = a["timestamp"].as_str().unwrap_or("");
-        let ts_b = b["timestamp"].as_str().unwrap_or("");
-        ts_b.cmp(ts_a)
-    });
-    all_entries.truncate(limit);
-
-    Ok(serde_json::to_string_pretty(&json!({
-        "note_path": note_path,
-        "db_path": db_path,
-        "file_info": file_info,
-        "total_entries": all_entries.len(),
-        "history": all_entries,
-    }))?)
 }
 
 // ── execute_revert_note ───────────────────────────────────────────

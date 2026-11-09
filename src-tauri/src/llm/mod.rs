@@ -1370,6 +1370,112 @@ fn should_nudge_stagnation(streak: u32, nudges_used: u32) -> bool {
     streak >= EMPTY_RESULT_STAGNATION_THRESHOLD && nudges_used < MAX_STAGNATION_NUDGES
 }
 
+/// Search/discovery/inspection tools whose repeated results indicate stagnation.
+fn is_exploration_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "search_notes"
+            | "search_by_tag"
+            | "find_similar_notes"
+            | "list_notes"
+            | "get_note_tags"
+            | "get_backlinks"
+            | "get_note_metadata"
+            | "get_note_history"
+            | "query_relations"
+            | "get_relations_by_type"
+            | "read_note"
+            | "batch_read_notes"
+            | "get_timeline"
+            | "get_global_timeline"
+            | "query_temporal"
+            | "web_search"
+    )
+}
+
+/// Fingerprint actual observations, never the requested query. Read bodies and
+/// historical content count even when their paths have already been seen.
+fn exploration_result_fingerprints(
+    tc_name: &str,
+    content: &str,
+) -> std::collections::HashSet<String> {
+    use sha2::{Digest, Sha256};
+    let mut observations = std::collections::HashSet::new();
+    let body = strip_json_fence(content);
+    fn fingerprint(name: &str, value: &str) -> String {
+        format!("{:x}", Sha256::digest(format!("{}\0{}", name, value).as_bytes()))
+    }
+
+    // read_note returns the user's body verbatim, not a structured tool payload.
+    // A note can itself contain JSON fields named query, results, or error.
+    if tc_name == "read_note" {
+        if !content.trim().is_empty() && !tool_result_is_error(tc_name, content) {
+            observations.insert(fingerprint(tc_name, content.trim()));
+        }
+        return observations;
+    }
+    if is_empty_tool_result(body) || tool_result_is_error(tc_name, body) {
+        return observations;
+    }
+
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(body) {
+        // Search wrappers echo the input query; that is not a new observation.
+        if let Some(map) = value.as_object_mut() {
+            map.remove("query");
+        }
+        // Track individual records, so reordered/subset results cannot look new.
+        const RECORD_KEYS: &[&str] = &["results", "notes", "matches", "items", "data", "hits", "snapshots", "history", "relations", "events"];
+        let is_record_list = value.is_array() || value.as_object().is_some_and(|map| {
+            RECORD_KEYS.iter().any(|key| map.get(*key).is_some_and(|v| v.is_array()))
+        });
+        let records: Vec<_> = if let Some(items) = value.as_array() {
+            items.iter().collect()
+        } else if let Some(map) = value.as_object() {
+            RECORD_KEYS
+                .iter()
+                .filter_map(|key| map.get(*key).and_then(|v| v.as_array()))
+                .flatten()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if !is_record_list {
+            observations.insert(fingerprint(tc_name, &value.to_string()));
+        } else {
+            for record in records {
+                observations.insert(fingerprint(tc_name, &record.to_string()));
+            }
+        }
+    } else {
+        observations.insert(fingerprint(tc_name, body));
+    }
+    observations
+}
+
+fn tool_result_is_error(tool_name: &str, content: &str) -> bool {
+    let body = strip_json_fence(content);
+    body.starts_with("Error:") || body.starts_with("error:")
+        || (tool_name != "read_note" && serde_json::from_str::<serde_json::Value>(body).ok().is_some_and(|v| {
+            v.get("error").is_some_and(|e| !e.is_null())
+                || v.get("success").and_then(|s| s.as_bool()) == Some(false)
+        }))
+}
+
+fn track_exploration_result(
+    name: &str,
+    content: &str,
+    visited: &mut std::collections::HashSet<String>,
+    streak: u32,
+) -> u32 {
+    if !is_exploration_tool(name) || tool_result_is_error(name, content) {
+        return 0;
+    }
+    let observations = exploration_result_fingerprints(name, content);
+    let has_new_info = observations.iter().any(|item| !visited.contains(item));
+    visited.extend(observations);
+    if has_new_info { 0 } else { streak.saturating_add(1) }
+}
+
 // ── Tool Result Summarization ──────────────────────────────────────
 
 /// Tools whose output is already compact and should NOT be summarized.
@@ -1556,6 +1662,7 @@ fn tool_stage_label(name: &str, zh: bool) -> &'static str {
             "find_similar_notes" => "正在查找相似笔记…",
             "list_notes" => "正在列出笔记…",
             "read_note" | "batch_read_notes" => "正在读取笔记…",
+            "get_note_history" => "正在读取笔记历史版本…",
             "get_graph" | "get_local_graph" => "正在加载知识图谱…",
             "find_shortest_path" => "正在查找关系路径…",
             "query_relations" | "get_relations_by_type" => "正在查询关系…",
@@ -1593,6 +1700,7 @@ fn tool_stage_label(name: &str, zh: bool) -> &'static str {
             "find_similar_notes" => "Finding similar notes…",
             "list_notes" => "Listing notes…",
             "read_note" | "batch_read_notes" => "Reading notes…",
+            "get_note_history" => "Fetching note history snapshots…",
             "get_graph" | "get_local_graph" => "Loading knowledge graph…",
             "find_shortest_path" => "Finding relationship path…",
             "query_relations" | "get_relations_by_type" => "Querying relations…",
@@ -2059,6 +2167,9 @@ where
     // the budget cannot leak across turns.
     let mut consecutive_empty_results = 0u32;
     let mut stagnation_nudges = 0u32;
+    let mut visited_observations: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut consecutive_zero_gain_queries = 0u32;
+    let mut zero_gain_nudged = false;
 
     let max_context = get_max_context_tokens(config);
 
@@ -2697,10 +2808,17 @@ where
 
         // 4. Update message history with parallel tool outputs
         for (tc_id, tc_name, content, duration_ms) in results {
+            // Fingerprint before hooks add random web envelopes or compress
+            // away changed paragraphs. Only digests are retained by this guard.
+            let is_error = tool_result_is_error(&tc_name, &content);
+            consecutive_zero_gain_queries = track_exploration_result(
+                &tc_name, &content, &mut visited_observations, consecutive_zero_gain_queries,
+            );
+            if consecutive_zero_gain_queries == 0 {
+                zero_gain_nudged = false;
+            }
             // ── POST hook stage ─────────────────────────────────────
-            // Runs *before* the ToolResult event so the frontend, logs, and
-            // context history all see the redacted / compressed view. The
-            // original raw content only exists inside the executor future.
+            // The frontend, logs, and context see only the redacted/hooked view.
             let post = tool_hooks::run_post_hooks(&tc_name, &content);
             let after_hook = post.replace_content.clone().unwrap_or(content);
             if post.redactions > 0 {
@@ -2757,7 +2875,6 @@ where
             };
 
             // Track consecutive errors for simple escalation
-            let is_error = final_content.starts_with("Error:") || final_content.starts_with("error:");
             if is_error {
                 consecutive_errors += 1;
             } else {
@@ -2788,6 +2905,58 @@ where
         // All this iteration's tool calls now have a matching ToolResult — clear the
         // pending tracker so early exits in subsequent iterations don't double-flush.
         pending_tool_results.clear();
+
+        // ── Semantic Zero-Gain Stagnation: hard break or nudge ───────
+        if consecutive_zero_gain_queries >= 5 {
+            crate::chat_file_log::log_agent(&format!(
+                "zero_gain_stagnation_break: {} consecutive exploration tool calls with zero new information gain — breaking tool loop to force final synthesis",
+                consecutive_zero_gain_queries
+            ));
+            emit_agent_event(app_handle, AgentEvent::Thinking {
+                message: plan_guard::stagnation_thinking_ui(user_zh),
+            });
+            flush_pending_tool_results(&mut pending_tool_results, app_handle, "Tool call skipped (turn ending)");
+            let fallback = if user_zh {
+                "检索结果开始重复，本次已停止继续检索，暂时无法生成完整分析。请缩小问题范围后重试。".to_string()
+            } else {
+                "Search results began repeating, so retrieval stopped. A complete analysis could not be generated; please try a narrower question.".to_string()
+            };
+            let (content, source) = synthesize_or_fallback(
+                config,
+                messages,
+                &user_query,
+                task_kind,
+                app_handle,
+                total_tool_calls,
+                &executed_calls,
+                fallback,
+                "zero_gain_stagnation",
+            )
+            .await;
+            return Ok(AgentTurnResult::finish(
+                content,
+                source,
+                total_tool_calls,
+                app_handle,
+            ));
+        } else if should_nudge_stagnation(consecutive_zero_gain_queries, stagnation_nudges) && !zero_gain_nudged {
+            zero_gain_nudged = true;
+            stagnation_nudges += 1;
+            // One guidance message per stall, including empty-result stalls.
+            consecutive_empty_results = 0;
+            crate::chat_file_log::log_agent(&format!(
+                "zero_gain_stagnation_nudge: {} consecutive zero-gain tool calls — injecting change-approach guidance ({}/{})",
+                consecutive_zero_gain_queries, stagnation_nudges, MAX_STAGNATION_NUDGES
+            ));
+            emit_agent_event(app_handle, AgentEvent::Thinking {
+                message: plan_guard::stagnation_thinking_ui(user_zh),
+            });
+            messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: plan_guard::stagnation_system(user_zh),
+                ..Default::default()
+            });
+        }
 
         // ── Stagnation nudge: tools work, but find nothing ───────────
         // Salvaged from the old `agent_recovery` module, with three constraints
@@ -2929,6 +3098,89 @@ mod tests {
         // Errors belong to the escalation path, never the empty streak.
         assert!(!is_empty_tool_result("Error: something broke"));
         assert!(!is_empty_tool_result("Error: []"));
+    }
+
+    #[test]
+    fn exploration_tool_classification_excludes_writes() {
+        assert!(is_exploration_tool("search_notes"));
+        assert!(is_exploration_tool("get_note_tags"));
+        assert!(is_exploration_tool("get_note_history"));
+        assert!(!is_exploration_tool("create_note"));
+        assert!(!is_exploration_tool("todo_write"));
+
+    }
+
+    #[test]
+    fn history_fix_different_versions_and_plain_text_are_new_information() {
+        let first = exploration_result_fingerprints("get_note_history", r#"{"file_path":"a.md","version_id":1,"content":"first"}"#);
+        let second = exploration_result_fingerprints("get_note_history", r#"{"file_path":"a.md","version_id":2,"content":"second"}"#);
+        assert_ne!(first, second);
+        assert_ne!(
+            exploration_result_fingerprints("read_note", "first body"),
+            exploration_result_fingerprints("read_note", "second body")
+        );
+    }
+
+    #[test]
+    fn history_fix_changed_query_is_not_information_gain() {
+        let result = r#"[{"path":"a.md","content":"same"}]"#;
+        assert_eq!(
+            exploration_result_fingerprints("search_notes", &format!(r#"{{"query":"first","results":{}}}"#, result)),
+            exploration_result_fingerprints("search_notes", &format!(r#"{{"query":"second","results":{}}}"#, result))
+        );
+        assert!(exploration_result_fingerprints("search_notes", r#"{"query":"new","results":[]}"#).is_empty());
+    }
+
+    #[test]
+    fn history_fix_result_formatting_and_order_are_not_information_gain() {
+        let a = r#"{"query":"one","results":[{"path":"a.md"},{"path":"b.md"}]}"#;
+        let b = "```json\n{\"results\": [{\"path\":\"b.md\"},{\"path\":\"a.md\"}], \"query\":\"two\"}\n```";
+        assert_eq!(exploration_result_fingerprints("search_notes", a), exploration_result_fingerprints("search_notes", b));
+    }
+
+    #[test]
+    fn history_fix_progress_streak_resets_after_writes_errors_or_new_content() {
+        let mut seen = std::collections::HashSet::new();
+        let original = r#"{"file_path":"a.md","content":"first version"}"#;
+        let changed = r#"{"file_path":"a.md","content":"second version"}"#;
+        assert_eq!(track_exploration_result("get_note_history", original, &mut seen, 0), 0);
+        let mut streak = 0;
+        for expected in 1..=5 {
+            streak = track_exploration_result("get_note_history", original, &mut seen, streak);
+            assert_eq!(streak, expected);
+        }
+        assert_eq!(track_exploration_result("get_note_history", changed, &mut seen, streak), 0);
+        assert_eq!(track_exploration_result("edit_note", "done", &mut seen, 4), 0);
+        for error in ["Error: no file", r#"{"error":"not found"}"#, r#"{"success":false}"#] {
+            assert_eq!(track_exploration_result("get_note_history", error, &mut seen, 4), 0);
+            assert!(tool_result_is_error("get_note_history", error));
+        }
+        assert!(tool_result_is_error("get_note_history", "```json\n{\"error\":\"not found\"}\n```"));
+    }
+
+    #[test]
+    fn history_fix_repeated_search_subsets_are_not_new_information() {
+        let mut seen = std::collections::HashSet::new();
+        assert_eq!(track_exploration_result("search_notes", r#"{"results":[{"path":"a.md","content":"A"},{"path":"b.md","content":"B"}]}"#, &mut seen, 0), 0);
+        assert_eq!(track_exploration_result("search_notes", r#"{"query":"different","results":[{"path":"a.md","content":"A"}]}"#, &mut seen, 0), 1);
+        assert_eq!(track_exploration_result("search_notes", r#"{"results":[{"path":"a.md","content":"changed A"}]}"#, &mut seen, 1), 0);
+    }
+
+    #[test]
+    fn history_fix_json_note_bodies_are_data_not_search_wrappers() {
+        assert_ne!(
+            exploration_result_fingerprints("read_note", r#"{"query":"first"}"#),
+            exploration_result_fingerprints("read_note", r#"{"query":"second"}"#)
+        );
+        let mut seen = std::collections::HashSet::new();
+        assert_eq!(track_exploration_result("read_note", r#"{"error":"documented example"}"#, &mut seen, 4), 0);
+        assert!(!seen.is_empty());
+    }
+
+    #[test]
+    fn history_fix_empty_history_pages_are_not_new_information() {
+        assert!(exploration_result_fingerprints("get_note_history", r#"{"offset":10,"snapshots":[],"history":[]}"#).is_empty());
+        assert!(exploration_result_fingerprints("get_timeline", r#"{"events":[],"offset":20}"#).is_empty());
     }
 
     #[test]

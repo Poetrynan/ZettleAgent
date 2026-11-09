@@ -503,33 +503,35 @@ pub fn synthesis_instruction(task_kind: TaskKind, zh: bool) -> String {
             "工具调用已全部完成。请根据上述工具返回的结果，为用户撰写一份完整的知识库结构性诊断报告（Markdown）。\
              必须包含：执行摘要、关键发现（孤立卡片/断裂链接/冗余话题/MOC 机会）、数据不一致说明（如有）、\
              编号的即时行动计划。使用与用户问题相同的语言。禁止调用任何工具。\
-             禁止复述系统指令（如「请勿重复调用工具」）。禁止用一句话 meta 摘要敷衍——写完整分析。"
+             严禁输出任何待调用工具的 JSON 参数或伪代码块。若某些信息不存在，直接向用户说明。禁止用一句话 meta 摘要敷衍——写完整分析。"
                 .to_string()
         }
         (TaskKind::DiagnosticReport, false) => {
             "All tool calls are complete. Write a FULL structural diagnostic report (Markdown) from the tool results above. \
              Include: executive summary, key findings (orphans, broken links, redundant topics, MOC opportunities), \
              data inconsistencies if any, and a numbered action plan. Same language as the user. \
-             Do NOT call tools. Do NOT echo system instructions. No one-line meta summaries."
+             Do NOT call tools or output tool JSON arguments. If data is absent, state so clearly. No one-line meta summaries."
                 .to_string()
         }
         (TaskKind::SearchAnalysis | TaskKind::CurateAction, true) => {
-            "工具调用已全部完成。请根据上述工具结果，为用户撰写完整、结构化的最终回答（Markdown）。\
-             包含关键发现与具体建议。禁止调用工具，禁止复述系统指令，禁止一句话 meta 摘要。"
+            "工具调用已全部完成。请根据上述信息，为用户撰写完整、结构化、可直接阅读的最终分析与回答（Markdown 格式）。\
+             包含核心论点、发展脉络与具体建议。严禁输出任何待调用工具的 JSON 代码块或内部思考草稿。\
+             若特定历史版本或文件在库中不存在，请明确向用户说明并基于现有内容完成深度分析。"
                 .to_string()
         }
         (TaskKind::SearchAnalysis | TaskKind::CurateAction, false) => {
-            "All tool calls are complete. Write a complete structured final answer (Markdown) from the tool results. \
-             Include key findings and concrete recommendations. Do NOT call tools or echo system instructions."
+            "All tool calls are complete. Write a complete structured final answer (Markdown) from the gathered information. \
+             Include key findings and concrete recommendations. Do NOT output tool JSON parameter blocks or execution drafts. \
+             If specific historical versions do not exist, clearly explain and provide full analysis from available notes."
                 .to_string()
         }
         (_, true) => {
-            "工具调用已全部完成。请根据上述信息撰写完整的最终回答。禁止调用工具，禁止复述系统指令。"
+            "工具调用已全部完成。请根据上述信息撰写完整的最终回答（Markdown 格式）。严禁输出待调工具的 JSON 代码块或草稿。若部分数据缺失，请直接说明并基于现有信息给出最佳回答。"
                 .to_string()
         }
         (_, false) => {
             "All tool calls are complete. Write the complete final answer from the information above. \
-             Do NOT call tools or echo system instructions."
+             Do NOT output tool invocation JSON blocks or internal drafts. If any data is missing, clearly explain and provide the best available analysis."
                 .to_string()
         }
     }
@@ -953,7 +955,7 @@ pub fn sanitize_user_visible_answer(s: &str) -> String {
         "tool call",
         "工具调用",
     ];
-    out.lines()
+    let cleaned = out.lines()
         .map(str::trim)
         .filter(|line| {
             if line.is_empty() {
@@ -965,7 +967,49 @@ pub fn sanitize_user_visible_answer(s: &str) -> String {
             true
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+
+    strip_pseudo_tool_json_blocks(&cleaned)
+}
+
+/// Remove explicit invocations of known tools, preserving ambiguous JSON data,
+/// non-JSON fences, and all prose outside each removed block.
+pub fn strip_pseudo_tool_json_blocks(text: &str) -> String {
+    fn is_invocation(body: &str) -> bool {
+        let Ok(serde_json::Value::Object(map)) = serde_json::from_str(body) else { return false; };
+        let invocation = if map.len() == 2 {
+            map.get("name").zip(map.get("arguments"))
+                .or_else(|| map.get("tool").zip(map.get("parameters")))
+        } else { None };
+        let Some((name, args)) = invocation else { return false; };
+        let Some(name) = name.as_str() else { return false; };
+        if !args.is_object() { return false; }
+        crate::tools::internal_tools::get_internal_tool_defs()
+            .iter().any(|tool| tool.function.name == name)
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut open: Option<(usize, usize, usize, bool)> = None;
+    let mut offset = 0;
+    let mut retained_from = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        let fence_len = trimmed.bytes().take_while(|b| *b == b'`').count();
+        if let Some((start, body_start, opening_len, is_json)) = open {
+            if fence_len >= opening_len && trimmed[fence_len..].is_empty() {
+                if is_json && is_invocation(text[body_start..offset].trim()) {
+                    out.push_str(&text[retained_from..start]);
+                    retained_from = offset + line.len();
+                }
+                open = None;
+            }
+        } else if fence_len >= 3 {
+            open = Some((offset, offset + line.len(), fence_len, trimmed[fence_len..].trim() == "json"));
+        }
+        offset += line.len();
+    }
+    out.push_str(&text[retained_from..]);
+    out
 }
 
 /// Remove `<thought>...</thought>` blocks (and any trailing unclosed `<thought>`)
@@ -1296,5 +1340,43 @@ mod tests {
         assert!(!out.iter().any(|m| m.role == "tool"));
         assert!(out.iter().all(|m| m.tool_calls.is_none()));
         assert!(out.iter().any(|m| m.content.contains("0 orphans")));
+    }
+
+    #[test]
+    fn test_strip_pseudo_tool_json_blocks() {
+        let raw = "这里是关于卡片盒笔记法的分析。\n\n```json\n{\n  \"file_path\": \"Zettelkasten Method.md\"\n}\n```";
+        let cleaned = sanitize_user_visible_answer(raw);
+        // Bare path objects are ambiguous: preserve user data rather than guess.
+        assert!(cleaned.contains("file_path"));
+        assert!(cleaned.contains("这里是关于卡片盒笔记法的分析。"));
+
+        let normal_code = "下面是一段示例代码：\n\n```json\n{\n  \"name\": \"Alice\",\n  \"age\": 30\n}\n```";
+        let cleaned_code = sanitize_user_visible_answer(normal_code);
+        assert!(cleaned_code.contains("```json"));
+        assert!(cleaned_code.contains("\"name\": \"Alice\""));
+    }
+
+    #[test]
+    fn history_fix_preserves_json_examples_and_following_prose() {
+        let text = "配置示例：\n```json\n{\"path\":\"notes/a.md\",\"query\":\"rust\"}\n```\n后面的说明必须保留。";
+        assert_eq!(strip_pseudo_tool_json_blocks(text), text);
+    }
+
+    #[test]
+    fn history_fix_removes_only_explicit_tool_envelopes() {
+        let text = "分析。\n```json\n{\"name\":\"read_note\",\"arguments\":{\"path\":\"a.md\"}}\n```\n结论。\n```json\n{\"tool\":\"get_note_history\",\"parameters\":{\"file_path\":\"a.md\"}}\n```\n结束。";
+        let cleaned = strip_pseudo_tool_json_blocks(text);
+        assert!(!cleaned.contains("read_note"));
+        assert!(!cleaned.contains("get_note_history"));
+        assert!(cleaned.contains("分析。"));
+        assert!(cleaned.contains("结论。"));
+        assert!(cleaned.contains("结束。"));
+    }
+
+    #[test]
+    fn history_fix_preserves_incomplete_and_non_json_fences() {
+        for text in ["```json\n{\"path\":\"a.md\"}", "```text\n```json\n{\"name\":\"read_note\",\"arguments\":{}}\n```\n```"] {
+            assert_eq!(strip_pseudo_tool_json_blocks(text), text);
+        }
     }
 }
