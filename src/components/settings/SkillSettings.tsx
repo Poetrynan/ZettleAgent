@@ -136,7 +136,7 @@ export function SkillDirectoriesSection() {
                     <IconTool size={12} />
                     <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{skill.name}</span>
                     <span className="badge badge-primary" style={{ fontSize: '10px' }}>v{skill.version}</span>
-                    {skill.has_skill_md && <span style={{ fontSize: '10px', color: 'var(--success, #22c55e)' }}>📄 SKILL.md</span>}
+                    {skill.has_skill_md && <span style={{ fontSize: '10px', color: 'var(--success)' }}>SKILL.md</span>}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
                     {skill.description}

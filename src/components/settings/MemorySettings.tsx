@@ -103,7 +103,7 @@ export function AiMemorySection() {
       {expanded && (
         <>
           {/* Data storage info + Custom DB Path */}
-          <div style={{ background: 'rgba(139, 92, 246, 0.04)', border: '1px solid rgba(139, 92, 246, 0.15)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
             <div style={{ ...labelStyle, fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: '6px' }}><IconDatabase size={14} /> {t('memory.dbPath')}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: '1.5' }}>
               {t('memory.dbPathDesc')}
@@ -113,7 +113,7 @@ export function AiMemorySection() {
             </code>
             {isCustomDb && (
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--accent-primary)', marginBottom: '8px' }}>
-                ✅ {t('memory.customPathActive')}
+                {t('memory.customPathActive')}
               </div>
             )}
             
@@ -186,8 +186,8 @@ export function AiMemorySection() {
             </div>
             
             {/* Recommendation */}
-            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px', lineHeight: '1.6', background: 'rgba(0,0,0,0.02)', padding: '6px 8px', borderRadius: 'var(--radius-md)' }}>
-              💡 <strong>{t('memory.recommendedPath')}</strong>：{t('memory.recommendedDesc')}<br/>
+            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px', lineHeight: '1.6', background: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: 'var(--radius-md)' }}>
+              <strong>{t('memory.recommendedPath')}</strong>：{t('memory.recommendedDesc')}<br/>
               • <code>D:\ZettelAgent_Data\</code> — {t('memory.recommendedDrive')}<br/>
               • <code>C:\Users\You\Documents\ZettelAgent\</code> — {t('memory.recommendedDocs')}<br/>
               • {t('memory.recommendedVault')}<br/>

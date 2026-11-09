@@ -671,8 +671,8 @@
   gap: 4px;
   font-size: 10px;
   font-weight: 600;
-  color: #A855F7;
-  background: rgba(168, 85, 247, 0.08);
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
   padding: 2px 8px;
   border-radius: var(--radius-md);
   max-width: 160px;
@@ -1097,8 +1097,8 @@
 }
 
 .kg-ai-section-label--advice {
-  background: rgba(168, 85, 247, 0.15);
-  color: #9333ea;
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
 }
 
 .kg-ai-section-text {
@@ -1120,8 +1120,8 @@
 }
 
 .dark .kg-ai-section-label--advice {
-  background: rgba(168, 85, 247, 0.25);
-  color: #c084fc;
+  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+  color: var(--accent-primary);
 }
 
 /* ── Loading state ─────────────────────────────────────────────────── */
@@ -1229,7 +1229,7 @@
   background: #10B981;
 }
 .kg-stat-dot--semantic {
-  background: #8B5CF6;
+  background: var(--accent-primary);
 }
 
 .kg-stat-sep {
@@ -1466,9 +1466,9 @@
 }
 
 .kg-stat-badge--semantic {
-  background: rgba(168, 85, 247, 0.06);
-  color: #7C3AED;
-  border: 1px solid rgba(168, 85, 247, 0.1);
+  background: color-mix(in srgb, var(--accent-primary) 6%, transparent);
+  color: var(--accent-primary);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 .kg-similarity-badge {
@@ -1705,7 +1705,7 @@
 .kg-help-term-node { color: var(--step-organize-accent); }
 .kg-help-term-edge { color: var(--step-index-accent); }
 .kg-help-term-canvas { color: var(--canvas-accent); }
-.kg-help-term-cluster { color: #8B5CF6; }
+.kg-help-term-cluster { color: var(--accent-primary); }
 .kg-help-term-slider { color: var(--step-export-accent); }
 .kg-help-term-orphan { color: var(--text-tertiary, #94A3B8); }
 

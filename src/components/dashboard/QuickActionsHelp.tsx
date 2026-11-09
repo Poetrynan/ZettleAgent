@@ -41,8 +41,8 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
       ftsStatus: isZh ? '自动增量构建 (FTS5)' : 'Auto-built (FTS5)',
       embStatus: isZh ? '不在此阶段生成 (需构建向量索引)' : 'Not generated (Run Vector Indexing)',
       tip: isZh
-        ? '💡 建议在外部编辑器（如 Obsidian/VSCode）新增或批量修改笔记后点击同步。'
-        : '💡 Recommended to run after adding or modifying notes in external editors.',
+        ? '建议在外部编辑器（如 Obsidian/VSCode）新增或批量修改笔记后点击同步。'
+        : 'Recommended to run after adding or modifying notes in external editors.',
     },
     {
       id: 'embed',
@@ -60,8 +60,8 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
       ftsStatus: '—',
       embStatus: isZh ? '本地模型离线编码入库' : 'Locally embedded to SQLite-Vec',
       tip: isZh
-        ? '⚡ 向量索引只需在新笔记积累或初次导入时构建一次，后续增量更新。'
-        : '⚡ Only needed when importing new notes or on first setup; updates incrementally.',
+        ? '向量索引只需在新笔记积累或初次导入时构建一次，后续增量更新。'
+        : 'Only needed when importing new notes or on first setup; updates incrementally.',
     },
     {
       id: 'organize',
@@ -79,8 +79,8 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
       ftsStatus: isZh ? '用于粗筛初排上下文' : 'Used for lexical candidate retrieval',
       embStatus: isZh ? '若已构建，自动启用混合搜索 (FTS+向量)' : 'Auto-enables Hybrid RRF when vector index is ready',
       tip: isZh
-        ? '🚀 构建向量索引后运行智能整理，关联精准度会有显著质的提升。'
-        : '🚀 Running after Vector Indexing significantly boosts recommendation accuracy.',
+        ? '构建向量索引后运行智能整理，关联精准度会有显著质的提升。'
+        : 'Running after Vector Indexing significantly boosts recommendation accuracy.',
     },
     {
       id: 'lint',
@@ -98,8 +98,8 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
       ftsStatus: isZh ? '用于断链修复模糊搜索建议' : 'Used for fuzzy search fix suggestions',
       embStatus: isZh ? '用于检测语义重复与隐藏关联' : 'Enables semantic duplicate and hidden link detection',
       tip: isZh
-        ? '🛡️ 建议在智能整理后或定期运行健康检查，保持卡片盒链接健康健壮。'
-        : '🛡️ Recommended to run periodically or after organizing to maintain graph integrity.',
+        ? '建议在智能整理后或定期运行健康检查，保持卡片盒链接健康健壮。'
+        : 'Recommended to run periodically or after organizing to maintain graph integrity.',
     },
     {
       id: 'canvas',
@@ -117,8 +117,8 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
       ftsStatus: '—',
       embStatus: '—',
       tip: isZh
-        ? '🎨 导出后可直接拖入白板进行多卡片空间归纳与视觉化推演。'
-        : '🎨 Exported files can be dragged directly into the Whiteboard for spatial reasoning.',
+        ? '导出后可直接拖入白板进行多卡片空间归纳与视觉化推演。'
+        : 'Exported files can be dragged directly into the Whiteboard for spatial reasoning.',
     },
   ];
 

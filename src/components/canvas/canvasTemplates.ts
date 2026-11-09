@@ -26,7 +26,6 @@ const GAP = 140;   // 中心节点边缘到周围 group 边缘的间距
 
 export interface TemplateMeta {
   id: string;
-  icon: string;
   defaultMethodology: string;
   thumbnail: string;
 }
@@ -65,11 +64,11 @@ const THUMB = {
     <line x1="38" y1="40" x2="62" y2="40"/>
   </svg>`,
   moc: `<svg viewBox="0 0 100 60" fill="none" stroke="#64748b" stroke-width="1.2">
-    <rect x="38" y="24" width="24" height="12" rx="2" fill="#a855f7" stroke="none"/>
-    <rect x="6" y="6" width="20" height="11" rx="2" fill="#ede9fe"/>
-    <rect x="74" y="6" width="20" height="11" rx="2" fill="#ede9fe"/>
-    <rect x="6" y="43" width="20" height="11" rx="2" fill="#ede9fe"/>
-    <rect x="74" y="43" width="20" height="11" rx="2" fill="#ede9fe"/>
+    <rect x="38" y="24" width="24" height="12" rx="2" fill="#3b82f6" stroke="none"/>
+    <rect x="6" y="6" width="20" height="11" rx="2" fill="#dbeafe"/>
+    <rect x="74" y="6" width="20" height="11" rx="2" fill="#dbeafe"/>
+    <rect x="6" y="43" width="20" height="11" rx="2" fill="#dbeafe"/>
+    <rect x="74" y="43" width="20" height="11" rx="2" fill="#dbeafe"/>
     <line x1="26" y1="12" x2="38" y2="28"/>
     <line x1="74" y1="12" x2="62" y2="28"/>
     <line x1="26" y1="48" x2="38" y2="32"/>
@@ -90,11 +89,11 @@ const THUMB = {
 };
 
 export const CANVAS_TEMPLATES: TemplateMeta[] = [
-  { id: 'knowledge-graph', icon: '🕸️', defaultMethodology: 'moc',          thumbnail: THUMB.knowledgeGraph },
-  { id: 'timeline',        icon: '⏱️', defaultMethodology: 'generic',      thumbnail: THUMB.timeline },
-  { id: 'compare',         icon: '⚖️', defaultMethodology: 'generic',      thumbnail: THUMB.compare },
-  { id: 'moc',             icon: '🗺️', defaultMethodology: 'moc',          thumbnail: THUMB.moc },
-  { id: 'zettelkasten',    icon: '🌱', defaultMethodology: 'zettelkasten', thumbnail: THUMB.zettelkasten },
+  { id: 'knowledge-graph', defaultMethodology: 'moc',          thumbnail: THUMB.knowledgeGraph },
+  { id: 'timeline',        defaultMethodology: 'generic',      thumbnail: THUMB.timeline },
+  { id: 'compare',         defaultMethodology: 'generic',      thumbnail: THUMB.compare },
+  { id: 'moc',             defaultMethodology: 'moc',          thumbnail: THUMB.moc },
+  { id: 'zettelkasten',    defaultMethodology: 'zettelkasten', thumbnail: THUMB.zettelkasten },
 ];
 
 export const BLANK_THUMBNAIL = THUMB.blank;
@@ -202,7 +201,7 @@ function tplKnowledgeGraph(methodology: string): GeneratedCanvas {
   const types = typesOf(methodology);
   const centerColor = colorOf(types[2]);
 
-  const center = centerNode('🧭 中心主题 / MOC', centerColor);
+  const center = centerNode('中心主题 / MOC', centerColor);
 
   // 4 方向 group:上 / 右 / 下 / 左,严格对称
   const dirs = [
@@ -277,7 +276,7 @@ function tplCompare(methodology: string): GeneratedCanvas {
 function tplMoc(_methodology: string): GeneratedCanvas {
   const types = typesOf('moc');
   const mapColor = colorOf('map');
-  const center = centerNode('🗺️ Map of Content', mapColor);
+  const center = centerNode('Map of Content', mapColor);
 
   const dirs = [
     { x: TOP_BOTTOM_X, y: TOP_Y,    nt: types[0], label: '分支 1' },
@@ -303,10 +302,10 @@ function tplMoc(_methodology: string): GeneratedCanvas {
 
 function tplZettelkastenFlow(_methodology: string): GeneratedCanvas {
   const items = [
-    { text: '📥 Fleeting\n灵光一现', nt: 'fleeting' },
-    { text: '📚 Literature\n文献笔记', nt: 'literature' },
-    { text: '💎 Permanent\n永久笔记', nt: 'permanent' },
-    { text: '🗂️ Structure\n结构笔记', nt: 'structure' },
+    { text: 'Fleeting\n灵光一现', nt: 'fleeting' },
+    { text: 'Literature\n文献笔记', nt: 'literature' },
+    { text: 'Permanent\n永久笔记', nt: 'permanent' },
+    { text: 'Structure\n结构笔记', nt: 'structure' },
   ];
 
   const zkY = -ZK_ITEM_H / 2;

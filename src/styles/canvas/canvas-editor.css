@@ -207,9 +207,9 @@
 
 .group-node-frame.selected {
   border-style: dashed;
-  border-color: rgba(99, 102, 241, 0.4) !important;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(59, 130, 246, 0.02) 100%);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.06);
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, transparent) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 4%, transparent) 0%, rgba(59, 130, 246, 0.02) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 6%, transparent);
 }
 
 .group-node-label-input {
@@ -517,15 +517,15 @@
 .react-flow__node:hover .react-flow__handle,
 .react-flow__node.selected .react-flow__handle {
   opacity: 0.8 !important;
-  border-color: rgba(99, 102, 241, 0.45) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent) !important;
 }
 
 .react-flow__handle:hover {
   transform: none;
   background-color: rgba(255, 255, 255, 1) !important;
-  border-color: rgba(99, 102, 241, 0.7) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, transparent) !important;
   opacity: 1 !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 15%, transparent);
 }
 
 /* 7a. NodeResizer — visible resize dots at corners */
@@ -553,8 +553,8 @@
   opacity: 1 !important;
   transform: none;
   background: rgba(255, 255, 255, 1) !important;
-  border-color: rgba(99, 102, 241, 0.7) !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 15%, transparent), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* 7b. Show ALL handles on ALL nodes while user is dragging a connection.
@@ -564,15 +564,15 @@
 .react-flow:has(.react-flow__connection) .react-flow__handle,
 .react-flow__node .react-flow__handle.connectingto {
   opacity: 1 !important;
-  border-color: rgba(99, 102, 241, 0.6) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent) !important;
   background: rgba(255, 255, 255, 1) !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 12%, transparent);
   animation: handlePulse 1.2s ease-in-out infinite;
 }
 
 @keyframes handlePulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1); }
-  50%      { box-shadow: 0 0 0 5px rgba(99, 102, 241, 0.2); }
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 10%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-primary) 20%, transparent); }
 }
 .react-flow__resize-control.line {
   border-color: rgba(148, 163, 184, 0.25) !important;
@@ -861,9 +861,9 @@
 [data-theme="dark"] .canvas-quick-connect-menu,
 .dark-theme .canvas-quick-connect-menu {
   background: rgba(15, 23, 42, 0.96);
-  border-color: rgba(99, 102, 241, 0.2);
+  border-color: color-mix(in srgb, var(--accent-primary) 20%, transparent);
   box-shadow:
-    0 0 0 1px rgba(99, 102, 241, 0.15),
+    0 0 0 1px color-mix(in srgb, var(--accent-primary) 15%, transparent),
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 2px 8px rgba(0, 0, 0, 0.2);
 }
@@ -896,7 +896,7 @@
 [data-theme="dark"] .canvas-quick-connect-title,
 .dark-theme .canvas-quick-connect-title {
   color: rgba(129, 140, 248, 0.9);
-  border-bottom-color: rgba(99, 102, 241, 0.12);
+  border-bottom-color: color-mix(in srgb, var(--accent-primary) 12%, transparent);
 }
 
 .canvas-quick-connect-menu .canvas-context-menu-item {
@@ -908,12 +908,12 @@
 }
 
 .canvas-quick-connect-menu .canvas-context-menu-item:hover {
-  background: rgba(99, 102, 241, 0.06);
+  background: color-mix(in srgb, var(--accent-primary) 6%, transparent);
 }
 
 [data-theme="dark"] .canvas-quick-connect-menu .canvas-context-menu-item:hover,
 .dark-theme .canvas-quick-connect-menu .canvas-context-menu-item:hover {
-  background: rgba(99, 102, 241, 0.1);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -927,7 +927,7 @@
 
 /* Visual highlight when a node is being dragged over a group */
 .react-flow__node-group.selected .group-node-frame {
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08) inset;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 8%, transparent) inset;
 }
 
 /* ══════════════════════════════════════════════════════════════════════

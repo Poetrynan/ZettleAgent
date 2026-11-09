@@ -331,7 +331,7 @@
 }
 
 .md-code-copy-btn:hover {
-  background: var(--bg-surface-hover, rgba(99, 102, 241, 0.1));
+  background: var(--bg-surface-hover, color-mix(in srgb, var(--accent-primary) 10%, transparent));
   color: var(--text-secondary);
 }
 

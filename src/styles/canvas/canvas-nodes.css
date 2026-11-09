@@ -358,7 +358,7 @@
 }
 
 .web-node-title-input:focus {
-  border-color: rgba(99, 102, 241, 0.35);
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
   box-shadow: none;
 }
 
@@ -381,8 +381,8 @@
 }
 
 .web-node-url-row:focus-within {
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 8%, transparent);
 }
 
 .web-node-url-row-icon {
@@ -527,7 +527,7 @@
 }
 
 .web-node-fallback-edit:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
 }
 
 

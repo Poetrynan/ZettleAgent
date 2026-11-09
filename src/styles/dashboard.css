@@ -1648,7 +1648,7 @@ hr.dash-divider + .dash-band {
 }
 
 .gap-insight-item.gap-type-orphan { border-left-color: var(--warning, #F59E0B); }
-.gap-insight-item.gap-type-island { border-left-color: var(--accent, #8B5CF6); }
+.gap-insight-item.gap-type-island { border-left-color: var(--sys-teal, #0D9488); }
 .gap-insight-item.gap-type-hub { border-left-color: var(--danger, #EF4444); }
 .gap-insight-item.gap-type-suggestion { border-left-color: var(--accent, #3B82F6); }
 
@@ -2003,7 +2003,7 @@ hr.dash-divider + .dash-band {
 
 .gap-terminal-line.log-thinking .terminal-text { color: #8b9bb4; }
 .gap-terminal-line.log-tool .terminal-text { color: #fbbf24; font-weight: 600; }
-.gap-terminal-line.log-result .terminal-text { color: #a78bfa; }
+.gap-terminal-line.log-result .terminal-text { color: var(--sys-teal); }
 .gap-terminal-line.log-done .terminal-text { color: #34d399; font-weight: 700; }
 
 /* Terminal flashing cursor */
@@ -2382,7 +2382,7 @@ hr.dash-divider + .dash-band {
 .props-add-frontmatter-btn:hover {
   border-color: var(--accent-primary);
   color: var(--accent-primary);
-  background: rgba(99, 102, 241, 0.05);
+  background: color-mix(in srgb, var(--accent-primary) 5%, transparent);
 }
 
 .props-editor-header {

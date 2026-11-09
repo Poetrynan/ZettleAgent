@@ -654,7 +654,7 @@ export function MarkdownViewer({ filePath, paneId = 'primary' }: MarkdownViewerP
           {/* Auto-save indicator */}
           <span style={{
             fontSize: '11px',
-            color: saveStatus === 'saved' ? 'var(--text-tertiary)' : saveStatus === 'saving' ? 'var(--accent-primary)' : '#f59e0b',
+            color: saveStatus === 'saved' ? 'var(--text-tertiary)' : saveStatus === 'saving' ? 'var(--accent-primary)' : 'var(--warning)',
             fontWeight: 500,
             transition: 'color 0.3s',
           }}>

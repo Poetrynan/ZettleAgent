@@ -47,10 +47,10 @@ const LABELS = {
 };
 
 const EVENT_COLORS: Record<string, { color: string; bg: string }> = {
-  created: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)' },
-  updated: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)' },
-  contradicted: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)' },
-  superseded: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)' },
+  created: { color: 'var(--success)', bg: 'color-mix(in srgb, var(--success) 12%, transparent)' },
+  updated: { color: 'var(--accent-primary)', bg: 'var(--accent-tint)' },
+  contradicted: { color: 'var(--danger)', bg: 'color-mix(in srgb, var(--danger) 12%, transparent)' },
+  superseded: { color: 'var(--warning)', bg: 'color-mix(in srgb, var(--warning) 12%, transparent)' },
 };
 
 function getEventStyle(type: string) {

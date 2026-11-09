@@ -1224,10 +1224,10 @@ export function SmartChat() {
               const total = e.total_steps ?? 1;
               const agentName = e.agent_name || 'Agent';
               const label = step === 0
-                ? (isZh ? `🧩 多 Agent 流水线启动（共 ${total} 步）` : `🧩 Multi-agent pipeline (${total} steps)`)
+                ? (isZh ? `多 Agent 流水线启动（共 ${total} 步）` : `Multi-agent pipeline (${total} steps)`)
                 : (isZh
-                  ? `🧩 步骤 ${step}/${total}：${agentName}`
-                  : `🧩 Step ${step}/${total}: ${agentName}`);
+                  ? `步骤 ${step}/${total}：${agentName}`
+                  : `Step ${step}/${total}: ${agentName}`);
               const entry: TimelineEntry = {
                 type: 'pipeline',
                 content: label,
@@ -1269,8 +1269,8 @@ export function SmartChat() {
             if (m.approvalId !== e.approval_id) return m;
             if (!m.isApprovalRequest) return m;   // 已被 onApprovalResolved 处理过,跳过
             const reasonText = e.reason === 'timeout'
-              ? (isZh ? '⏱️ 审批超时(60秒未操作)' : '⏱️ Approval timed out')
-              : (isZh ? '🚫 已拒绝该操作' : '🚫 Rejected');
+              ? (isZh ? '审批超时(60秒未操作)' : 'Approval timed out')
+              : (isZh ? '已拒绝该操作' : 'Rejected');
             return {
               ...m,
               isApprovalRequest: false,
@@ -1925,8 +1925,8 @@ export function SmartChat() {
                   isApprovalRequest: false,
                   // approved → 前端只显示"已批准";rejected → 显示拒绝原因(由后端 ToolEnd 触发后续)
                   content: approved
-                    ? (isZh ? '✅ 已批准该操作' : '✅ Approved')
-                    : (isZh ? '🚫 已拒绝该操作' : '🚫 Rejected'),
+                    ? (isZh ? '已批准该操作' : 'Approved')
+                    : (isZh ? '已拒绝该操作' : 'Rejected'),
                   isError: !approved,
                 };
               }));

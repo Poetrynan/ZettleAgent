@@ -919,7 +919,7 @@ button.ctx-menu-item {
     from var(--chat-ring-angle),
     transparent 0deg,
     color-mix(in srgb, var(--accent-primary) 85%, transparent) 40deg,
-    var(--sys-purple) 80deg,
+    var(--sys-teal) 80deg,
     transparent 130deg,
     transparent 360deg
   );

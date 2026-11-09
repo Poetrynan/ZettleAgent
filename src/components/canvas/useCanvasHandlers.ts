@@ -168,7 +168,7 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
           'add',
           relType,
         );
-        showToast(lang === 'zh' ? '✅ 已接受连接' : '✅ Connection accepted', 'success');
+        showToast(lang === 'zh' ? '已接受连接' : 'Connection accepted', 'success');
       }
       dismissSmartSuggestion(edgeId);
     },
@@ -179,7 +179,7 @@ export function useCanvasHandlers(params: CanvasHandlersParams) {
   const onRejectGhostEdge = useCallback(
     (edgeId: string) => {
       dismissSmartSuggestion(edgeId);
-      showToast(lang === 'zh' ? '❌ 已忽略建议' : '❌ Suggestion dismissed', 'info');
+      showToast(lang === 'zh' ? '已忽略建议' : 'Suggestion dismissed', 'info');
     },
     [dismissSmartSuggestion, showToast, lang],
   );

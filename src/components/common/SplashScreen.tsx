@@ -8,6 +8,11 @@ interface SplashScreenProps {
   isReady: boolean;
 }
 
+/**
+ * Startup screen. The app icon draws itself — one ink stroke through three
+ * linked notes, the middle one in vermilion — then the wordmark and tagline
+ * settle in underneath. Same artwork as logo/zettleagent-icon.svg.
+ */
 export const SplashScreen = memo(function SplashScreen({ isReady }: SplashScreenProps) {
   const [exiting, setExiting] = useState(false);
   const [unmounted, setUnmounted] = useState(false);
@@ -35,69 +40,52 @@ export const SplashScreen = memo(function SplashScreen({ isReady }: SplashScreen
       <div className="splash-grid-mesh" />
 
       <div className="splash-stack">
-        <div className="splash-hero">
-          <div className="splash-nodes-network">
-            <svg className="splash-network-svg" viewBox="0 0 800 600" fill="none" aria-hidden="true">
-              <defs>
-                <linearGradient id="splash-line-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#06B6D4" stopOpacity="0.52" />
-                  <stop offset="50%" stopColor="#3B82F6" stopOpacity="0.42" />
-                  <stop offset="100%" stopColor="#10B981" stopOpacity="0.52" />
-                </linearGradient>
-                {/* Cut Z strokes under the wordmark — white=visible, black=hidden */}
-                <mask id="splash-wordmark-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="600">
-                  <rect width="800" height="600" fill="white" />
-                  <rect x="158" y="252" width="484" height="62" rx="12" fill="black" />
-                </mask>
-              </defs>
+        <svg className="splash-icon" viewBox="100 100 824 824" aria-hidden="true">
+          <defs>
+            <linearGradient id="splash-paper" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#FAF8F3" />
+              <stop offset="1" stopColor="#EFEBE3" />
+            </linearGradient>
+          </defs>
+          <rect className="splash-icon-tile" x="100" y="100" width="824" height="824" rx="185" fill="url(#splash-paper)" />
+          <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="4" />
+          <path
+            className="splash-icon-stroke"
+            pathLength={1}
+            d="M318 330 H706 L318 694 H706"
+            fill="none"
+            stroke="#1C1B19"
+            strokeWidth="66"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle className="splash-icon-node" style={{ '--node-delay': '0.3s' } as React.CSSProperties} cx="318" cy="330" r="62" fill="#1C1B19" />
+          <circle className="splash-icon-node" style={{ '--node-delay': '1.05s' } as React.CSSProperties} cx="706" cy="694" r="62" fill="#1C1B19" />
+          <circle className="splash-icon-node is-mark" style={{ '--node-delay': '1.3s' } as React.CSSProperties} cx="512" cy="512" r="62" fill="#C8432B" />
+        </svg>
 
-              <path
-                className="splash-network-path-track"
-                pathLength={1}
-                mask="url(#splash-wordmark-cut)"
-                d="M 200 155 L 600 155 L 200 445 L 600 445"
-                stroke="url(#splash-line-grad)"
-                strokeWidth="4"
-              />
-              <path
-                className="splash-network-path"
-                pathLength={1}
-                mask="url(#splash-wordmark-cut)"
-                d="M 200 155 L 600 155 L 200 445 L 600 445"
-                stroke="url(#splash-line-grad)"
-                strokeWidth="2.25"
-              />
+        <div className="splash-title logo-wordmark">
+          <span className="logo-zettel">Zettel</span>
+          <span className="logo-lambda-wrap">
+            <span className="logo-agent-lambda">Λ</span>
+          </span>
+          <span className="logo-agent-rest">gent</span>
+        </div>
 
-              <circle cx="200" cy="155" r="7" fill="#10B981" className="splash-pulse-dot splash-dot-in" style={{ '--dot-delay': '0.5s' } as React.CSSProperties} />
-              <circle cx="600" cy="155" r="7" fill="#06B6D4" className="splash-pulse-dot splash-dot-in" style={{ '--dot-delay': '0.65s' } as React.CSSProperties} />
-              <circle cx="200" cy="445" r="7" fill="#06B6D4" className="splash-pulse-dot splash-dot-in" style={{ '--dot-delay': '0.85s' } as React.CSSProperties} />
-              <circle cx="600" cy="445" r="7" fill="#10B981" className="splash-pulse-dot splash-dot-in" style={{ '--dot-delay': '1.0s' } as React.CSSProperties} />
-            </svg>
-          </div>
-
-          <div className="splash-title logo-wordmark">
-            <span className="logo-zettel">Zettel</span>
-            <span className="logo-lambda-wrap">
-              <span className="logo-agent-lambda">Λ</span>
-            </span>
-            <span className="logo-agent-rest">gent</span>
-          </div>
-
-          <div className="splash-tagline-row">
-            <span className="splash-tagline-rule splash-tagline-rule--left" aria-hidden="true" />
-            <p className="splash-tagline" aria-label={TAGLINE}>
-              {Array.from(TAGLINE).map((char, i) => (
-                <span
-                  key={`${i}-${char}`}
-                  className="splash-tagline-char"
-                  style={{ '--char-i': i } as React.CSSProperties}
-                >
-                  {char === ' ' ? '\u00a0' : char}
-                </span>
-              ))}
-            </p>
-            <span className="splash-tagline-rule splash-tagline-rule--right" aria-hidden="true" />
-          </div>
+        <div className="splash-tagline-row">
+          <span className="splash-tagline-rule splash-tagline-rule--left" aria-hidden="true" />
+          <p className="splash-tagline" aria-label={TAGLINE}>
+            {Array.from(TAGLINE).map((char, i) => (
+              <span
+                key={`${i}-${char}`}
+                className="splash-tagline-char"
+                style={{ '--char-i': i } as React.CSSProperties}
+              >
+                {char === ' ' ? ' ' : char}
+              </span>
+            ))}
+          </p>
+          <span className="splash-tagline-rule splash-tagline-rule--right" aria-hidden="true" />
         </div>
       </div>
     </div>

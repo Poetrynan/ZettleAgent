@@ -1314,8 +1314,8 @@
 .update-checker-banner {
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  border: 1px solid var(--accent-border, rgba(99, 102, 241, 0.35));
-  background: var(--accent-bg, rgba(99, 102, 241, 0.08));
+  border: 1px solid var(--accent-border, color-mix(in srgb, var(--accent-primary) 35%, transparent));
+  background: var(--accent-bg, color-mix(in srgb, var(--accent-primary) 8%, transparent));
 }
 
 .update-checker-banner-title {

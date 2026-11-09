@@ -210,7 +210,8 @@
   --vermilion-strong: var(--accent-primary-hover);
   --vermilion-tint: var(--accent-tint);
   --vermilion-line: var(--accent-border);
-  --brand-red: #FF3B30;
+  /* Vermilion of the app icon's middle node (logo/zettleagent-icon.svg) */
+  --brand-red: #C8432B;
   --cobalt: var(--accent-primary);
   --cobalt-tint: var(--accent-tint);
   --cobalt-line: rgba(0, 122, 255, 0.3);
@@ -367,7 +368,7 @@
 
   --cobalt-line: rgba(10, 132, 255, 0.4);
   --accent-border: rgba(10, 132, 255, 0.4);
-  --brand-red: #FF453A;
+  --brand-red: #F0705A;
 
   --stamp-pending-fg: #FFB340;
   --stamp-pending-bg: rgba(255, 159, 10, 0.16);

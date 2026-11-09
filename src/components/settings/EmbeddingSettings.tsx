@@ -345,7 +345,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
               gap: 'var(--space-2)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-md)', background: 'rgba(34,197,94,0.12)', color: 'var(--success, #22c55e)', flexShrink: 0 }}><IconBrain size={16} /></span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-md)', background: 'color-mix(in srgb, var(--success) 12%, transparent)', color: 'var(--success)', flexShrink: 0 }}><IconBrain size={16} /></span>
                 <div>
                   <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {LOCAL_EMBED_MODEL_ID} (q8)
@@ -374,8 +374,8 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
           {mode === 'custom' && (
             <div style={{
               padding: 'var(--space-4)',
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(168,85,247,0.06))',
-              border: '1px solid rgba(99,102,241,0.15)',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-md)',
               display: 'flex',
               flexDirection: 'column',
@@ -386,7 +386,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                 <span style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 28, height: 28, borderRadius: 'var(--radius-md)',
-                  background: 'rgba(99,102,241,0.12)', color: '#6366f1', flexShrink: 0,
+                  background: 'var(--accent-tint)', color: 'var(--accent-primary)', flexShrink: 0,
                 }}><IconPlug size={14} /></span>
                 <div>
                   <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>

@@ -391,7 +391,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                                 disabled={creatingTitle === item.target_title || fixingId !== null}
                                 onClick={() => handleCreateNote(item.target_title)}
                                 style={{
-                                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                                  background: 'var(--success)',
                                   color: '#fff',
                                   border: 'none',
                                   fontWeight: 600,
@@ -749,8 +749,8 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                                     {item.title_a}
                                   </button>
                                   <span style={{
-                                    fontSize: 'var(--text-xs)', fontWeight: 700, color: '#EF4444',
-                                    background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: '10px'
+                                    fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--danger)',
+                                    background: 'color-mix(in srgb, var(--danger) 12%, transparent)', padding: '2px 8px', borderRadius: '10px'
                                   }}>
                                     {Math.round(item.similarity * 100)}%
                                   </span>
@@ -770,7 +770,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                         {hiddenCount > 0 && (
                           <div>
                             <h4 style={{ margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                              <span style={{ color: 'var(--sys-purple)', display: 'inline-flex' }} aria-hidden="true"><IconLink size={13} /></span>
+                              <span style={{ color: 'var(--sys-teal)', display: 'inline-flex' }} aria-hidden="true"><IconLink size={13} /></span>
                               {navigator.language.startsWith('zh') ? `隐藏关联 (${hiddenCount})` : `Hidden Connections (${hiddenCount})`}
                             </h4>
                             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '0 0 var(--space-3) 0' }}>
@@ -783,8 +783,8 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                                 <div key={i} style={{
                                   display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
                                   padding: 'var(--space-3) var(--space-4)',
-                                  background: 'rgba(139, 92, 246, 0.04)',
-                                  border: '1px solid rgba(139, 92, 246, 0.12)',
+                                  background: 'color-mix(in srgb, var(--sys-teal) 5%, transparent)',
+                                  border: '1px solid color-mix(in srgb, var(--sys-teal) 18%, transparent)',
                                   borderRadius: 'var(--radius-md)',
                                   flexWrap: 'wrap'
                                 }}>
@@ -795,8 +795,8 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
                                     {item.title_a}
                                   </button>
                                   <span style={{
-                                    fontSize: 'var(--text-xs)', fontWeight: 700, color: '#8B5CF6',
-                                    background: 'rgba(139, 92, 246, 0.1)', padding: '2px 8px', borderRadius: '10px'
+                                    fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--sys-teal)',
+                                    background: 'color-mix(in srgb, var(--sys-teal) 12%, transparent)', padding: '2px 8px', borderRadius: '10px'
                                   }}>
                                     {Math.round(item.similarity * 100)}%
                                   </span>

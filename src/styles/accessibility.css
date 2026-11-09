@@ -74,8 +74,8 @@
 /* ── Dark mode ── */
 [data-theme="dark"] .editor-suggestion-scanning,
 .dark-theme .editor-suggestion-scanning {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.25);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-primary) 25%, transparent);
   color: rgba(129, 140, 248, 0.9);
 }
 
@@ -129,7 +129,7 @@
   text-decoration-color: #f97316;
 }
 .ProseMirror .suggestion-wave-reconciliation_conflict {
-  text-decoration-color: #8b5cf6;
+  text-decoration-color: var(--accent-primary);
 }
 
 /* Widget badge: small clickable ⚠ after the conflict text */
@@ -172,9 +172,9 @@
   color: #c2410c;
 }
 .ProseMirror .suggestion-wave-badge-reconciliation_conflict {
-  border-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.12);
-  color: #7c3aed;
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--accent-primary);
 }
 
 /* ═══ Anchored Suggestion Card (positioned via ProseMirror coords) ═══ */

@@ -547,7 +547,7 @@ function processText(
           onClick={() => onWikilinkClick(target.replace(/\.md$/i, ''))}
           style={{ borderBottom: '2px dashed var(--accent)' }}
         >
-          📎 {displayName}
+          <span style={{ display: 'inline-flex', verticalAlign: '-2px', marginRight: 3, opacity: 0.7 }}><IconFile size={13} /></span>{displayName}
         </span>
       );
     }

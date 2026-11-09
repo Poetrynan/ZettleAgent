@@ -46,7 +46,7 @@ export function CanvasModals({
               <div className="canvas-template-grid">
                 <button className="canvas-template-card" onClick={() => applyTemplate(null)} title={t('canvas.templateBlank')}>
                   <div className="canvas-template-thumb" dangerouslySetInnerHTML={{ __html: BLANK_THUMBNAIL }} />
-                  <div className="canvas-template-title"><span>⬜</span>{t('canvas.templateBlank')}</div>
+                  <div className="canvas-template-title">{t('canvas.templateBlank')}</div>
                   <div className="canvas-template-desc">{t('canvas.templateBlankDesc')}</div>
                 </button>
                 {CANVAS_TEMPLATES.map(tpl => {
@@ -54,7 +54,7 @@ export function CanvasModals({
                   return (
                     <button key={tpl.id} className="canvas-template-card" onClick={() => applyTemplate(tpl.id)} title={t(`canvas.template${capName}` as any)}>
                       <div className="canvas-template-thumb" dangerouslySetInnerHTML={{ __html: tpl.thumbnail }} />
-                      <div className="canvas-template-title"><span>{tpl.icon}</span>{t(`canvas.template${capName}` as any)}</div>
+                      <div className="canvas-template-title">{t(`canvas.template${capName}` as any)}</div>
                       <div className="canvas-template-desc">{t(`canvas.template${capName}Desc` as any)}</div>
                     </button>
                   );

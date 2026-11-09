@@ -48,29 +48,30 @@ function getTypeIcon(type: string, size = 14) {
 }
 
 const TYPE_COLORS: Record<string, { border: string; bg: string; text: string; wave: string }> = {
+  // Theme tokens, so the text keeps AA contrast in light and dark.
   temporal_conflict: {
-    border: 'rgba(234, 179, 8, 0.5)',
-    bg: 'rgba(234, 179, 8, 0.06)',
-    text: '#b45309',
-    wave: '#eab308',
+    border: 'color-mix(in srgb, var(--warning) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--warning) 7%, transparent)',
+    text: 'var(--warning)',
+    wave: 'var(--warning)',
   },
   factual_conflict: {
-    border: 'rgba(239, 68, 68, 0.5)',
-    bg: 'rgba(239, 68, 68, 0.06)',
-    text: '#dc2626',
-    wave: '#ef4444',
+    border: 'color-mix(in srgb, var(--danger) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--danger) 7%, transparent)',
+    text: 'var(--danger)',
+    wave: 'var(--danger)',
   },
   outdated_claim: {
-    border: 'rgba(249, 115, 22, 0.4)',
-    bg: 'rgba(249, 115, 22, 0.06)',
-    text: '#c2410c',
-    wave: '#f97316',
+    border: 'color-mix(in srgb, var(--sys-orange) 45%, transparent)',
+    bg: 'color-mix(in srgb, var(--sys-orange) 7%, transparent)',
+    text: 'color-mix(in srgb, var(--sys-orange) 75%, var(--text-primary))',
+    wave: 'var(--sys-orange)',
   },
   reconciliation_conflict: {
-    border: 'rgba(139, 92, 246, 0.5)',
-    bg: 'rgba(139, 92, 246, 0.06)',
-    text: '#7c3aed',
-    wave: '#8b5cf6',
+    border: 'color-mix(in srgb, var(--accent-primary) 50%, transparent)',
+    bg: 'var(--accent-tint)',
+    text: 'var(--accent-primary)',
+    wave: 'var(--accent-primary)',
   },
 };
 
@@ -175,7 +176,7 @@ export function EditorSuggestionOverlay({
             <>
               <div className="editor-suggestion-quote">
                 <div className="editor-suggestion-quote-label">
-                  {isZh ? '📝 你的版本' : '📝 Your Version'}
+                  {isZh ? '你的版本' : 'Your Version'}
                 </div>
                 <div className="editor-suggestion-quote-text">
                   {(sug.userVersion || sug.triggerText).slice(0, 300)}
@@ -185,7 +186,7 @@ export function EditorSuggestionOverlay({
 
               <div className="editor-suggestion-quote conflicting">
                 <div className="editor-suggestion-quote-label">
-                  {isZh ? '🤖 AI 的版本' : '🤖 AI Version'}
+                  {isZh ? 'AI 的版本' : 'AI Version'}
                 </div>
                 <div className="editor-suggestion-quote-text">
                   {(sug.aiVersion || sug.conflictingClaim).slice(0, 300)}
@@ -244,7 +245,7 @@ export function EditorSuggestionOverlay({
               {hasFix && (
                 <div className="editor-suggestion-quote" style={{ borderLeftColor: colors.wave, background: 'rgba(0,0,0,0.02)' }}>
                   <div className="editor-suggestion-quote-label" style={{ color: colors.text }}>
-                    {isZh ? '✏️ 建议修正' : '✏️ Suggested Fix'}
+                    {isZh ? '建议修正' : 'Suggested Fix'}
                   </div>
                   <div className="editor-suggestion-quote-text">
                     {sug.suggestedFix!.slice(0, 300)}{(sug.suggestedFix!.length > 300) ? '...' : ''}

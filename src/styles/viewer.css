@@ -379,7 +379,7 @@
 }
 
 .org-guide-type-card--violet {
-  border-left: 3px solid #8b5cf6;
+  border-left: 3px solid var(--accent-primary);
 }
 
 .org-guide-type-label {

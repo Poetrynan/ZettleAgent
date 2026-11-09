@@ -2678,7 +2678,7 @@
 }
 
 .trace-node-thought {
-  color: #8b5cf6;
+  color: var(--accent-primary);
   background: var(--bg-elevated, #FFFFFF);
   border-color: var(--border);
 }
@@ -2837,7 +2837,7 @@
   border-radius: var(--radius-sm, 2px);
   font-size: 10px;
   font-weight: 700;
-  color: #8b5cf6;
+  color: var(--accent-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   flex-shrink: 0;
@@ -2910,7 +2910,7 @@
   border-radius: var(--radius-sm, 2px);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-left: 3px solid #8b5cf6;
+  border-left: 3px solid var(--accent-primary);
   margin: 3px 0;
   transition: border-color var(--duration-fast) var(--ease-out),
               background-color var(--duration-fast) var(--ease-out);
@@ -2921,8 +2921,8 @@
 }
 
 .trace-thought-full[role='button']:hover {
-  border-color: color-mix(in srgb, #8b5cf6 34%, var(--border));
-  background: color-mix(in srgb, #8b5cf6 5%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent-primary) 5%, var(--bg-secondary));
 }
 
 .trace-thought-full-header {
