@@ -1,12 +1,22 @@
 /**
- * ForceWorker: WebWorker 中运行 d3-force-3d 物理仿真。
- * 主线程负责渲染，Worker 负责 Barnes-Hut n-body 力三维计算，
- * 通过 Transferable Float32Array 高效回传三维位置数据，避免主线程阻塞。
+ * ForceWorker: d3-force-3d simulation off the main thread.
+ *
+ * Two driving modes:
+ *  - 'free'    (default, used by the 3D view): d3's own timer ticks the
+ *              simulation and positions are posted as they change.
+ *  - 'stepped' (used by the 2D Pixi view): the main thread sends one `step`
+ *              per display frame and gets exactly one tick back, so physics
+ *              and rendering never drift apart (no repeated / skipped frames).
+ *              The step also carries the dragged node's position, and the
+ *              reply says when the layout has settled so the main thread can
+ *              stop asking — a resting graph costs nothing.
+ *
+ * Physics follows the Obsidian / d3 feel: the graph cools down and comes to
+ * rest; dragging warms it (alphaTarget 0.3) so neighbours follow on springs,
+ * and releasing lets it cool again.
  */
 
-import { forceSimulation, forceLink, forceManyBody, forceCenter } from 'd3-force-3d';
-
-let ctx: any = null;
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force-3d';
 
 interface WorkerParams {
   centerStrength: number;
@@ -15,134 +25,95 @@ interface WorkerParams {
   linkDistance: number;
 }
 
-const ALPHA_DECAY = 0.015;
-const VELOCITY_DECAY = 0.2;   // 对齐 vis-network damping=0.2
-let floatingAlpha = 0;
-const FLOATING_PHYSICS_THRESHOLD = 500;  // ≤500 节点启用物理漂浮
+const ALPHA_DECAY = 0.0228;   // d3 default: ~300 ticks from hot to rest
+const VELOCITY_DECAY = 0.4;   // d3 default: damped, no endless wobble
+const DRAG_ALPHA_TARGET = 0.3;
 const CHARGE_DISTANCE_MAX = 600;
+const CHARGE_THETA = 0.9;
+/** The UI's default link slider value; it maps to d3's default link strength. */
+const LINK_STRENGTH_BASELINE = 0.2;
+/** Cold start: pre-run the layout before the first frame for at most this long. */
+const WARMUP_BUDGET_MS = 160;
+const WARMUP_ALPHA = 0.12;
 
-// 节点 data (只在 worker 内部)
 let nodes: any[] = [];
 let nodeIdx: Map<string, number> = new Map();
-// 回传位置缓冲 (3D: [x0, y0, z0, x1, y1, z1, ...])
-let posBuf: Float32Array | null = null;
-// links 原始 + d3-force 期望格式
 let links: any[] = [];
+let degree: Map<string, number> = new Map();
+let dims = 3;
+let stepped = false;
+let sim: any = null;
 
-// bbox boundary
-let bbox = { minX: -Infinity, maxX: Infinity, minY: -Infinity, maxY: Infinity };
-let bboxEnabled = true;
-
-// 力参数
 let params: WorkerParams = {
-  centerStrength: 0.03,
+  centerStrength: 0.05,
   chargeStrength: -500,
-  linkStrength: 0.06,
+  linkStrength: LINK_STRENGTH_BASELINE,
   linkDistance: 200,
 };
 
-// ── 温启动继承位置与派生出生点仿真初始化 ──
-function initSim(nds: any[], lks: any[], fp: WorkerParams, warm: boolean = false) {
+const post = (msg: any, transfer?: Transferable[]) =>
+  (self as unknown as { postMessage: (m: any, t?: Transferable[]) => void }).postMessage(msg, transfer);
+
+// ── Init: keep positions of nodes we already know, spawn new ones next to a neighbour ──
+function initSim(nds: any[], lks: any[], fp: WorkerParams, warm: boolean) {
   params = fp;
 
-  // 1. 保存当前现有的节点位置和速度缓存
   const history = new Map<string, { x: number; y: number; z: number; vx: number; vy: number; vz: number }>();
-  nodes.forEach(n => {
+  for (const n of nodes) {
     if (n.x !== undefined && n.y !== undefined) {
       history.set(n.id, { x: n.x, y: n.y, z: n.z ?? 0, vx: n.vx ?? 0, vy: n.vy ?? 0, vz: n.vz ?? 0 });
     }
-  });
+  }
 
-  // 2. 映射当前连线，帮助新涌现节点从邻居锚点平滑长出
-  const linkRelations = new Map<string, string[]>();
-  lks.forEach(l => {
+  const neighbours = new Map<string, string[]>();
+  degree = new Map();
+  for (const l of lks) {
     const s = typeof l.source === 'string' ? l.source : l.source.id;
     const t = typeof l.target === 'string' ? l.target : l.target.id;
-    if (!linkRelations.has(s)) linkRelations.set(s, []);
-    if (!linkRelations.has(t)) linkRelations.set(t, []);
-    linkRelations.get(s)?.push(t);
-    linkRelations.get(t)?.push(s);
-  });
+    if (!neighbours.has(s)) neighbours.set(s, []);
+    if (!neighbours.has(t)) neighbours.set(t, []);
+    neighbours.get(s)!.push(t);
+    neighbours.get(t)!.push(s);
+    degree.set(s, (degree.get(s) ?? 0) + 1);
+    degree.set(t, (degree.get(t) ?? 0) + 1);
+  }
+
+  // Centroid of the previous layout: where unconnected newcomers appear.
+  let cx = 0, cy = 0, cz = 0;
+  if (history.size > 0) {
+    history.forEach(p => { cx += p.x; cy += p.y; cz += p.z; });
+    cx /= history.size; cy /= history.size; cz /= history.size;
+  }
 
   nodeIdx.clear();
   nodes = nds.map((n, i) => {
-    const idx = i;
-    nodeIdx.set(n.id, idx);
-    
-    // 优先：如果节点在历史中已计算过位置，直接继承
+    nodeIdx.set(n.id, i);
+    const base = { id: n.id, index: i, r: n.r ?? 8, fx: n.fx, fy: n.fy, fz: dims === 3 ? n.fz : undefined };
     const hist = history.get(n.id);
     if (hist) {
-      return {
-        id: n.id,
-        index: idx,
-        x: hist.x,
-        y: hist.y,
-        z: hist.z,
-        vx: hist.vx * 0.6, // 速度打折继承，确保网络平稳过度
-        vy: hist.vy * 0.6,
-        vz: hist.vz * 0.6,
-        fx: n.fx,
-        fy: n.fy,
-        fz: n.fz,
-        is_hub: n.is_hub,
-        is_orphan: n.is_orphan,
-      };
+      return { ...base, x: hist.x, y: hist.y, z: hist.z, vx: hist.vx * 0.5, vy: hist.vy * 0.5, vz: hist.vz * 0.5 };
     }
-
-    // 次选：全新节点，寻找相连的已有节点作为锚点出生
-    let spawnX = 0;
-    let spawnY = 0;
-    let spawnZ = 0;
-    let foundAnchor = false;
-
-    const neighbors = linkRelations.get(n.id) || [];
-    for (const nbId of neighbors) {
-      const nbHist = history.get(nbId);
-      if (nbHist) {
-        spawnX = nbHist.x;
-        spawnY = nbHist.y;
-        spawnZ = nbHist.z;
-        foundAnchor = true;
-        break;
-      }
+    // Use the caller's position (e.g. restored layout) when given.
+    if (typeof n.x === 'number' && typeof n.y === 'number' && isFinite(n.x) && isFinite(n.y)) {
+      return { ...base, x: n.x, y: n.y, z: 0, vx: 0, vy: 0, vz: 0 };
     }
-
-    if (!foundAnchor) {
-      // 若没有邻居，采用当前系统物理中心作为出生点
-      let sumX = 0, sumY = 0, sumZ = 0, count = 0;
-      history.forEach(pos => {
-        sumX += pos.x;
-        sumY += pos.y;
-        sumZ += pos.z;
-        count++;
-      });
-      if (count > 0) {
-        spawnX = sumX / count;
-        spawnY = sumY / count;
-        spawnZ = sumZ / count;
-      } else {
-        // 全新冷启动随机小球
-        spawnX = Math.random() * 80 - 40;
-        spawnY = Math.random() * 80 - 40;
-        spawnZ = Math.random() * 80 - 40;
-      }
+    let sx = cx, sy = cy, sz = cz;
+    let anchored = false;
+    for (const nb of neighbours.get(n.id) ?? []) {
+      const h = history.get(nb);
+      if (h) { sx = h.x; sy = h.y; sz = h.z; anchored = true; break; }
     }
-
-    // 附带微小偏差，避免两点重合除以零产生无穷大斥力“炸飞”
+    if (!anchored && history.size === 0) {
+      // Cold start: d3's phyllotaxis-like spread is decided by the simulation itself.
+      return { ...base, vx: 0, vy: 0, vz: 0 };
+    }
+    // Small jitter so two points never coincide (avoids infinite repulsion).
     return {
-      id: n.id,
-      index: idx,
-      x: spawnX + (Math.random() * 8 - 4),
-      y: spawnY + (Math.random() * 8 - 4),
-      z: spawnZ + (Math.random() * 8 - 4),
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      fx: n.fx,
-      fy: n.fy,
-      fz: n.fz,
-      is_hub: n.is_hub,
-      is_orphan: n.is_orphan,
+      ...base,
+      x: sx + (Math.random() * 8 - 4),
+      y: sy + (Math.random() * 8 - 4),
+      z: dims === 3 ? sz + (Math.random() * 8 - 4) : 0,
+      vx: 0, vy: 0, vz: 0,
     };
   });
 
@@ -154,77 +125,108 @@ function initSim(nds: any[], lks: any[], fp: WorkerParams, warm: boolean = false
     label: l.label,
   }));
 
-  posBuf = new Float32Array(nodes.length * 3);
   rebuildSim(warm);
-  (ctx as any).postMessage({ type: 'ready' });
 }
 
-let sim: any = null;
-function rebuildSim(warm: boolean = false) {
+/** d3's default link strength (1 / min degree) scaled by the UI slider, so hubs are not dragged into a knot. */
+function linkStrength(l: any): number {
+  const s = typeof l.source === 'object' ? l.source.id : l.source;
+  const t = typeof l.target === 'object' ? l.target.id : l.target;
+  const k = params.linkStrength / LINK_STRENGTH_BASELINE;
+  const base = k / Math.max(1, Math.min(degree.get(s) ?? 1, degree.get(t) ?? 1));
+  return l.edge_type === 'semantic' ? base * 0.05 : base;
+}
+
+function linkDistance(l: any): number {
+  return l.edge_type === 'semantic' ? params.linkDistance * 1.5 : params.linkDistance;
+}
+
+function rebuildSim(warm: boolean) {
   if (sim) sim.stop();
-  sim = forceSimulation(nodes, 3)
-    .force('charge', forceManyBody().strength(params.chargeStrength).distanceMax(CHARGE_DISTANCE_MAX).theta(1.2))
-    .force('link', forceLink(links).id((d: any) => d.id)
-      .distance((l: any) => (l.edge_type === 'semantic' ? params.linkDistance * 1.5 : params.linkDistance))
-      .strength((l: any) => (l.edge_type === 'semantic' ? params.linkStrength * 0.05 : params.linkStrength)))
+  sim = forceSimulation(nodes, dims)
+    .force('charge', forceManyBody().strength(params.chargeStrength).distanceMax(CHARGE_DISTANCE_MAX).theta(CHARGE_THETA))
+    .force('link', forceLink(links).id((d: any) => d.id).distance(linkDistance).strength(linkStrength))
     .force('center', forceCenter(0, 0, 0).strength(params.centerStrength))
+    .force('collide', forceCollide((d: any) => (d.r ?? 8) + 4).strength(0.7).iterations(1))
     .alphaDecay(ALPHA_DECAY)
     .velocityDecay(VELOCITY_DECAY)
-    // 降低温启动热度（由 0.3 降到 0.15），配合历史继承，完全消除滑块拖拽时的夸张波动
     .alpha(warm ? 0.15 : 1)
-    .alphaTarget(floatingAlpha);
+    .alphaTarget(0);
 
-  // 自定义 3D bbox 力
-  sim.force('bbox', () => {
-    if (!bboxEnabled) return;
-    const margin = 80;
-    const strength = 0.02;
-    for (const n of nodes) {
-      if (n.fx !== undefined || n.fy !== undefined || n.fz !== undefined) continue;
-      if (!isFinite(bbox.minX)) continue;
-      
-      // X 轴边界
-      if (n.x < bbox.minX + margin) n.vx += (bbox.minX + margin - n.x) * strength;
-      else if (n.x > bbox.maxX - margin) n.vx += (bbox.maxX - margin - n.x) * strength;
-      
-      // Y 轴边界
-      if (n.y < bbox.minY + margin) n.vy += (bbox.minY + margin - n.y) * strength;
-      else if (n.y > bbox.maxY - margin) n.vy += (bbox.maxY - margin - n.y) * strength;
-      
-      // Z 轴边界
-      const minZ = -400, maxZ = 400;
-      if (n.z < minZ + margin) n.vz += (minZ + margin - n.z) * strength;
-      else if (n.z > maxZ - margin) n.vz += (maxZ - margin - n.z) * strength;
+  if (stepped) {
+    sim.stop(); // the main thread drives ticks
+    if (!warm) {
+      // Settle the rough shape before the first frame so the graph does not "explode" on open.
+      const t0 = performance.now();
+      while (sim.alpha() > WARMUP_ALPHA && performance.now() - t0 < WARMUP_BUDGET_MS) sim.tick();
     }
-  });
-
-  sim.on('tick', sendPositions);
+    sendPositions(null, false);
+  } else {
+    sim.on('tick', () => sendPositions(null, false));
+  }
 }
 
-let lastSendTs = 0;
-const SEND_INTERVAL_MS = 16;   // ≈60fps
+function isSettled(): boolean {
+  return !sim || (sim.alphaTarget() === 0 && sim.alpha() < sim.alphaMin());
+}
 
-function sendPositions() {
-  const now = Date.now();
-  if (now - lastSendTs < SEND_INTERVAL_MS) return;
-  lastSendTs = now;
-  if (!posBuf || posBuf.length !== nodes.length * 3) {
-    posBuf = new Float32Array(nodes.length * 3);
+let lastFreeSend = 0;
+let freeBuf: Float32Array | null = null;
+
+/** Positions as [x0, y0, (z0,) x1, y1, ...]. Stepped mode reuses the main thread's buffer and transfers it back. */
+function sendPositions(reuse: Float32Array | null, settled: boolean, gen?: number) {
+  const len = nodes.length * dims;
+  if (stepped) {
+    const buf = reuse && reuse.length === len ? reuse : new Float32Array(len);
+    fill(buf);
+    post({ type: 'positions', buffer: buf, settled, gen }, [buf.buffer]);
+    return;
   }
+  const now = performance.now();
+  if (now - lastFreeSend < 16) return;
+  lastFreeSend = now;
+  if (!freeBuf || freeBuf.length !== len) freeBuf = new Float32Array(len);
+  fill(freeBuf);
+  post({ type: 'positions', buffer: freeBuf });
+}
+
+function fill(buf: Float32Array) {
   for (let i = 0; i < nodes.length; i++) {
-    posBuf[i * 3] = nodes[i].x;
-    posBuf[i * 3 + 1] = nodes[i].y;
-    posBuf[i * 3 + 2] = nodes[i].z ?? 0;
+    const n = nodes[i];
+    buf[i * dims] = n.x;
+    buf[i * dims + 1] = n.y;
+    if (dims === 3) buf[i * dims + 2] = n.z ?? 0;
   }
-  (ctx as any).postMessage({ type: 'positions', buffer: posBuf });
+}
+
+/** Wake the simulation: free mode restarts d3's timer; stepped mode waits for the next `step`. */
+function wake(alpha?: number) {
+  if (!sim) return;
+  if (alpha !== undefined) sim.alpha(Math.max(sim.alpha(), alpha));
+  if (!stepped) sim.restart();
 }
 
 self.onmessage = (e: MessageEvent) => {
-  ctx = self;
   const d = e.data;
   switch (d.type) {
     case 'init': {
+      dims = d.dims === 2 ? 2 : 3;
+      stepped = d.stepped === true;
       initSim(d.nodes, d.links, d.params, d.warm ?? false);
+      break;
+    }
+    case 'step': {
+      // One tick per display frame. The dragged node follows the pointer exactly.
+      if (d.drag) {
+        const i = nodeIdx.get(d.drag.id);
+        if (i !== undefined) {
+          const n = nodes[i];
+          n.fx = n.x = d.drag.x;
+          n.fy = n.y = d.drag.y;
+        }
+      }
+      if (sim && !isSettled()) sim.tick();
+      sendPositions(d.buffer ?? null, isSettled(), d.gen);
       break;
     }
     case 'params': {
@@ -232,69 +234,51 @@ self.onmessage = (e: MessageEvent) => {
       if (sim) {
         sim.force('charge')?.strength(params.chargeStrength);
         sim.force('center')?.strength(params.centerStrength);
-        const lf = sim.force('link');
-        if (lf) {
-          lf.distance((l: any) => (l.edge_type === 'semantic' ? params.linkDistance * 1.5 : params.linkDistance));
-          lf.strength((l: any) => (l.edge_type === 'semantic' ? params.linkStrength * 0.05 : params.linkStrength));
-        }
-        sim.alpha(0.15).restart();
+        sim.force('link')?.distance(linkDistance).strength(linkStrength);
+        wake(0.3);
       }
       break;
     }
     case 'pin': {
       const i = nodeIdx.get(d.id);
-      if (i !== undefined) {
+      if (i !== undefined && sim) {
         nodes[i].fx = d.x;
         nodes[i].fy = d.y;
-        nodes[i].fz = d.z ?? 0;
-        if (sim) sim.alphaTarget(0.3).alpha(0.15).restart();
+        if (dims === 3) nodes[i].fz = d.z ?? 0;
+        sim.alphaTarget(DRAG_ALPHA_TARGET);
+        wake();
       }
       break;
     }
     case 'unpin': {
       const i = nodeIdx.get(d.id);
-      if (i !== undefined) {
-        nodes[i].fx = undefined;
-        nodes[i].fy = undefined;
-        nodes[i].fz = undefined;
-        nodes[i].vx = 0;
-        nodes[i].vy = 0;
-        nodes[i].vz = 0;
-        if (sim) {
-          sim.alphaTarget(floatingAlpha);
-          sim.alpha(0.15).restart();
-        }
+      if (i !== undefined && sim) {
+        const n = nodes[i];
+        n.fx = n.fy = n.fz = undefined;
+        n.vx = n.vy = n.vz = 0;
+        sim.alphaTarget(0);
+        wake();
       }
+      break;
+    }
+    case 'release': {
+      // End of a drag on a node that should stay pinned (double-click pinned): just cool down.
+      if (sim) { sim.alphaTarget(0); wake(); }
       break;
     }
     case 'reheat': {
-      // 如果是微调，降低 reheat 热度
-      if (sim) sim.alpha(d.alpha ?? 0.15).restart();
-      break;
-    }
-    case 'bounds': {
-      bbox = { minX: d.minX, maxX: d.maxX, minY: d.minY, maxY: d.maxY };
-      break;
-    }
-    case 'bboxEnabled': {
-      bboxEnabled = d.enabled;
+      wake(d.alpha ?? 0.15);
       break;
     }
     case 'dragMove': {
+      // Free mode (3D) drag; stepped mode sends the drag inside `step`.
       const i = nodeIdx.get(d.id);
       if (i !== undefined && nodes[i].fx !== undefined) {
-        nodes[i].fx = d.x;
-        nodes[i].fy = d.y;
-        if (d.z !== undefined) nodes[i].fz = d.z;
-        nodes[i].x = d.x;
-        nodes[i].y = d.y;
-        if (d.z !== undefined) nodes[i].z = d.z;
+        const n = nodes[i];
+        n.fx = n.x = d.x;
+        n.fy = n.y = d.y;
+        if (d.z !== undefined && dims === 3) n.fz = n.z = d.z;
       }
-      break;
-    }
-    case 'floatingMode': {
-      floatingAlpha = d.alpha;
-      if (sim) sim.alphaTarget(floatingAlpha);
       break;
     }
     case 'stop': {

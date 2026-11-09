@@ -1,13 +1,14 @@
 /**
  * PixiGraph — 基于 Pixi.js v8 + d3-force 的知识图谱渲染组件
  *
- * 设计要点(对齐 Obsidian 力导向图 + 用户"水上漂浮"需求):
- *  - d3-force 作力引擎;alphaTarget=0.02 让仿真永不停止,节点持续温柔漂浮
- *  - 拖拽节点:pin fx/fy 跟随鼠标,视口内钳制;释放后解除 pin,不回弹原位
- *  - 自定义 bbox force:轻量把越界节点推回当前视角内(按 alpha 缩放,不暴力)
+ * 设计要点(对齐 Obsidian 力导向图):
+ *  - 2D d3-force 仿真在 Worker 中,按帧驱动:每个显示帧发一次 step、Worker 推进一步并回传
+ *    (Transferable 双缓冲),物理与渲染严格同步;布局收敛后 Worker 报告 settled,主线程停止
+ *    请求 → 静止的图零开销。不再有永不停止的漂浮或随视口变化的边界力。
+ *  - 拖拽节点:以主线程指针位置为准(零延迟),位置随 step 一起交给 Worker;拖拽时加热
+ *    (alphaTarget 0.3)让邻居弹性跟随,松手后冷却直至静止
+ *  - hover:非邻居节点/边按帧平滑淡出(只改 alpha,不重绘几何)
  *  - Pixi Container(isRenderGroup) 作为相机:平移/缩放在 GPU 上做
- *  - 节点/边视觉复用 graphHelpers;hover 暗化、hub 星标、orphan 环、选择环、局部焦点环
- *  - 力参数(charge/link/center/decay)沿用 KnowledgeGraph 原值,保持物理不变
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import {
@@ -113,8 +114,8 @@ export interface ForceParams {
 //   centralGravity: 0.3            → centerStrength: 0.05   (×alphaTarget÷damping_vis≈0.05)
 //   springLength: 95               → linkDistance: 200      (×坐标比例≈2；原注释误写为120)
 //   springConstant: 0.04           → linkStrength: 0.20     (d3 strength 等效换算)
-//   damping: 0.09                  → velocityDecay: 0.2     (故意调高阻尼→漂浮感，已在 forceWorker 中设置)
-//   avoidOverlap: 0                → 由 chargeStrength + bbox 力近似
+// 阻尼/冷却按 d3 默认(velocityDecay 0.4、alphaDecay 0.0228),布局会静止;linkStrength 滑块是
+// d3 默认连线强度(1/较小度数)的倍率,0.20 = 1×;另有弱碰撞力防止节点重叠。见 forceWorker.ts。
 export const DEFAULT_FORCE_PARAMS: ForceParams = {
   centerStrength: 0.05,    // vis-network centralGravity=0.3 → ×(alphaTarget/damping_vis)≈0.05；开启后节点自发涌现二维库仑晶体圆形分布
   chargeStrength: -500,    // vis-network gravitationalConstant=-2000(官方值，非注释误写的-22000) ÷ 坐标比例²≈-500
@@ -125,8 +126,11 @@ export const DEFAULT_FORCE_PARAMS: ForceParams = {
 
 
 
-// 物理漂浮阈值:≤此值时 worker 用 alphaTarget>0 让仿真永不停(vis-network 风格)
-const FLOATING_PHYSICS_THRESHOLD = 500;
+// hover 淡出:非邻居节点 / 普通边层的目标不透明度,以及时间常数(ms,约 3τ 完成)
+const DIM_NODE_ALPHA = 0.15;
+const DIM_LINK_ALPHA = 0.15;
+const EDGE_LABEL_ALPHA = 0.85;
+const FADE_TAU_MS = 55;
 
 // ── 常量 ────────────────────────────────────────────────────────────
 // 力学常量(ALPHA_DECAY / VELOCITY_DECAY / FLOATING_ALPHA / CHARGE_DISTANCE_MAX /
@@ -152,10 +156,6 @@ interface NodeView {
   radius: number;
   color: string;       // hex string(保留用于调试/标签)
   colorNum: number;    // 缓存的数值型颜色(Pixi 填充用,免去每帧解析字符串)
-  phaseX: number;      // 漂浮动画相位(预计算,避免每帧 charCodeAt)
-  phaseY: number;
-  phaseZ: number;      // 涟漪频率相位(双频漂浮的第二频率)
-  ampScale: number;    // 漂浮幅度缩放(大节点更重,漂浮更轻)
   // 脏标记:样式相关状态变化时需要重绘 glow/body/ring
   dirty: boolean;
 }
@@ -210,9 +210,17 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     focusNodeId,
   });
   const liveBoundsRef = useRef({ minX: -Infinity, maxX: Infinity, minY: -Infinity, maxY: Infinity });
-  // 已同步给 worker 的 bounds 缓存:仅当值变化时才 postMessage,避免每帧结构化克隆开销
-  const sentBoundsRef = useRef({ minX: NaN, maxX: NaN, minY: NaN, maxY: NaN });
-  const bboxEnabledRef = useRef(true);
+  // 按帧驱动的仿真:simActive=是否还需要 step;awaitingStep=已发出 step 尚未收到回包;
+  // simGen=每次唤醒(拖拽/调参/重建)自增,过期回包的 settled 不能让刚唤醒的仿真停下。
+  const simActiveRef = useRef(false);
+  const awaitingStepRef = useRef(false);
+  const simGenRef = useRef(0);
+  // hover 淡出动画进行中(收敛后停止逐帧插值)
+  const fadeActiveRef = useRef(false);
+  // 有节点被标记 dirty(样式待重绘):onTick 据此决定本帧是否遍历节点
+  const nodesDirtyRef = useRef(true);
+  // 上次绘制边时用的剔除范围(图坐标)
+  const drawnEdgeBoundsRef = useRef({ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
   // 最新画布尺寸(由 width/height props 同步),供 onTick/onGlobalPointerMove 闭包读取,
   // 避免 init effect 空依赖导致 width/height 被锁死在 mount 时的值。
   const sizeRef = useRef({ width, height });
@@ -256,9 +264,6 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
   const wasDragMovedRef = useRef(false);
   // 力参数 ref(rebuildGraph 闭包读取最新值)
   const forceParamsRef = useRef(forceParams);
-  // dragMove RAF 节流(高刷新率显示器 120/240Hz 下将 postMessage 对齐到 60fps)
-  const dragMoveRafRef = useRef<number | null>(null);
-  const dragMoveDataRef = useRef<{ id: string; x: number; y: number } | null>(null);
   // 边索引:rebuildGraph 时构建,drawHighlightEdges 用邻接表 O(degree) 查找替代 O(E) 全量遍历
   const edgeIndexByPairRef = useRef<Map<string, number>>(new Map());
   // 上一次 rebuild 时的节点位置缓存,用于时间滑块等增量更新场景:
@@ -267,6 +272,12 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
   // 空间网格:onContextMenu 时懒构建,O(1) 查找最近节点(替代 O(V) 全量遍历)
   const nodeGridRef = useRef<Map<string, string[]>>(new Map());
   const NODE_GRID_CELL = 200;
+
+  /** Ask the worker for steps again (after a drag, a parameter change or a rebuild). */
+  function wakeSim() {
+    simActiveRef.current = true;
+    simGenRef.current++;
+  }
 
   // ── 同步 styleState ──
   useEffect(() => {
@@ -288,22 +299,16 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     }
     neighborSetRef.current = set;
     linksHighlightDirtyRef.current = true; // hover 变化只需重绘高亮层
-    // 精准标记 dirty:只标记前后两次 hover 涉及的节点(hovered 本身 + 其邻居),
-    // 避免对全量节点调 drawNode。restyleAll 只在 cluster/methodology 变化时需要。
     if (prevHovered?.id !== hoveredNode?.id) {
-      const toDirty = new Set<string>();
-      if (prevHovered) {
-        toDirty.add(prevHovered.id);
-        adjacencyRef.current.get(prevHovered.id)?.forEach(id => toDirty.add(id));
-      }
-      if (hoveredNode) {
-        toDirty.add(hoveredNode.id);
-        adjacencyRef.current.get(hoveredNode.id)?.forEach(id => toDirty.add(id));
-      }
-      for (const id of toDirty) {
-        const v = viewsRef.current.get(id);
+      // 变暗/恢复由 onTick 逐帧插值 alpha 完成(所有节点一致,不重绘几何);
+      // 只有新旧 hover 节点本身需要重绘光晕/外环。
+      fadeActiveRef.current = true;
+      if (hoveredNode && linkHighlightRef.current) linkHighlightRef.current.alpha = 0;
+      for (const id of [prevHovered?.id, hoveredNode?.id]) {
+        const v = id ? viewsRef.current.get(id) : undefined;
         if (v) v.dirty = true;
       }
+      nodesDirtyRef.current = true;
     } else {
       // selectedNodes/cluster/methodology/focus 变化:全量标记
       restyleAll();
@@ -317,6 +322,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     forceRafRef.current = requestAnimationFrame(() => {
       forceRafRef.current = null;
       workerRef.current?.postMessage({ type: 'params', params: forceParamsRef.current });
+      wakeSim();
     });
     return () => {
       if (forceRafRef.current !== null) {
@@ -428,6 +434,11 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         if (data.type === 'positions') {
           nodePositionsRef.current = data.buffer as Float32Array;
           linksDirtyRef.current = true;
+          // Replies to `step` carry gen; the initial/warm-up positions after `init` do not.
+          if (data.gen !== undefined) {
+            awaitingStepRef.current = false;
+            if (data.settled && data.gen === simGenRef.current) simActiveRef.current = false;
+          }
         }
       };
       workerRef.current = worker;
@@ -453,8 +464,8 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       const checkStability = () => {
         if (hasFitted) return; // 防止重复执行
         stabilityFrames++;
-        // 至少等待 30 帧（约 500ms）让布局初步稳定
-        if (stabilityFrames >= 30) {
+        // Worker 在首帧前已预跑布局,这里只需等几帧让第一批位置到达
+        if (stabilityFrames >= 8) {
           hasFitted = true;
           fitToScreen();
           // 淡入显示
@@ -469,10 +480,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
     return () => {
       destroyed = true;
-      if (dragMoveRafRef.current !== null) {
-        cancelAnimationFrame(dragMoveRafRef.current);
-        dragMoveRafRef.current = null;
-      }
+      simActiveRef.current = false;
       const app = appRef.current;
       if (app) {
         if (app.canvas) {
@@ -599,6 +607,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       });
       t.anchor.set(0.5);
       t.eventMode = 'none';
+      t.alpha = EDGE_LABEL_ALPHA;
       world.addChild(t);
       linkLabelRef.current.set(labelKey, t);
     }
@@ -737,13 +746,6 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       container.on('pointertap', (e: FederatedPointerEvent) => onNodeTap(e, n));
 
       nodeLayer.addChild(container);
-      // 预计算漂浮相位(避免每帧 charCodeAt)
-      // 三组相位 + 幅度缩放:模拟"水上漂浮"的双重波叠加(慢涌 + 快涟)
-      const phX = (n.id.charCodeAt(0) || 0) + (n.id.charCodeAt(Math.max(0, n.id.length - 1)) || 0);
-      const phY = phX + 2;
-      const phZ = ((n.id.charCodeAt(1) || 0) * 7 + (n.id.charCodeAt(2) || 0) * 13) % 360;
-      // 大节点更重,漂浮幅度减半;小节点全幅(vis-network 中大节点更稳定)
-      const ampScale = radius > 18 ? 0.5 : radius > 12 ? 0.75 : 1.0;
       viewsRef.current.set(n.id, {
         node: n,
         container,
@@ -755,10 +757,6 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         radius,
         color,
         colorNum: colorNum(color),
-        phaseX: phX,
-        phaseY: phY,
-        phaseZ: phZ,
-        ampScale,
         dirty: true,
       });
     }
@@ -773,33 +771,28 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
     // 交给 Worker 跑 d3-force(序列化节点/边数据,worker 内部构建自己的仿真)
     const fp = forceParamsRef.current;
-    // 根据节点数自适应漂浮模式:
-    //   小图(≤500): alphaTarget=0.03,仿真永不停 → 真物理漂浮(vis-network 风格)
-    //   大图(>500):  alphaTarget=0,仿真收敛后停 → 主线程 sin/cos 漂浮(高性能)
-    const physicsFloating = nodes.length <= FLOATING_PHYSICS_THRESHOLD;
+    // 温启动:之前有节点位置,说明是增量更新(如时间滑块),保留位置、低 alpha,避免整图震荡。
+    // 冷启动:不传坐标,由 d3 的初始分布 + Worker 首帧前预跑决定布局。
+    const warm = savedPositions.size > 0;
     workerRef.current?.postMessage({
       type: 'init',
-      nodes: nodes.map(n => ({ id: n.id, x: n.x, y: n.y, is_hub: n.is_hub, is_orphan: n.is_orphan })),
+      dims: 2,
+      stepped: true,
+      nodes: nodes.map(n => ({
+        id: n.id,
+        r: viewsRef.current.get(n.id)?.radius ?? 8,
+        ...(warm ? { x: n.x, y: n.y } : {}),
+      })),
       links: links.map(l => ({
         source: typeof l.source === 'string' ? l.source : l.source.id,
         target: typeof l.target === 'string' ? l.target : l.target.id,
         edge_type: l.edge_type, weight: l.weight, label: l.label,
       })),
       params: fp,
-      // 温启动:如果之前有节点位置,说明是增量更新(如时间滑块),
-      // 使用低 alpha 避免全量重新仿真导致的剧烈震荡。
-      warm: savedPositions.size > 0,
+      warm,
     });
-    workerRef.current?.postMessage({
-      type: 'floatingMode',
-      alpha: physicsFloating ? 0.03 : 0,
-    });
-    // 同步当前 bbox 状态到 worker
-    const lb0 = liveBoundsRef.current;
-    workerRef.current?.postMessage({ type: 'bounds', minX: lb0.minX, maxX: lb0.maxX, minY: lb0.minY, maxY: lb0.maxY });
-    sentBoundsRef.current.minX = lb0.minX; sentBoundsRef.current.maxX = lb0.maxX;
-    sentBoundsRef.current.minY = lb0.minY; sentBoundsRef.current.maxY = lb0.maxY;
-    workerRef.current?.postMessage({ type: 'bboxEnabled', enabled: bboxEnabledRef.current });
+    awaitingStepRef.current = false;
+    wakeSim();
 
     linksDirtyRef.current = true; // rebuild 后首次必然需要重绘
 
@@ -807,7 +800,8 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     drawLinks();
   }
 
-  // ── 每帧:更新位置 + 视口边界 + 标签可见性 + 按需重绘边 ──
+  // ── 每帧:应用 Worker 位置 → 请求下一步仿真 → hover 淡出 → 视口剔除 / 标签 LOD → 按需重绘边 ──
+  const lastCameraRef = useRef({ x: NaN, y: NaN, s: NaN, w: 0, h: 0 });
   function onTick() {
     const world = worldRef.current;
     const linkLayer = linkLayerRef.current;
@@ -818,119 +812,117 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     world.toLocal({ x: 0, y: 0 }, undefined, tmpP1.current);
     world.toLocal({ x: w, y: h }, undefined, tmpP2.current);
     const pad = 20 / Math.max(world.scale.x, 0.0001);
-    // 就地修改,避免每帧 new 对象
     const lb = liveBoundsRef.current;
     lb.minX = tmpP1.current.x + pad;
     lb.maxX = tmpP2.current.x - pad;
     lb.minY = tmpP1.current.y + pad;
     lb.maxY = tmpP2.current.y - pad;
 
-    // 同步视口边界到 Worker(bbox 力在 worker 内运行)。
-    // 仅当 bounds 相对上次发送有显著变化时才 postMessage,避免每帧结构化克隆开销。
-    // 阈值取 1 像素:平移/缩放每帧移动量通常 >1px,而浮点抖动 <1px。
-    const sb = sentBoundsRef.current;
-    if (Math.abs(lb.minX - sb.minX) > 1 || Math.abs(lb.maxX - sb.maxX) > 1 ||
-        Math.abs(lb.minY - sb.minY) > 1 || Math.abs(lb.maxY - sb.maxY) > 1) {
-      sb.minX = lb.minX; sb.maxX = lb.maxX; sb.minY = lb.minY; sb.maxY = lb.maxY;
-      workerRef.current?.postMessage({ type: 'bounds', minX: lb.minX, maxX: lb.maxX, minY: lb.minY, maxY: lb.maxY });
-    }
-
-    // 合并:Worker 位置写入 + 漂浮动画 + 视口剔除 (单次遍历)
-    const pos = nodePositionsRef.current;
-    const time = (appRef.current?.ticker.lastTime ?? 0) * 0.001;
-    const zoom = world.scale.x;
-    const showLabels = zoom >= LABEL_SHOW_ZOOM;
-    const cullMinX = lb.minX - 100, cullMaxX = lb.maxX + 100;
-    const cullMinY = lb.minY - 100, cullMaxY = lb.maxY + 100;
-    const hoveredId = styleStateRef.current.hoveredNode?.id;
-    const dragNodeId = dragStateRef.current.mode === 'node' ? dragStateRef.current.node?.id : null;
-
     const views = idx2viewRef.current;
     const n = views.length;
-    for (let i = 0; i < n; i++) {
-      const v = views[i];
-      if (!v) continue;
+    const ds = dragStateRef.current;
+    const dragNode = ds.mode === 'node' ? ds.node ?? null : null;
 
-      // Worker 位置写入
-      if (pos) {
-        const stride = pos.length === views.length * 3 ? 3 : 2;
+    // 1. Worker 位置写入(被拖节点以主线程指针位置为准,不被回包覆盖 → 零延迟跟手)
+    const pos = nodePositionsRef.current;
+    if (pos) {
+      const stride = pos.length === n * 3 ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const v = views[i];
+        if (!v || v.node === dragNode) continue;
         v.node.x = pos[i * stride];
         v.node.y = pos[i * stride + 1];
       }
-
-      const base_x = v.node.x!;
-      const base_y = v.node.y!;
-
-      // 先用基础位置做视口剔除,视口外节点跳过 sin/cos 计算
-      // (万级节点下省去 90%+ 的三角函数调用,cull margin 100px 远大于偏移 2.5px)
-      v.container.x = base_x;
-      v.container.y = base_y;
-      v.container.visible = base_x >= cullMinX && base_x <= cullMaxX && base_y >= cullMinY && base_y <= cullMaxY;
-      if (!v.container.visible) continue;
-
-      // 视口内节点才计算漂浮偏移(双频正弦叠加,模拟"水上漂浮"的慢涌+快涟)
-      // 对齐 vis-network 的物理漂浮感:低阻尼(damping=0.2) + 残余力自然漂移
-      const isPinned = v.node.fx !== undefined && v.node.fy !== undefined;
-      const isDragging = isPinned && dragNodeId === v.node.id;
-      if (!isDragging) {
-        const amp = v.ampScale;
-        // 慢涌:大振幅低频(水上主体波动)
-        const swellX = Math.sin(time * 0.3 + v.phaseX) * 2.0 * amp;
-        const swellY = Math.cos(time * 0.25 + v.phaseY) * 2.0 * amp;
-        // 快涟:小振幅高频(水面涟漪叠加,打破周期感)
-        const rippleX = Math.sin(time * 0.8 + v.phaseZ) * 0.7 * amp;
-        const rippleY = Math.cos(time * 0.7 + v.phaseZ * 1.3) * 0.7 * amp;
-        v.container.x += swellX + rippleX;
-        v.container.y += swellY + rippleY;
-      }
-
-      // 标签可见性(LOD: zoom < 0.3 隐藏)
-      v.label.visible = showLabels || (LABEL_HOVER_FORCE && hoveredId === v.node.id);
-      if (v.dirty) drawNode(v, zoom);
     }
 
-    // 边层按需重绘:仅在 sim tick 标记 dirty 时执行。
-    // 悬停选择导致浮动时 sim 持续运行 → dirty 持续 true → 正常重绘。
-    // 仿真完全静态时 → 漂浮仍在但节点 node.x/y 不变 → 边端点不变 → 跳过重绘。
-    // 漂浮是写入 container 的视觉偏移,不影响 node.x/y,故边层内容确实不变。
-    if (linkLayer && linksDirtyRef.current) {
+    // 2. 每个显示帧最多请求一步仿真;缓冲区转移回 Worker 复用(双缓冲,无拷贝)
+    const worker = workerRef.current;
+    if (worker && (simActiveRef.current || dragNode) && !awaitingStepRef.current) {
+      awaitingStepRef.current = true;
+      const msg: { type: 'step'; gen: number; drag?: { id: string; x: number; y: number }; buffer?: Float32Array } =
+        { type: 'step', gen: simGenRef.current };
+      if (dragNode) msg.drag = { id: dragNode.id, x: dragNode.x!, y: dragNode.y! };
+      if (pos) {
+        msg.buffer = pos;
+        worker.postMessage(msg, [pos.buffer]);
+      } else {
+        worker.postMessage(msg);
+      }
+    }
+    nodePositionsRef.current = null;
+
+    // 3. 本帧是否需要遍历节点:位置变了、相机变了、正在淡出,或有节点样式待重绘
+    const cam = lastCameraRef.current;
+    const cameraMoved = cam.x !== world.position.x || cam.y !== world.position.y || cam.s !== world.scale.x || cam.w !== w || cam.h !== h;
+    if (cameraMoved) {
+      cam.x = world.position.x; cam.y = world.position.y; cam.s = world.scale.x; cam.w = w; cam.h = h;
+      const db = drawnEdgeBoundsRef.current;
+      if (lb.minX < db.minX || lb.maxX > db.maxX || lb.minY < db.minY || lb.maxY > db.maxY) {
+        linksDirtyRef.current = true;
+      }
+    }
+    const fading = fadeActiveRef.current;
+    if (pos || dragNode || cameraMoved || fading || nodesDirtyRef.current) {
+      nodesDirtyRef.current = false;
+      const zoom = world.scale.x;
+      const showLabels = zoom >= LABEL_SHOW_ZOOM;
+      const cullMinX = lb.minX - 100, cullMaxX = lb.maxX + 100;
+      const cullMinY = lb.minY - 100, cullMaxY = lb.maxY + 100;
+      const hoveredId = styleStateRef.current.hoveredNode?.id;
+      const nb = neighborSetRef.current;
+      const k = 1 - Math.exp(-(appRef.current?.ticker.deltaMS ?? 16.7) / FADE_TAU_MS);
+      let stillFading = false;
+      const approach = (a: number, target: number) => {
+        if (a === target) return a;
+        const next = a + (target - a) * k;
+        if (Math.abs(target - next) < 0.01) return target;
+        stillFading = true;
+        return next;
+      };
+
+      for (let i = 0; i < n; i++) {
+        const v = views[i];
+        if (!v) continue;
+        const x = v.node.x!;
+        const y = v.node.y!;
+        v.container.x = x;
+        v.container.y = y;
+        // hover:非邻居平滑淡出(所有节点一致,只改 alpha)
+        if (fading) v.container.alpha = approach(v.container.alpha, !hoveredId || nb.has(v.node.id) ? 1 : DIM_NODE_ALPHA);
+        const visible = x >= cullMinX && x <= cullMaxX && y >= cullMinY && y <= cullMaxY;
+        v.container.visible = visible;
+        if (!visible) continue;
+        // 标签 LOD:缩放足够时全部显示;hover 时强制显示 hover 节点与邻居的标签
+        v.label.visible = showLabels || (LABEL_HOVER_FORCE && !!hoveredId && nb.has(v.node.id));
+        if (v.dirty) drawNode(v, zoom);
+      }
+
+      if (fading) {
+        if (linkLayer) linkLayer.alpha = approach(linkLayer.alpha, hoveredId ? DIM_LINK_ALPHA : 1);
+        const hl = linkHighlightRef.current;
+        if (hl) hl.alpha = approach(hl.alpha, 1);
+        const seen = new Set<string>();
+        for (const m of linkMetaRef.current) {
+          if (!m.displayLabel || seen.has(m.labelKey)) continue;
+          seen.add(m.labelKey);
+          const t = linkLabelRef.current.get(m.labelKey);
+          if (!t) continue;
+          const incident = !!hoveredId && (m.s.id === hoveredId || m.t.id === hoveredId);
+          t.alpha = approach(t.alpha, !hoveredId ? EDGE_LABEL_ALPHA : incident ? 1 : 0.08);
+        }
+        if (!stillFading) fadeActiveRef.current = false;
+      }
+    }
+
+    // 4. 边层按需重绘:位置变化 / 拖拽 / 相机越过剔除边界后才重绘;hover 只重绘高亮层
+    if (linkLayer && (linksDirtyRef.current || dragNode)) {
       drawLinks();
-      drawHighlightEdges(); // 高亮层同步更新(拖拽/仿真时边端点变化)
+      drawHighlightEdges();
       linksDirtyRef.current = false;
       linksHighlightDirtyRef.current = false;
     } else if (linkLayer && linksHighlightDirtyRef.current) {
-      // 仅 hover 变化:只重绘高亮层(~5~20 条边),基础层不动
       drawHighlightEdges();
       linksHighlightDirtyRef.current = false;
-    }
-
-    // 修复"标签脱落"问题:每帧更新边标签位置,跟随节点的漂浮动画。
-    // 边标签位置需要基于 container.x/y(含漂浮偏移)而非 node.x/y(基础位置),
-    // 否则仿真收敛后标签会固定在基础位置,与漂浮的节点视觉上脱节。
-    if (showLabels) {
-      updateEdgeLabelsFollowFloating();
-    }
-  }
-
-  // ── 每帧更新边标签位置,跟随节点漂浮动画 ──
-  function updateEdgeLabelsFollowFloating() {
-    const meta = linkMetaRef.current;
-    const len = meta.length;
-    const views = viewsRef.current; // Map<string, NodeView>,O(1) 查找
-    for (let i = 0; i < len; i++) {
-      const m = meta[i];
-      if (!m.displayLabel) continue;
-      const labelObj = linkLabelRef.current.get(m.labelKey);
-      if (!labelObj || !labelObj.visible) continue;
-      const sView = views.get(m.s.id);
-      const tView = views.get(m.t.id);
-      if (sView && tView) {
-        // 使用 container 位置(包含漂浮偏移)计算中点
-        labelObj.position.set(
-          (sView.container.x + tView.container.x) / 2,
-          (sView.container.y + tView.container.y) / 2
-        );
-      }
     }
   }
 
@@ -947,6 +939,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       }
       v.dirty = true;
     }
+    nodesDirtyRef.current = true;
   }
 
   // ── 绘制单个节点 glow/body/ring (LOD: 低缩放跳过 glow/ring) ──
@@ -954,8 +947,7 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     v.dirty = false;
     const st = styleStateRef.current;
     const hovered = st.hoveredNode?.id === v.node.id;
-    const isNeighbor = neighborSetRef.current.has(v.node.id);
-    const dimmed = st.hoveredNode && !isNeighbor;
+    // hover 变暗不在这里画:onTick 对 container.alpha 做平滑插值,几何与 hover 无关
     const selected = st.selectedNodeIds.has(v.node.id);
     const isFocus = st.isLocalMode && st.focusNodeId === v.node.id;
     const colorN = v.colorNum;
@@ -974,10 +966,9 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
 
     // body
     v.body.clear();
-    const bodyAlpha = dimmed ? 0.15 : 1.0;
-    v.body.circle(0, 0, r).fill({ color: colorN, alpha: bodyAlpha });
+    v.body.circle(0, 0, r).fill({ color: colorN, alpha: 1 });
     if (!isLowDetail) {
-      v.body.circle(0, 0, r).stroke({ width: 1.5, color: colorN, alpha: dimmed ? 0.1 : 0.6 });
+      v.body.circle(0, 0, r).stroke({ width: 1.5, color: colorN, alpha: 0.6 });
     }
 
     const ring = getVizPalette().ring;
@@ -1012,23 +1003,26 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     const linkLayer = linkLayerRef.current;
     if (!linkLayer) return;
     linkLayer.clear();
-    const st = styleStateRef.current;
-    const hovered = st.hoveredNode;
     const world = worldRef.current;
     const zoom = world?.scale.x ?? 1;
     const showLabels = zoom >= LABEL_SHOW_ZOOM;
     const showArrows = zoom > 0.35;
 
     // LOD 极小缩放优化:点云/星系宏观模式下完全跳过连接线绘制,大幅提升帧率
+    const db = drawnEdgeBoundsRef.current;
     if (zoom < HIDE_LINKS_ZOOM) {
       const linkLayer = linkLayerRef.current;
       if (linkLayer) linkLayer.clear();
+      // 空范围:相机一动就会重新判断(放大回来时边能重新出现)
+      db.minX = Infinity; db.maxX = -Infinity; db.minY = Infinity; db.maxY = -Infinity;
       return;
     }
 
     const b = liveBoundsRef.current;
     const minX = b.minX - 200, maxX = b.maxX + 200;
     const minY = b.minY - 200, maxY = b.maxY + 200;
+    // 记录本次剔除范围:相机移出这个范围时 onTick 会触发重绘(仿真静止后边不会自动重画)
+    db.minX = minX; db.maxX = maxX; db.minY = minY; db.maxY = maxY;
 
     // 复用分组容器(每帧 clear 而非 new,消除 GC 压力)
     const strokeGroups = strokeGroupsRef.current;
@@ -1050,11 +1044,11 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       if ((sx < minX && tx < minX) || (sx > maxX && tx > maxX)) continue;
       if ((sy < minY && ty < minY) || (sy > maxY && ty > maxY)) continue;
 
-      const isHL = !!hovered && (s.id === hovered.id || t.id === hovered.id);
-      const isDim = !!hovered && !isHL;
-      const color = isHL ? m.colorHL : m.color;
-      const w = isHL ? Math.max(m.width + 1, 2.5) : m.width;
-      const alpha = isDim ? 0.08 : (!isHL && m.isSemantic ? 0.6 : 1.0);
+      // 基础层与 hover 无关:hover 时整层 alpha 平滑淡出(onTick),相连的边在高亮层上重画
+      const isHL = false;
+      const color = m.color;
+      const w = m.width;
+      const alpha = m.isSemantic ? 0.6 : 1.0;
 
       // 数值 key 消除字符串拼接
       const key = (Math.round(w * 10) << 20) | (color & 0xfffff) | (Math.round(alpha * 100) << 24);
@@ -1119,13 +1113,12 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         }
       }
 
-      // 边标签
-      if (showLabels && !isDim) {
+      // 边标签(透明度由 onTick 的 hover 淡出管理)
+      if (showLabels) {
         const labelObj = linkLabelRef.current.get(m.labelKey);
         if (labelObj) {
           labelObj.position.set((sx + tx) / 2, (sy + ty) / 2);
           labelObj.visible = true;
-          labelObj.alpha = isHL ? 1.0 : 0.85;
         }
       } else {
         const labelObj = linkLabelRef.current.get(m.labelKey);
@@ -1308,12 +1301,10 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
       moved: false,
       downTime: Date.now(),
     };
-    // 通知 Worker:pin 节点 + 提高 alpha 让邻接节点跟随
+    // 通知 Worker:pin 节点 + 加热(alphaTarget 0.3)让邻接节点弹性跟随
     workerRef.current?.postMessage({ type: 'pin', id: node.id, x: node.x!, y: node.y! });
-    // 拖拽期间禁用 bbox 力(在 worker 内),让节点及其邻居可自由移动到任意位置
-    bboxEnabledRef.current = false;
-    workerRef.current?.postMessage({ type: 'bboxEnabled', enabled: false });
-    // 主线程镜像 fx/fy(用于 pinned ring 指示 + dragMove 偏移计算)
+    wakeSim();
+    // 主线程镜像 fx/fy(用于 pinned ring 指示)
     node.fx = node.x;
     node.fy = node.y;
   }
@@ -1352,21 +1343,13 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         nx = clamped.x;
         ny = clamped.y;
       }
-      // 主线程立即更新(视觉零延迟)
+      // 主线程立即更新(视觉零延迟);onTick 不会用 Worker 回包覆盖被拖节点,
+      // 位置随下一帧的 step 消息交给 Worker(天然按帧合并,不会出现消息风暴或乱序)
       ds.node.fx = nx;
       ds.node.fy = ny;
       ds.node.x = nx;
       ds.node.y = ny;
-      // RAF 节流:高刷新率显示器(120/240Hz)下将 postMessage 频率对齐到 60fps,
-      // 连续 mousemove 合并为单条消息,避免消息风暴
-      dragMoveDataRef.current = { id: ds.node.id, x: nx, y: ny };
-      if (dragMoveRafRef.current === null) {
-        dragMoveRafRef.current = requestAnimationFrame(() => {
-          dragMoveRafRef.current = null;
-          const d = dragMoveDataRef.current;
-          if (d) workerRef.current?.postMessage({ type: 'dragMove', id: d.id, x: d.x, y: d.y });
-        });
-      }
+      linksDirtyRef.current = true;
     }
   }
 
@@ -1376,26 +1359,17 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     // 此时 dragStateRef 已被重置,无法直接读取)
     wasDragMovedRef.current = ds.moved;
     if (ds.mode === 'node' && ds.node) {
-      // ⚠️ 关键:取消 pending 的 dragMove RAF,防止它在 unpin 之后向 worker
-      // 发送 dragMove 消息。否则消息顺序为 unpin(清除fx/fy) → dragMove(重新设置fx/fy),
-      // 节点会被永久钉在最后拖拽位置,表现为「像钉子一样固定不动」。
-      if (dragMoveRafRef.current !== null) {
-        cancelAnimationFrame(dragMoveRafRef.current);
-        dragMoveRafRef.current = null;
-      }
-      dragMoveDataRef.current = null;
-
-      // 释放 pin:节点不再钉在松手位置,可自由漂浮(符合"像水上漂浮"需求)
+      // 释放 pin:节点留在松手处、不回弹;Worker 冷却(alphaTarget 0),
+      // link force 把网络拉回平衡后整图静止。拖拽状态在本函数末尾清空,
+      // 之后的 step 不再携带 drag,不会出现“松手后又被钉住”的乱序问题。
       ds.node.fx = undefined;
       ds.node.fy = undefined;
-      // 通知 Worker:解除 pin + reheat,让 link force 把网络拉回平衡(保持边长)
       workerRef.current?.postMessage({ type: 'unpin', id: ds.node.id });
-      // 恢复 bbox 力
-      bboxEnabledRef.current = true;
-      workerRef.current?.postMessage({ type: 'bboxEnabled', enabled: true });
+      wakeSim();
       // 只标记被拖节点 dirty(重绘以去掉 pinned ring 指示),不全量 restyleAll
       const v = viewsRef.current.get(ds.node.id);
       if (v) v.dirty = true;
+      nodesDirtyRef.current = true;
     }
     if (ds.mode === 'pan') {
       // 平移结束后重绘一次边(更新视口剔除)
@@ -1428,9 +1402,12 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
         node.fx = node.x;
         node.fy = node.y;
         workerRef.current?.postMessage({ type: 'pin', id: node.id, x: node.x!, y: node.y! });
+        // 双击固定不是拖拽:固定后立刻冷却,否则 alphaTarget 停在 0.3,整图永不静止
+        workerRef.current?.postMessage({ type: 'release' });
       }
       restyleAll();
-      workerRef.current?.postMessage({ type: 'reheat', alpha: 0.3 });
+      workerRef.current?.postMessage({ type: 'reheat', alpha: 0.1 });
+      wakeSim();
       lastClickRef.current = { id: '', time: 0 };
     } else {
       lastClickRef.current = { id: node.id, time: now };
@@ -1508,8 +1485,10 @@ export const PixiGraph = forwardRef<PixiGraphHandle, PixiGraphProps>(function Pi
     world.scale.set(z);
     world.position.x = sx - gx.x * z;
     world.position.y = sy - gx.y * z;
-    // 缩放跨越阈值时标记边层 dirty(箭头/标签可见性变化)
-    if ((prevZoom < 0.35) !== (z < 0.35) || (prevZoom < 0.5) !== (z < 0.5)) {
+    // 缩放跨越阈值时标记边层 dirty(箭头/标签/虚线/隐藏连线的 LOD 变化)
+    const crossed = (t: number) => (prevZoom < t) !== (z < t);
+    if (crossed(0.3) || crossed(0.5)) restyleAll(); // 节点 LOD(光晕/外环/星标)
+    if (crossed(0.35) || crossed(0.5) || crossed(SEMANTIC_DASH_ZOOM) || crossed(HIDE_LINKS_ZOOM) || crossed(LABEL_SHOW_ZOOM)) {
       linksDirtyRef.current = true;
     }
   }

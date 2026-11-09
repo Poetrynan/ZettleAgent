@@ -121,7 +121,15 @@ export function getThemeMode(): ThemeMode {
   return 'system';
 }
 
+/**
+ * The theme actually on screen. Reads the `data-theme` that applyResolvedTheme() set,
+ * because in 'system' mode that comes from the native window theme (Tauri), which can
+ * differ from the WebView's prefers-color-scheme (notably WebView2 on Windows). Falls
+ * back to the saved mode / media query only before the first apply.
+ */
 export function getResolvedTheme(): ResolvedTheme {
+  const applied = typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null;
+  if (applied === 'dark' || applied === 'light') return applied;
   const mode = getThemeMode();
   if (mode === 'light' || mode === 'dark') return mode;
   return prefersDarkFromMedia() ? 'dark' : 'light';
