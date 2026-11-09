@@ -1032,6 +1032,13 @@ export async function retryFailedEmbeddings(): Promise<number> {
   return invoke('retry_failed_embeddings');
 }
 
+/** Explicit rebuild: clears derived vectors and their cache, preserving note text and FTS. */
+export async function resetEmbeddingIndex(): Promise<number> {
+  const cleared = await invoke<number>('reset_embedding_index');
+  embeddingStatsCache = null;
+  return cleared;
+}
+
 export async function finalizeEmbeddingIndex(): Promise<void> {
   return invoke('finalize_embedding_index');
 }

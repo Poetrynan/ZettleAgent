@@ -16,6 +16,7 @@ vi.mock('../../../lib/tauri', () => ({
   chatWithLlm: vi.fn().mockResolvedValue({ content: '' }),
   agentChat: vi.fn().mockResolvedValue('diagnosis report'),
   knowledgeGraphCreatePlan: vi.fn(),
+  knowledgeGraphGetPlan: vi.fn(),
   knowledgeGraphStagePlan: vi.fn(),
   knowledgeGraphCommitPlan: vi.fn(),
   knowledgeGraphRollbackPlan: vi.fn(),
@@ -47,6 +48,7 @@ import { KnowledgeGapAnalysis } from '../KnowledgeGapAnalysis';
 import {
   getKnowledgeGraph,
   knowledgeGraphCreatePlan,
+  knowledgeGraphGetPlan,
   knowledgeGraphStagePlan,
   knowledgeGraphCommitPlan,
   knowledgeGraphVerifyPlan,
@@ -60,6 +62,7 @@ import { zh } from '../../../lib/i18n/zh';
 beforeEach(() => {
   vi.clearAllMocks();
   setLang('en');
+  localStorage.setItem('zettel:dash-gaps-expanded', 'true');
   // jsdom 没有 scrollIntoView，而日志面板挂载时就会调它。
   Element.prototype.scrollIntoView = vi.fn();
   vi.mocked(getKnowledgeGraph).mockResolvedValue({ nodes: [], edges: [], clusters: [] } as never);
@@ -149,11 +152,28 @@ function outcome(over: Partial<PlanOutcome> = {}): PlanOutcome {
 /** 跑一轮诊断（Agent 路径没有定时器），然后切到修复页。 */
 async function openFixTab() {
   render(<KnowledgeGapAnalysis />);
-  fireEvent.click(screen.getByRole('button', { name: /AI Agent Deep Diagnosis/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Deep diagnosis/ }));
   fireEvent.click(await screen.findByRole('tab', { name: 'Fix' }));
 }
 
 describe('KnowledgeGapAnalysis — the fix loop', () => {
+  it('leaves low-confidence proposals unchecked when opening an existing plan', async () => {
+    const lowOnly = plan();
+    lowOnly.proposals = lowOnly.proposals.filter(p => p.confidence < 0.8);
+    vi.mocked(knowledgeGraphGetPlan).mockResolvedValue(lowOnly);
+    render(<KnowledgeGapAnalysis initialPlanId="plan-1" />);
+    await waitFor(() => expect(screen.getByText('0 of 1 selected')).toBeInTheDocument());
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();
+  });
+
+  it('does not label an empty graph as perfectly healthy', async () => {
+    await openFixTab();
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.queryByText('Excellent Health')).not.toBeInTheDocument();
+    expect(screen.getByText('No graph data to assess yet')).toBeInTheDocument();
+  });
+
   it('shows a plan and a preview before anything is applied', async () => {
     vi.mocked(knowledgeGraphCreatePlan).mockResolvedValue(plan());
     vi.mocked(knowledgeGraphStagePlan).mockResolvedValue(outcome());

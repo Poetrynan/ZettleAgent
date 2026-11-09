@@ -184,16 +184,13 @@ export function CoreMemorySection() {
 
   return (
     <div className="settings-section-card">
-      <h2
-        style={{ ...sectionTitle, cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setExpanded(!expanded)}
-      >
+      <h2 style={sectionTitle}><button type="button" className="settings-disclosure" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         <span style={{ display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
           <IconChevronRight size={18} />
         </span>
         <IconBrain size={18} />
         {t('coreMemory.title')}
-      </h2>
+      </button></h2>
 
       {expanded && (
         <div>

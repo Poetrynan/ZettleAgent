@@ -83,6 +83,7 @@ async function persistLlmConfig(config: Record<string, unknown>): Promise<void> 
     await st.save();
   } catch (error) {
     console.error('Failed to save LLM config to Tauri Store:', error);
+    throw error;
   }
 }
 
@@ -116,14 +117,29 @@ async function getStore(): Promise<Store> {
  * next status read (the settings tab re-probes on save) rather than never.
  */
 export async function saveLlmConfig(config: Record<string, unknown>): Promise<void> {
-  const apiKey = typeof config.apiKey === 'string' ? config.apiKey : '';
+  // No key field means "leave the stored credential alone". An explicit empty
+  // string is the separate, intentional remove operation.
+  if (typeof config.apiKey !== 'string') {
+    const st = await getStore();
+    let previous = await st.get<Record<string, unknown>>('llmConfig');
+    if (!previous) {
+      try { previous = JSON.parse(localStorage.getItem(LLM_LOCAL_KEY) || 'null'); } catch { /* no legacy config */ }
+    }
+    // Older builds can have their only credential in the visible plaintext
+    // fallback. Preserve that existing copy until it is replaced or migrated.
+    const next = withoutApiKey(config);
+    if (typeof previous?.apiKey === 'string' && previous.apiKey) next.apiKey = previous.apiKey;
+    await persistLlmConfig(next);
+    return;
+  }
+  await persistLlmConfig(withoutApiKey(config));
+  const apiKey = config.apiKey;
   try {
     lastSecretStatus = await setApiKey(apiKey);
     // The backend owns the key now — either in the keyring, or in its own
     // clearly-named unprotected file, which its status probe *can* see. Either
     // way there is no WebView-side plaintext copy left to remember.
     plaintextFallbackActive = false;
-    await persistLlmConfig(withoutApiKey(config));
   } catch (error) {
     // Never log `config` itself — it still holds the key at this point.
     console.error('Failed to store API key in the OS credential store:', error);

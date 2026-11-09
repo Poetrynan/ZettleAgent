@@ -140,7 +140,11 @@ pub fn get_timeline_range(
 ) -> anyhow::Result<Vec<TimelineEvent>> {
     let mut stmt = conn.prepare(
         "SELECT id, note_path, event_type, event_timestamp, event_details, old_fact_id, new_fact_id
-         FROM knowledge_timeline WHERE event_timestamp BETWEEN ?1 AND ?2 ORDER BY event_timestamp DESC",
+         FROM knowledge_timeline
+         WHERE julianday(event_timestamp) >= julianday(?1)
+           AND julianday(event_timestamp) < CASE WHEN length(?2) = 10
+               THEN julianday(?2, '+1 day') ELSE julianday(?2) END
+         ORDER BY julianday(event_timestamp) DESC, id DESC",
     )?;
     let events = stmt
         .query_map(rusqlite::params![start, end], |row| {
@@ -156,4 +160,23 @@ pub fn get_timeline_range(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(events)
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+
+    #[test]
+    fn range_accepts_iso_bounds_and_includes_the_entire_end_date() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE knowledge_timeline (id INTEGER PRIMARY KEY, note_path TEXT, event_type TEXT, event_timestamp TEXT, event_details TEXT, old_fact_id INTEGER, new_fact_id INTEGER);
+            INSERT INTO knowledge_timeline (id,note_path,event_type,event_timestamp) VALUES
+            (1,'a.md','updated','2026-11-09 08:00:00'),
+            (2,'b.md','updated','2026-11-09T17:00:00+08:00'),
+            (3,'c.md','updated','2026-11-10 00:00:00');").unwrap();
+        let iso = get_timeline_range(&conn, "2026-11-09T00:00:00Z", "2026-11-09T23:59:59Z").unwrap();
+        assert_eq!(iso.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2,1]);
+        let date = get_timeline_range(&conn, "2026-11-09", "2026-11-09").unwrap();
+        assert_eq!(date.len(), 2);
+    }
 }

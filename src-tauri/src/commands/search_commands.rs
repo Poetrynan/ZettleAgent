@@ -136,6 +136,12 @@ pub fn retry_failed_embeddings(state: State<'_, AppState>) -> Result<usize, Zett
 }
 
 #[tauri::command]
+pub fn reset_embedding_index(state: State<'_, AppState>) -> Result<usize, ZettelError> {
+    let mut conn = state.db.lock()?;
+    Ok(crate::db::embedding_cache::reset_index(&mut conn)?)
+}
+
+#[tauri::command]
 pub fn save_chunk_embeddings(
     state: State<'_, AppState>,
     embeddings: Vec<(i64, Vec<f32>)>,

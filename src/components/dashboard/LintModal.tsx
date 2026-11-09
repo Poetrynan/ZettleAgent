@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { runVaultLint, fixBrokenLink, createNoteForLink, type LintReport, type BrokenLinkInfo } from '../../lib/tauri';
 import { t } from '../../lib/i18n';
+import { useDialog } from '../../hooks/useDialog';
 import { IconClose, IconWarning, IconCheck, IconNote, IconLink, IconRobot, IconSync } from '../icons';
 
 interface LintModalProps {
@@ -10,6 +11,7 @@ interface LintModalProps {
 }
 
 export function LintModal({ isOpen, onClose }: LintModalProps) {
+  const dialogRef = useDialog(isOpen, onClose);
   const { setView, setCurrentFile, showToast } = useApp();
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<LintReport | null>(null);
@@ -90,6 +92,11 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
     <div className="modal-overlay" onClick={onClose}>
       <div 
         className="modal-container" 
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-lint-title"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: '800px', height: '85vh' }}
       >
@@ -99,7 +106,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
             <span style={{ display: 'flex', color: totalIssues > 0 ? 'var(--warning)' : 'var(--success)' }}>
               <IconWarning size={20} />
             </span>
-            <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 600 }}>
+            <h2 id="dashboard-lint-title" style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 600 }}>
               {t('lint.modalTitle')}
             </h2>
             {totalIssues > 0 && (
@@ -117,7 +124,7 @@ export function LintModal({ isOpen, onClose }: LintModalProps) {
             >
               <IconSync size={18} spinning={loading} />
             </button>
-            <button className="btn btn-ghost btn-icon-sm" onClick={onClose}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={onClose} aria-label={t('common.close')}>
               <IconClose size={18} />
             </button>
           </div>

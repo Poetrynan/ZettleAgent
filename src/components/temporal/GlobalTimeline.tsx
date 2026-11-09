@@ -1,291 +1,103 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../contexts/AppContext';
-import { getGlobalTimeline, TimelineEvent } from '../../lib/tauri';
-import { IconCreated, IconContradicted, IconSuperseded, IconTimeline, IconChevronDown, IconChevronUp } from '../icons';
+import { getGlobalTimeline, type TimelineEvent } from '../../lib/tauri';
+import { IconTimeline, IconChevronDown } from '../icons';
 
-const LABELS = {
-  zh: {
-    title: '知识演化',
-    total: '总事件',
-    created: '新增',
-    conflicts: '矛盾',
-    superseded: '取代',
-    all: '全部',
-    today: '今天',
-    yesterday: '昨天',
-    thisWeek: '本周',
-    thisMonth: '本月',
-    earlier: '更早',
-    loading: '加载中...',
-    empty: '暂无时间线记录',
-    more: '个事件...',
-    createdLabel: '新增',
-    updatedLabel: '更新',
-    contradictedLabel: '矛盾',
-    supersededLabel: '取代',
-  },
-  en: {
-    title: 'Knowledge Evolution',
-    total: 'Total',
-    created: 'Created',
-    conflicts: 'Conflicts',
-    superseded: 'Superseded',
-    all: 'All',
-    today: 'Today',
-    yesterday: 'Yesterday',
-    thisWeek: 'This Week',
-    thisMonth: 'This Month',
-    earlier: 'Earlier',
-    loading: 'Loading...',
-    empty: 'No timeline events yet',
-    more: 'more events...',
-    createdLabel: 'Created',
-    updatedLabel: 'Updated',
-    contradictedLabel: 'Contradicted',
-    supersededLabel: 'Superseded',
-  },
-};
-
-const EVENT_COLORS: Record<string, { color: string; bg: string }> = {
-  created: { color: 'var(--success)', bg: 'color-mix(in srgb, var(--success) 12%, transparent)' },
-  updated: { color: 'var(--accent-primary)', bg: 'var(--accent-tint)' },
-  contradicted: { color: 'var(--danger)', bg: 'color-mix(in srgb, var(--danger) 12%, transparent)' },
-  superseded: { color: 'var(--warning)', bg: 'color-mix(in srgb, var(--warning) 12%, transparent)' },
-};
-
-function getEventStyle(type: string) {
-  return EVENT_COLORS[type] || { color: 'var(--text-tertiary)', bg: 'var(--bg-tertiary)' };
+/** SQLite stores UTC timestamps without an offset; explicit offsets are retained. */
+function parseTimestamp(value: string): Date {
+  const iso = value.replace(' ', 'T');
+  return new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`);
 }
 
-function getEventIcon(type: string, size: number = 14) {
-  switch (type) {
-    case 'created': return <IconCreated size={size} />;
-    case 'updated': return <IconTimeline size={size} />;
-    case 'contradicted': return <IconContradicted size={size} />;
-    case 'superseded': return <IconSuperseded size={size} />;
-    default: return <IconTimeline size={size} />;
-  }
+function dayNumber(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000;
 }
 
-export function GlobalTimeline() {
-  const { state, setCurrentFile } = useApp();
+export function GlobalTimeline({ refreshKey = 0 }: { refreshKey?: number }) {
+  const { state, setCurrentFile, setView } = useApp();
+  const zh = state.lang === 'zh';
+  const copy = (cn: string, en: string) => zh ? cn : en;
   const [events, setEvents] = useState<TimelineEvent[]>([]);
-  const [stats, setStats] = useState({ total: 0, active: 0, contradicted: 0, superseded: 0 });
-  const [loading, setLoading] = useState(false);
-  // Collapsed by default to keep the dashboard short; the choice is remembered.
-  const [isExpanded, setIsExpandedState] = useState(() => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [filter, setFilter] = useState('all');
+  const [expanded, setExpanded] = useState(() => {
     try { return localStorage.getItem('zettel:dash-timeline-expanded') === 'true'; } catch { return false; }
   });
-  const setIsExpanded = (next: boolean) => {
-    setIsExpandedState(next);
-    try { localStorage.setItem('zettel:dash-timeline-expanded', String(next)); } catch { /* ignore */ }
-  };
-  const [filter, setFilter] = useState('all');
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const L = state.lang === 'zh' ? LABELS.zh : LABELS.en;
-
-  const loadData = useCallback(async () => {
-    if (!state.vaultPath) return;
-    setLoading(true);
-    try {
-      const now = new Date();
-      const start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const end = now.toISOString().split('T')[0];
-      const timelineEvents = await getGlobalTimeline(start, end);
-      setEvents(timelineEvents);
-      const created = timelineEvents.filter(e => e.event_type === 'created').length;
-      const contradicted = timelineEvents.filter(e => e.event_type === 'contradicted').length;
-      const superseded = timelineEvents.filter(e => e.event_type === 'superseded').length;
-      setStats({ total: timelineEvents.length, active: created, contradicted, superseded });
-    } catch (err) {
-      console.error('Failed to load global timeline:', err);
-    } finally {
+  const [visibleCount, setVisibleCount] = useState(20);
+  const generation = useRef(0);
+  const pathsKey = JSON.stringify(state.vaultPaths?.length ? state.vaultPaths : state.vaultPath ? [state.vaultPath] : []);
+  const paths = useMemo<string[]>(() => JSON.parse(pathsKey), [pathsKey]);
+  useEffect(() => {
+    const request = ++generation.current;
+    if (!paths.length) { setEvents([]); setLoading(false); return; }
+    setLoading(true); setError(false); setEvents([]);
+    const now = new Date(Date.now());
+    const start = new Date(now); start.setDate(start.getDate() - 90); start.setHours(0, 0, 0, 0);
+    void getGlobalTimeline(start.toISOString(), now.toISOString()).then(data => {
+      if (request !== generation.current) return;
+      const normalize = (p: string) => p.replace(/^\\\\\?\\/, '').replace(/\\/g, '/').replace(/\/$/, '');
+      const withinScope = (path: string) => paths.some(root => {
+        let candidate = normalize(path); let prefix = normalize(root);
+        if (/^[a-z]:\//i.test(prefix)) { candidate = candidate.toLowerCase(); prefix = prefix.toLowerCase(); }
+        return candidate.startsWith(`${prefix}/`);
+      });
+      setEvents(data.filter(event => withinScope(event.note_path) && Number.isFinite(parseTimestamp(event.event_timestamp).getTime())).sort((a, b) => parseTimestamp(b.event_timestamp).getTime() - parseTimestamp(a.event_timestamp).getTime()));
       setLoading(false);
-    }
-  }, [state.vaultPath]);
+    }).catch(() => { if (request === generation.current) { setError(true); setLoading(false); } });
+    return () => { generation.current += 1; };
+  }, [paths, refreshKey, retry]);
 
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const getNoteName = (path: string) => path.split(/[/\\]/).pop()?.replace('.md', '') || path;
-
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return L.today;
-    if (diffDays === 1) return L.yesterday;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString(state.lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' });
+  if (!paths.length) return null;
+  const labels: Record<string, string> = {
+    created: copy('新增', 'Created'), updated: copy('更新', 'Updated'),
+    contradicted: copy('矛盾', 'Conflicts'), superseded: copy('取代', 'Superseded'),
   };
-
-  const getEventLabel = (type: string) => {
-    if (type === 'created') return L.createdLabel;
-    if (type === 'updated') return L.updatedLabel;
-    if (type === 'contradicted') return L.contradictedLabel;
-    if (type === 'superseded') return L.supersededLabel;
-    return type;
-  };
-
-  const filteredEvents = filter === 'all' ? events : events.filter(e => e.event_type === filter);
-
-  const getGroup = (dateStr: string) => {
-    const diffDays = Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return L.today;
-    if (diffDays === 1) return L.yesterday;
-    if (diffDays < 7) return L.thisWeek;
-    if (diffDays < 30) return L.thisMonth;
-    return L.earlier;
-  };
-
-  const grouped: Record<string, TimelineEvent[]> = {};
-  filteredEvents.forEach(ev => {
-    const g = getGroup(ev.event_timestamp);
-    if (!grouped[g]) grouped[g] = [];
-    grouped[g].push(ev);
-  });
-
-  if (!state.vaultPath) return null;
+  const filtered = filter === 'all' ? events : events.filter(event => event.event_type === filter);
+  const shown = expanded ? filtered.slice(0, visibleCount) : events.slice(0, 5);
+  const groups = new Map<string, TimelineEvent[]>();
+  const today = new Date(Date.now());
+  for (const event of shown) {
+    const date = parseTimestamp(event.event_timestamp);
+    const age = dayNumber(today) - dayNumber(date);
+    const label = age === 0 ? copy('今天', 'Today') : age === 1 ? copy('昨天', 'Yesterday') : date.toLocaleDateString(zh ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' });
+    groups.set(label, [...(groups.get(label) ?? []), event]);
+  }
+  const openNote = (path: string) => { setCurrentFile(path); setView('note'); };
 
   return (
-    <div className="animate-enter animate-enter-delay-3" style={{ marginBottom: 'var(--space-6)' }}>
-      <div
-        className="dash-section-header"
-        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-        onClick={() => setIsExpanded(!isExpanded)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
-      >
-        <h2 className="dash-section-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <IconTimeline size={18} />
-          {L.title}
-        </h2>
-        <span style={{ color: 'var(--text-tertiary)', transition: 'transform 0.2s ease', transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
-          <IconChevronDown size={16} />
-        </span>
+    <div className="dash-recent">
+      <div className="dash-home-section-heading">
+        <h2><IconTimeline size={17} />{copy('最近变化', 'Recent changes')}</h2>
+        <span>{copy('最近 90 天', 'Last 90 days')}</span>
       </div>
-
-      {isExpanded && (
-        <>
-          <div className="timeline-stats-grid">
-            <div className="stat-card timeline-stat-card">
-              <div className="timeline-stat-value">
-                <span className="timeline-stat-icon"><IconTimeline size={16} /></span>
-                <span>{stats.total}</span>
-              </div>
-              <div className="timeline-stat-label">{L.total}</div>
-            </div>
-            <div className="stat-card timeline-stat-card">
-              <div className="timeline-stat-value timeline-color-created">
-                <span className="timeline-stat-icon"><IconCreated size={16} /></span>
-                <span>{stats.active}</span>
-              </div>
-              <div className="timeline-stat-label">{L.created}</div>
-            </div>
-            <div className="stat-card timeline-stat-card">
-              <div className="timeline-stat-value timeline-color-conflicted">
-                <span className="timeline-stat-icon"><IconContradicted size={16} /></span>
-                <span>{stats.contradicted}</span>
-              </div>
-              <div className="timeline-stat-label">{L.conflicts}</div>
-            </div>
-            <div className="stat-card timeline-stat-card">
-              <div className="timeline-stat-value timeline-color-superseded">
-                <span className="timeline-stat-icon"><IconSuperseded size={16} /></span>
-                <span>{stats.superseded}</span>
-              </div>
-              <div className="timeline-stat-label">{L.superseded}</div>
-            </div>
+      {loading ? <div className="dash-recent-placeholder" role="status">{copy('正在读取最近变化…', 'Loading recent changes…')}</div>
+        : error ? <div className="dash-inline-notice" role="status"><span>{copy('时间线暂时无法读取。', 'The timeline could not be loaded.')}</span><button className="btn btn-sm" onClick={() => setRetry(value => value + 1)}>{copy('重试时间线', 'Retry timeline')}</button></div>
+        : events.length === 0 ? <div className="dash-recent-placeholder">{copy('最近 90 天暂无记录。整理笔记后，变更会显示在这里。', 'No events in the last 90 days. Changes will appear here after notes are organized.')}</div>
+        : <>
+          {expanded && <div className="timeline-filter-tabs" role="group" aria-label={copy('事件类型', 'Event type')}>
+            {['all', 'created', 'updated', 'contradicted', 'superseded'].map(type => <button key={type} className={`timeline-filter-btn ${type === filter ? 'active' : ''}`} aria-pressed={type === filter} onClick={() => { setFilter(type); setVisibleCount(20); }}>{type === 'all' ? copy('全部', 'All') : labels[type]} <span>{type === 'all' ? events.length : events.filter(event => event.event_type === type).length}</span></button>)}
+          </div>}
+          <div id="dash-timeline-events" className="dash-recent-events">
+            {Array.from(groups, ([group, items]) => <div key={group} className="dash-recent-group"><h3>{group}</h3>{items.map(event => {
+              const date = parseTimestamp(event.event_timestamp);
+              const name = event.note_path.split(/[/\\]/).pop()?.replace(/\.md$/i, '') || event.note_path;
+              return <button key={event.id} className="dash-recent-event" onClick={() => openNote(event.note_path)}>
+                <span className={`dash-event-kind dash-event-kind--${event.event_type}`}>{labels[event.event_type] ?? event.event_type}</span>
+                <span className="dash-recent-event-body"><strong>{name}</strong>{event.event_details && <span>{event.event_details}</span>}</span>
+                <time dateTime={date.toISOString()} title={date.toLocaleString(zh ? 'zh-CN' : 'en-US')}>{date.toLocaleTimeString(zh ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</time>
+              </button>;
+            })}</div>)}
+            {expanded && filtered.length === 0 && <p className="dash-recent-placeholder">{copy('此类型暂无记录。', 'No events of this type.')}</p>}
           </div>
-
-          <div className="timeline-filter-tabs">
-            {['all', 'created', 'contradicted', 'superseded'].map(tab => (
-              <button
-                key={tab}
-                className={`timeline-filter-btn ${filter === tab ? 'active' : ''}`}
-                onClick={() => setFilter(tab)}
-              >
-                {tab === 'all' ? L.all : tab === 'created' ? L.created : tab === 'contradicted' ? L.conflicts : L.superseded}
-              </button>
-            ))}
+          <div className="dash-recent-footer">
+            <button className="btn btn-ghost btn-sm" aria-expanded={expanded} aria-controls="dash-timeline-events" onClick={() => { const next = !expanded; setExpanded(next); try { localStorage.setItem('zettel:dash-timeline-expanded', String(next)); } catch { /* preference */ } }}>
+              {expanded ? copy('收起为最近 5 条', 'Show latest 5') : copy(`查看全部 ${events.length} 条变化`, `View all ${events.length} changes`)}<IconChevronDown size={12} />
+            </button>
+            {expanded && filtered.length > visibleCount && <button className="btn btn-sm" onClick={() => setVisibleCount(count => count + 20)}>{copy('再显示 20 条', 'Show 20 more')}</button>}
           </div>
-
-          {loading ? (
-            <div className="timeline-loading">
-              <div className="timeline-skeleton" />
-              <div className="timeline-skeleton" />
-              <div className="timeline-skeleton" />
-            </div>
-          ) : filteredEvents.length === 0 ? (
-            <div className="timeline-empty">
-              <IconTimeline size={32} />
-              <span>{L.empty}</span>
-            </div>
-          ) : (
-            <div className="timeline-scroll-container">
-              {Object.entries(grouped).map(([group, groupEvents]) => {
-                const isGroupExpanded = !!expandedGroups[group];
-                const visibleEvents = isGroupExpanded ? groupEvents : groupEvents.slice(0, 10);
-                return (
-                  <div key={group} className="timeline-group">
-                    <div className="timeline-group-header">
-                      <span className="timeline-group-line" />
-                      {group}
-                      <span className="timeline-group-line timeline-group-line-flex" />
-                    </div>
-                    <div className="timeline-events-list">
-                      {visibleEvents.map(event => {
-                        const eventStyle = getEventStyle(event.event_type);
-                        return (
-                          <div
-                            key={event.id}
-                            className="timeline-event-card"
-                            onClick={() => setCurrentFile(event.note_path)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter') setCurrentFile(event.note_path); }}
-                          >
-                            <span className="timeline-event-icon" style={{ color: eventStyle.color, background: eventStyle.bg }}>
-                              {getEventIcon(event.event_type)}
-                            </span>
-                            <div className="timeline-event-content">
-                              <div className="timeline-event-header">
-                                <span className="timeline-event-badge" style={{ color: eventStyle.color, background: eventStyle.bg }}>
-                                  {getEventLabel(event.event_type)}
-                                </span>
-                                <span className="timeline-event-note">{getNoteName(event.note_path)}</span>
-                              </div>
-                              {event.event_details && (
-                                <div className="timeline-event-details">{event.event_details.slice(0, 80)}</div>
-                              )}
-                            </div>
-                            <span className="timeline-event-time">{formatDate(event.event_timestamp)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {groupEvents.length > 10 && (
-                      <button
-                        className="btn btn-ghost timeline-more-btn"
-                        onClick={() => setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }))}
-                      >
-                        <span>
-                          {isGroupExpanded
-                            ? (state.lang === 'zh' ? '收起事件' : 'Collapse events')
-                            : (state.lang === 'zh'
-                              ? `查看更多 (${groupEvents.length - 10} 个事件)`
-                              : `View more (${groupEvents.length - 10} events)`)}
-                        </span>
-                        {isGroupExpanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
+        </>}
     </div>
   );
 }

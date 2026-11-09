@@ -18,6 +18,7 @@ import {
 import { AboutSection } from './AboutSection';
 
 interface GeneralSettingsTabProps {
+  section?: 'all' | 'appearance' | 'workspace' | 'storage';
   isZh: boolean;
   methodology: string;
   setMethodology: (m: string) => void;
@@ -44,7 +45,7 @@ const METHODOLOGIES = [
 
 export function GeneralSettingsTab({
   isZh, methodology, setMethodology, showToast, dataPath, dbPath, dailyNotePath, setDailyNotePath,
-  newFolderDefaultPath, setNewFolderDefaultPath,
+  newFolderDefaultPath, setNewFolderDefaultPath, section = 'all',
 }: GeneralSettingsTabProps) {
   const { state, setAppLang } = useApp();
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -74,6 +75,7 @@ export function GeneralSettingsTab({
 
   return (
     <div className="settings-tab-content">
+      {(section === 'all' || section === 'appearance') && <>
       {/* Language */}
       <div className="settings-section-card">
         <h2 style={sectionTitle}>
@@ -137,6 +139,8 @@ export function GeneralSettingsTab({
         </div>
       </div>
 
+      </>}
+      {(section === 'all' || section === 'workspace') && <>
       {/* Methodology */}
       <div className="settings-section-card">
         <h2 style={sectionTitle}>
@@ -278,6 +282,8 @@ export function GeneralSettingsTab({
       </div>
 
 
+      </>}
+      {(section === 'all' || section === 'storage') && <>
       {/* Data Storage */}
       <div className="settings-section-card storage-card">
         <h2 style={sectionTitle}><IconDatabase size={18} /> {t('settings.dataStorage')}</h2>
@@ -332,6 +338,8 @@ export function GeneralSettingsTab({
         </div>
       </div>
 
+      </>}
+      {(section === 'all' || section === 'appearance') && <>
       {/* About */}
       <div className="settings-section-card about-card">
         <h2 style={{ ...sectionTitle, cursor: 'pointer', userSelect: 'none' }} onClick={() => setAboutOpen(!aboutOpen)}>
@@ -345,6 +353,7 @@ export function GeneralSettingsTab({
         )}
       </div>
 
+      </>}
       {/* Clear Data Dialog */}
       {showClearConfirm && (
         <ClearDataDialog onClose={() => setShowClearConfirm(false)} showToast={showToast} />

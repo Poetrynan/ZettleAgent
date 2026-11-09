@@ -331,6 +331,7 @@ pipeline_log::init(&app_data_dir);
             commands::prepare_embedding_build,
             commands::record_embedding_failures,
             commands::retry_failed_embeddings,
+            commands::reset_embedding_index,
             commands::save_chunk_embeddings,
             commands::finalize_embedding_index,
             commands::get_embedding_stats,

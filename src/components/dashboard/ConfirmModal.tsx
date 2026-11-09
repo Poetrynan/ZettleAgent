@@ -48,8 +48,9 @@ export function ConfirmModal({
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement;
-      // Focus confirm button after mount
-      setTimeout(() => confirmBtnRef.current?.focus(), 50);
+      // Put the non-destructive choice first for rebuilds and other warnings.
+      const timer = setTimeout(() => modalRef.current?.querySelector<HTMLButtonElement>('button')?.focus(), 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 

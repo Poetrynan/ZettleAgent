@@ -117,6 +117,23 @@ pub fn content_hash(text: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Discard derived vectors for an explicit manual rebuild. Keep note/chunk text,
+/// lexical indexes, model configuration, and user-authored relations intact.
+pub fn reset_index(conn: &mut Connection) -> rusqlite::Result<usize> {
+    let tx = conn.transaction()?;
+    let cleared = tx.execute("UPDATE chunks SET embedding = NULL WHERE embedding IS NOT NULL", [])?;
+    tx.execute_batch(
+        "DELETE FROM chunks_vec;
+         DELETE FROM files_vec;
+         DELETE FROM embedding_cache;
+         DELETE FROM semantic_edges;
+         DELETE FROM embedding_failures;
+         DELETE FROM graph_cache;",
+    )?;
+    tx.commit()?;
+    Ok(cleared)
+}
+
 /// Encode `f32` vector to the little-endian blob layout used by both
 /// `chunks.embedding` and the `chunks_vec` virtual table.
 pub fn vec_to_blob(v: &[f32]) -> Vec<u8> {
@@ -332,6 +349,31 @@ mod tests {
         assert_eq!(stats(&conn).entries, 0, "text-keyed cache would hand old vectors back");
         let vec_rows: i64 = conn.query_row("SELECT COUNT(*) FROM chunks_vec", [], |r| r.get(0)).unwrap();
         assert_eq!(vec_rows, 0);
+    }
+
+    #[test]
+    fn manual_rebuild_preserves_notes_chunks_and_lexical_search() {
+        let mut conn = db_with_vectors();
+        assert_eq!(reset_index(&mut conn).unwrap(), 1);
+        assert_eq!(embedded(&conn), 0);
+        assert_eq!(stats(&conn).entries, 0);
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+        let text: String = conn.query_row("SELECT content FROM chunks WHERE id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(text, "text");
+        let hits: i64 = conn.query_row("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'text'", [], |r| r.get(0)).unwrap();
+        assert_eq!(hits, 1);
+    }
+
+    #[test]
+    fn failed_manual_rebuild_rolls_back_the_vectors() {
+        let mut conn = db_with_vectors();
+        conn.execute_batch("CREATE TRIGGER reject_cache_delete BEFORE DELETE ON embedding_cache BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        assert!(reset_index(&mut conn).is_err());
+        assert_eq!(embedded(&conn), 1);
+        assert_eq!(stats(&conn).entries, 1);
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM chunks_vec", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

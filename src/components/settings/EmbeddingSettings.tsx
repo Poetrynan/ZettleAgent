@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { IconChevronRight, IconDatabase, IconBrain, IconPlug, IconSync, IconWarning } from '../icons';
 import { sectionTitle, rowBetween, rowLabel } from './settingsStyles';
-import { getEmbeddingStats, retryFailedEmbeddings, EmbeddingStats } from '../../lib/tauri';
-import { LOCAL_EMBED_MODEL_ID } from '../../lib/embeddingModel';
+import { getEmbeddingStats, retryFailedEmbeddings, resetEmbeddingIndex, getSchedulerStatus, EmbeddingStats } from '../../lib/tauri';
+import { LOCAL_EMBED_MODEL_ID, EMBEDDING_DIM } from '../../lib/embeddingModel';
 import { runEmbeddingBuild, buildStageText, describeBuild } from '../../lib/embeddingIndexer';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { useSettingsDraft } from './SettingsDrafts';
 import { detectHardware, recommendConfig, getGpuSummary, type HardwareProfile, type RecommendedConfig } from '../../lib/hardwareDetect';
 
 type EmbeddingMode = 'local' | 'custom';
@@ -21,9 +22,9 @@ const STORAGE_KEY = 'zettelagent:embedding_config';
 function loadConfig(): EmbeddingConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { mode: 'local', apiUrl: '', model: '', ...JSON.parse(raw), dimensions: EMBEDDING_DIM };
   } catch { /* ignore */ }
-  return { mode: 'local', apiUrl: '', model: '', dimensions: 1536 };
+  return { mode: 'local', apiUrl: '', model: '', dimensions: EMBEDDING_DIM };
 }
 
 function saveConfig(cfg: EmbeddingConfig) {
@@ -46,8 +47,12 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
   const [mode, setMode] = useState<EmbeddingMode>('local');
   const [customApiUrl, setCustomApiUrl] = useState('');
   const [customModel, setCustomModel] = useState('');
-  const [customDimensions, setCustomDimensions] = useState(1536);
+  const [customDimensions, setCustomDimensions] = useState(EMBEDDING_DIM);
   const [configSaved, setConfigSaved] = useState(false);
+  const [configError, setConfigError] = useState('');
+  const [savedConfig, setSavedConfig] = useState(loadConfig);
+  const configDirty = mode !== savedConfig.mode || customApiUrl !== savedConfig.apiUrl || customModel !== savedConfig.model;
+  useSettingsDraft('search', configDirty);
 
   // Hardware detection state
   const [hwProfile, setHwProfile] = useState<HardwareProfile | null>(null);
@@ -82,12 +87,16 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
       .finally(() => setHwDetecting(false));
   }, []);
 
-  const handleBuildIndex = async () => {
-    if (stats && stats.total_chunks > 0 && stats.indexed_chunks === stats.total_chunks) {
+  const handleBuildIndex = async (rebuild = false) => {
+    if (building || configDirty) return;
+    setBuilding(true);
+    setBuildResult(null);
+    try {
+    if (rebuild) {
       const confirmRebuild = await ask(
         isZh
-          ? '当前所有笔记均已建立向量索引（进度已达 100%），重新构建可能需要一些时间。是否确定继续重新构建？'
-          : 'All notes are already indexed (100%). Rebuilding may take some time. Are you sure you want to continue?',
+          ? '将清除语义向量及其缓存后重新生成。笔记、全文搜索和手动关联将保留；远程模型会产生新的请求费用。'
+          : 'Clear existing vectors and their cache, then generate them again. Notes, keyword search, and manual relations are preserved. Remote models incur new requests.',
         {
           title: isZh ? '重新构建索引' : 'Rebuild Index',
           kind: 'warning',
@@ -98,17 +107,19 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
       if (!confirmRebuild) return;
     }
 
-    setBuilding(true);
-    setBuildResult(null);
     setBuildStage(isZh ? '正在初始化向量模块...' : 'Initializing embedding module...');
     cancelRef.current = false;
 
-    try {
       if (mode === 'custom' && !customApiUrl) {
         throw new Error(isZh ? 'API Endpoint 不能为空' : 'API Endpoint cannot be empty');
       }
       if (mode === 'custom' && !customModel) {
         throw new Error(isZh ? '模型名称不能为空' : 'Model name cannot be empty');
+      }
+      if (rebuild) {
+        const scheduler = await getSchedulerStatus();
+        if (scheduler.running) throw new Error(isZh ? '请先暂停后台整理再重建索引。' : 'Pause background organization before rebuilding the index.');
+        await resetEmbeddingIndex();
       }
       // Custom requests are issued by Rust: the API key lives in the OS
       // credential store and has no getter (see `fetchCustomEmbeddings`).
@@ -128,8 +139,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
       setStats(finalStats);
     } catch (e: any) {
       setBuildResult(isZh ? `构建失败: ${e.message || e}` : `Build failed: ${e.message || e}`);
-    }
-    setBuilding(false);
+    } finally { setBuilding(false); }
   };
 
   /** Clear remembered failures, then build so those chunks are tried right away. */
@@ -145,14 +155,22 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
 
   const handleModeChange = useCallback((newMode: EmbeddingMode) => {
     setMode(newMode);
-    saveConfig({ mode: newMode, apiUrl: customApiUrl, model: customModel, dimensions: customDimensions });
-  }, [customApiUrl, customModel, customDimensions]);
+    setConfigSaved(false);
+    setConfigError('');
+  }, []);
 
   const handleSaveCustomConfig = useCallback(() => {
-    saveConfig({ mode, apiUrl: customApiUrl, model: customModel, dimensions: customDimensions });
-    setConfigSaved(true);
-    setTimeout(() => setConfigSaved(false), 2000);
-  }, [mode, customApiUrl, customModel, customDimensions]);
+    const next = { mode, apiUrl: customApiUrl.trim(), model: customModel.trim(), dimensions: EMBEDDING_DIM };
+    setConfigError('');
+    try {
+      if (mode === 'custom') {
+        const url = new URL(next.apiUrl);
+        if (!['http:', 'https:'].includes(url.protocol) || !next.model) throw new Error(isZh ? '请填写 HTTP(S) 服务地址和模型名称。' : 'Enter an HTTP(S) endpoint and a model name.');
+      }
+      saveConfig(next); setSavedConfig(next); setCustomApiUrl(next.apiUrl); setCustomModel(next.model);
+      setConfigSaved(true);
+    } catch (error) { setConfigError((isZh ? '保存失败：' : 'Save failed: ') + String(error)); }
+  }, [mode, customApiUrl, customModel, isZh]);
 
   const progressPercent = stats ? (stats.total_chunks > 0 ? Math.round((stats.indexed_chunks / stats.total_chunks) * 100) : 0) : 0;
 
@@ -172,18 +190,16 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
 
   return (
     <div className="settings-section-card">
-      <h2
-        style={{ ...sectionTitle, cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setExpanded(!expanded)}
-      >
+      <h2 style={sectionTitle}><button type="button" className="settings-disclosure" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         <span style={{ display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
           <IconChevronRight size={18} />
         </span>
         <IconDatabase size={18} /> {isZh ? '嵌入向量引擎' : 'Embedding Engine'}
-      </h2>
+      </button></h2>
 
       {expanded && (
         <>
+          <details className="settings-hardware-details"><summary>{isZh ? '硬件与性能参考' : 'Hardware & performance'}</summary>
           {/* Hardware Auto-Detection Card */}
           <div style={{
             padding: 'var(--space-4)',
@@ -308,15 +324,16 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                     // Apply recommendation: switch to local mode with recommended backend
                     handleModeChange('local');
                     // Store recommended batch size for build process
-                    localStorage.setItem('zettelagent:embedding_batch_size', String(hwRecommend.batchSize));
+                    // The active embedding engine chooses its backend; this action selects the built-in model only.
                   }}
                 >
-                  {isZh ? '应用' : 'Apply'}
+                  {isZh ? '选择内置模型' : 'Select built-in model'}
                 </button>
               </div>
             )}
           </div>
 
+          </details>
           {/* Mode selector - pill toggle */}
           <div style={{
             display: 'flex',
@@ -365,7 +382,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                 gap: '6px',
               }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success, #22c55e)', display: 'inline-block' }} />
-                {isZh ? '前端 Wasm/WebGPU 引擎就绪 · 模型将缓存于浏览器' : 'Frontend WASM/WebGPU engine ready · Model will be cached in browser'}
+                {isZh ? '按需加载本地模型；首次使用时可能需要等待。' : 'The local model loads on demand; first use may take a moment.'}
               </div>
             </div>
           )}
@@ -432,7 +449,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                     className="settings-input"
                     value={customModel}
                     onChange={e => setCustomModel(e.target.value)}
-                    placeholder="text-embedding-3-small"
+                    placeholder={isZh ? '填写返回 768 维向量的模型 ID' : 'Model ID that returns 768-dimensional vectors'}
                     style={{
                       fontSize: 'var(--text-sm)',
                       background: 'var(--bg-primary)',
@@ -451,8 +468,10 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                     className="settings-input"
                     type="number"
                     value={customDimensions}
-                    onChange={e => setCustomDimensions(Number(e.target.value))}
-                    placeholder="1536"
+                    readOnly
+                    aria-label={isZh ? '固定向量维度' : 'Fixed vector dimensions'}
+                    title={isZh ? '此版本索引只支持 768 维' : 'This index supports 768-dimensional vectors'}
+                    placeholder="768"
                     style={{
                       fontSize: 'var(--text-sm)',
                       fontFamily: 'var(--font-mono)',
@@ -466,19 +485,11 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                 </div>
               </div>
 
-              {/* Save button */}
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button
-                  className="btn btn-sm btn-primary"
-                  onClick={handleSaveCustomConfig}
-                  style={{ minWidth: '100px' }}
-                >
-                  {configSaved ? (isZh ? '✓ 已保存' : '✓ Saved') : (isZh ? '保存配置' : 'Save Config')}
-                </button>
-              </div>
             </div>
           )}
 
+          <div className="settings-embedding-save-row"><button className="btn btn-sm" disabled={!configDirty || building} onClick={handleSaveCustomConfig}>{configSaved ? (isZh ? '已保存' : 'Saved') : (isZh ? '保存检索配置' : 'Save retrieval configuration')}</button>{configDirty && <button className="btn btn-ghost btn-sm" disabled={building} onClick={() => { setMode(savedConfig.mode); setCustomApiUrl(savedConfig.apiUrl); setCustomModel(savedConfig.model); setConfigError(''); setConfigSaved(false); }}>{isZh ? '丢弃草稿' : 'Discard draft'}</button>}<span>{configDirty ? (isZh ? '有草稿，保存后可更新索引。' : 'Save this draft before updating the index.') : (isZh ? '已保存的配置用于全部知识库。索引固定为 768 维。' : 'Saved configuration applies to all vaults. The index uses 768 dimensions.')}</span></div>
+          {configError && <p role="alert" className="settings-warning">{configError}</p>}
           {/* Index stats with progress bar */}
           {stats && (
             <div style={{
@@ -530,7 +541,7 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
                       ? `${stats.retrying_chunks ?? 0} 个分块等待重试，${stats.failed_chunks ?? 0} 个多次失败已跳过`
                       : `${stats.retrying_chunks ?? 0} chunks waiting to retry, ${stats.failed_chunks ?? 0} skipped after repeated failures`}
                   </span>
-                  <button className="btn btn-sm btn-secondary" disabled={building} onClick={handleRetryFailed}>
+                  <button className="btn btn-sm btn-secondary" disabled={building || configDirty} onClick={handleRetryFailed}>
                     {isZh ? '立即重试' : 'Retry now'}
                   </button>
                   {stats.last_error && (
@@ -554,16 +565,17 @@ export function EmbeddingConfigSection({ isZh }: { isZh: boolean }) {
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               className={`btn btn-sm ${building ? 'btn-secondary' : 'btn-primary'}`}
-              onClick={handleBuildIndex}
-              disabled={building}
+              onClick={() => void handleBuildIndex()}
+              disabled={building || configDirty}
               style={{ minWidth: '140px' }}
             >
               {building
                 ? (<><span className="spinner" style={{ width: 14, height: 14 }} /> {isZh ? '构建中...' : 'Building...'}</>)
-                : (<><IconSync size={14} /> {isZh ? '构建 / 刷新索引' : 'Build / Refresh Index'}</>)}
+                : (<><IconSync size={14} /> {isZh ? '更新索引' : 'Update index'}</>)}
             </button>
           </div>
 
+          <button className="btn btn-ghost btn-sm" disabled={building || configDirty} onClick={() => void handleBuildIndex(true)}>{isZh ? '全部重建向量…' : 'Rebuild all vectors…'}</button>
           {/* Build result */}
           {buildResult && (
             <div style={{

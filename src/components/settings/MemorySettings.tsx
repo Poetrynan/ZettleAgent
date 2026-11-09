@@ -9,8 +9,9 @@ import {
   exportAllSessions, getSetting, setSetting, getDataPath,
 } from '../../lib/tauri';
 
-export function AiMemorySection() {
-  const { showToast } = useApp();
+export function AiMemorySection({ section = 'all' }: { section?: 'all' | 'memory' | 'storage' } = {}) {
+  const { state, showToast } = useApp();
+  const isZh = state.lang === 'zh';
   const [memories, setMemories] = useState<{ id: number; content: string; category: string; createdAt: string }[]>([]);
   const [newMemory, setNewMemory] = useState('');
   const [chatExportPath, setChatExportPath] = useState('');
@@ -89,19 +90,17 @@ export function AiMemorySection() {
 
   return (
     <div className="settings-section-card">
-      <h2
-        style={{ ...sectionTitle, cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setExpanded(!expanded)}
-      >
+      <h2 style={sectionTitle}><button type="button" className="settings-disclosure" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         <span style={{ display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
           <IconChevronRight size={18} />
         </span>
         <IconBrain size={18} />
-        {t('memory.title')}
-      </h2>
+        {section === 'storage' ? (isZh ? '数据库与导出' : 'Database & exports') : t('memory.title')}
+      </button></h2>
 
       {expanded && (
         <>
+          {section !== 'memory' && <>
           {/* Data storage info + Custom DB Path */}
           <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
             <div style={{ ...labelStyle, fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: '6px' }}><IconDatabase size={14} /> {t('memory.dbPath')}</div>
@@ -195,6 +194,8 @@ export function AiMemorySection() {
             </div>
           </div>
 
+          </>}
+          {section !== 'storage' && <>
           {/* Memory entries */}
           <div>
             <div style={labelStyle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> {t('memory.entries')} ({memories.length})</div>
@@ -224,6 +225,8 @@ export function AiMemorySection() {
             </div>
           </div>
 
+          </>}
+          {section !== 'memory' && <>
           {/* Export paths */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 'var(--space-3)' }}>
             <div style={labelStyle}><IconFolder size={14} /> {t('memory.chatExportPath')}</div>
@@ -245,6 +248,8 @@ export function AiMemorySection() {
             </div>
           </div>
 
+          </>}
+          {section !== 'storage' && <>
           {/* Memory threshold */}
           <div>
             <div style={labelStyle}><IconSettings size={14} /> {t('memory.threshold')}</div>
@@ -262,6 +267,8 @@ export function AiMemorySection() {
             </div>
           </div>
 
+          </>}
+          {section !== 'memory' && <>
           {/* Export all button */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 'var(--space-3)' }}>
             <button
@@ -276,6 +283,7 @@ export function AiMemorySection() {
             </button>
           </div>
 
+          </>}
           {error && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--danger)' }}>{error}</div>}
         </>
       )}

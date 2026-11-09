@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
 
 import { invoke } from '@tauri-apps/api/core';
 import { t, tf } from '../../lib/i18n';
 import { getProvider } from '../../lib/llm-providers';
-import { clearData, clearDataSelective } from '../../lib/tauri';
+import { clearData, clearDataSelective, chatWithLlm } from '../../lib/tauri';
 import {
   IconSettings, IconGlobe,
   IconTrash, IconSliders, IconKeyboard, IconBrain, IconDatabase,
-  IconNote, IconSearch, IconFile, IconSync, IconPlug,
+  IconNote, IconSearch, IconFile, IconSync, IconPlug, IconFolder, IconKey,
 } from '../icons';
 import { loadDailyNotePath, loadNewFolderDefaultPath } from '../../lib/storage';
 
@@ -25,273 +25,191 @@ import { CoreMemorySection } from './CoreMemorySettings';
 import { EmbeddingConfigSection } from './EmbeddingSettings';
 import { SecuritySettingsSection } from './SecuritySettings';
 
+import { open as openFolder } from '@tauri-apps/plugin-dialog';
+import { ConfirmModal } from '../dashboard/ConfirmModal';
+import { SETTINGS_CATEGORIES, searchSettings, type SettingsPage } from './settingsCatalog';
+import { SettingsDrafts, useSettingsDraft } from './SettingsDrafts';
+import type { View } from '../../contexts/BaseContext';
+import '../../styles/settings-workbench.css';
 
 export function Settings() {
-  const { state, setAppLang, setLlmConfig, setMethodology, showToast } = useApp();
+  const { state, setLlmConfig, setMethodology, showToast, setView, addVaultPath, removeVaultPath, setPrimaryVaultPath } = useApp();
   const { llmConfig } = state;
+  const isZh = state.lang === 'zh';
+  const copy = (zh: string, en: string) => isZh ? zh : en;
+  const [active, setActive] = useState<SettingsPage>('general');
+  const [visited, setVisited] = useState<Set<SettingsPage>>(() => new Set(['general']));
+  const [query, setQuery] = useState('');
+  const [localProvider, setLocalProvider] = useState(llmConfig.providerId);
   const [localApiUrl, setLocalApiUrl] = useState(llmConfig.apiUrl);
-  const [localApiKey, setLocalApiKey] = useState(llmConfig.apiKey);
+  const [localApiKey, setLocalApiKey] = useState('');
+  const [keyAction, setKeyAction] = useState<'preserve' | 'replace' | 'clear'>('preserve');
   const [localModel, setLocalModel] = useState(llmConfig.model);
-  const [customModel, setCustomModel] = useState('');
-  const [localSupportsThinking, setLocalSupportsThinking] = useState(llmConfig.supportsThinking || false);
+  const [localSupportsThinking, setLocalSupportsThinking] = useState(!!llmConfig.supportsThinking);
   const [saved, setSaved] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState('');
   const [dataPath, setDataPath] = useState('');
   const [dbPath, setDbPath] = useState('');
   const [dailyNotePath, setDailyNotePath] = useState<string | null>(null);
   const [newFolderDefaultPath, setNewFolderDefaultPath] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'review' | 'ext' | 'memory' | 'organize' | 'shortcuts'>('general');
-
-  const currentProvider = getProvider(llmConfig.providerId);
-  const isZh = state.lang === 'zh';
-
-  // Load data paths and daily note path on mount
+  const [drafts, setDrafts] = useState<Record<string, boolean>>({});
+  const [leaving, setLeaving] = useState<View | null>(null);
+  const allowLeave = useRef(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const hasChanges = localProvider !== llmConfig.providerId || localApiUrl !== llmConfig.apiUrl || localModel !== llmConfig.model || localSupportsThinking !== !!llmConfig.supportsThinking || keyAction !== 'preserve';
+  const dirty = hasChanges || Object.values(drafts).some(Boolean);
+  const reportDraft = useCallback((id: string, value: boolean) => setDrafts(old => old[id] === value ? old : { ...old, [id]: value }), []);
+  const results = searchSettings(query);
+  const visible = query.trim() ? results.map(item => item.id) : [active];
   useEffect(() => {
-    const loadPaths = async () => {
-      try {
-        const path = await invoke<string>('get_data_path');
-        setDataPath(path);
-        const db = await invoke<string>('get_db_path');
-        setDbPath(db);
-      } catch (err) {
-        console.error('Failed to load data paths:', err);
-      }
-      try {
-        const dp = await loadDailyNotePath();
-        setDailyNotePath(dp);
-      } catch (err) {
-        console.error('Failed to load daily note path:', err);
-      }
-      try {
-        const nfp = await loadNewFolderDefaultPath();
-        setNewFolderDefaultPath(nfp);
-      } catch (err) {
-        console.error('Failed to load new folder default path:', err);
+    if (query.trim()) setVisited(previous => new Set([...previous, ...searchSettings(query).map(item => item.id)]));
+  }, [query]);
+  const icons = { general: IconSettings, workspace: IconFolder, models: IconBrain, agent: IconSliders, memory: IconNote, tools: IconPlug, search: IconSearch, permissions: IconKey, review: IconSync, storage: IconDatabase, shortcuts: IconKeyboard };
+  const groups = [
+    { id: 'workbench', label: copy('工作台', 'Workbench') },
+    { id: 'agent', label: 'Agent' },
+    { id: 'system', label: copy('系统', 'System') },
+  ];
+
+  useEffect(() => {
+    let alive = true;
+    const assign = <T,>(promise: Promise<T>, setter: (value: T) => void) => {
+      void promise.then(value => { if (alive) setter(value); }).catch(() => {});
+    };
+    assign(invoke<string>('get_data_path'), setDataPath);
+    assign(invoke<string>('get_db_path'), setDbPath);
+    assign(loadDailyNotePath(), setDailyNotePath);
+    assign(loadNewFolderDefaultPath(), setNewFolderDefaultPath);
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    setLocalProvider(llmConfig.providerId); setLocalApiUrl(llmConfig.apiUrl);
+    setLocalModel(llmConfig.model); setLocalSupportsThinking(!!llmConfig.supportsThinking);
+    setLocalApiKey(''); setKeyAction('preserve');
+  }, [llmConfig.providerId, llmConfig.apiUrl, llmConfig.model, llmConfig.supportsThinking]);
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      if (state.view === 'settings' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault(); searchRef.current?.focus(); searchRef.current?.select();
       }
     };
-    loadPaths();
-  }, []);
-
-
-  // Sync local state when provider changes (from outside, e.g. loaded from store)
+    const beforeLeave = (event: Event) => {
+      const next = (event as CustomEvent<{ view: View }>).detail?.view;
+      if (saving && next && next !== 'settings') { event.preventDefault(); return; }
+      if (dirty && !allowLeave.current && next && next !== 'settings') { event.preventDefault(); setLeaving(next); }
+    };
+    const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('keydown', keyboard);
+    window.addEventListener('zettel:before-navigate', beforeLeave);
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => { window.removeEventListener('keydown', keyboard); window.removeEventListener('zettel:before-navigate', beforeLeave); window.removeEventListener('beforeunload', beforeUnload); };
+  }, [dirty, saving, state.view]);
   useEffect(() => {
-    setLocalApiUrl(llmConfig.apiUrl);
-    setLocalApiKey(llmConfig.apiKey);
-    setLocalModel(llmConfig.model);
-    setLocalSupportsThinking(llmConfig.supportsThinking || false);
-  }, [llmConfig.providerId]);
+    if (!saved) return;
+    const timer = setTimeout(() => setSaved(false), 2000);
+    return () => clearTimeout(timer);
+  }, [saved]);
 
-
-
-  const handleProviderChange = (providerId: string) => {
-    const provider = getProvider(providerId);
-    if (!provider) return;
-    const newApiUrl = provider.baseUrl;
-    const newModel = provider.models[0]?.id || '';
-    
-    setLocalApiUrl(newApiUrl);
-    setLocalModel(newModel);
-    setHasChanges(true);
-    
-    // Update provider immediately, but don't save yet
-    setLlmConfig({
-      providerId,
-      apiUrl: newApiUrl,
-      model: newModel,
-    });
+  const navigate = (id: SettingsPage) => { if (saving) return; setActive(id); setQuery(''); setVisited(prev => new Set([...prev, id])); };
+  const dirtyModel = () => { setSaved(false); setSaveError(''); setTestResult(''); };
+  const resetConnection = () => {
+    setLocalProvider(llmConfig.providerId); setLocalApiUrl(llmConfig.apiUrl); setLocalModel(llmConfig.model);
+    setLocalSupportsThinking(!!llmConfig.supportsThinking); setLocalApiKey(''); setKeyAction('preserve'); setSaveError('');
   };
-
-  const handleModelChange = (modelId: string) => {
-    setLocalModel(modelId);
-    setCustomModel('');
-    setHasChanges(true);
+  const changeProvider = (id: string) => {
+    const provider = getProvider(id); if (!provider) return;
+    setLocalProvider(id); setLocalApiKey(''); setKeyAction(id === llmConfig.providerId ? 'preserve' : 'clear');
+    setLocalApiUrl(id === llmConfig.providerId ? llmConfig.apiUrl : provider.baseUrl);
+    setLocalModel(id === llmConfig.providerId ? llmConfig.model : provider.models[0]?.id || ''); dirtyModel();
   };
-
-  const handleSaveConfig = () => {
-    // Resolve contextWindow from the selected model's preset, if available.
-    // This gives the backend accurate context-budget info instead of model-name heuristics.
-    const presetModel = currentProvider?.models.find(m => m.id === localModel);
-    const customModelMatch = !presetModel
-      ? currentProvider?.models.find(m => m.id === llmConfig.model)
-      : undefined;
-
-    setLlmConfig({
-      providerId: llmConfig.providerId,
-      apiUrl: localApiUrl,
-      apiKey: localApiKey,
-      model: localModel,
-      contextWindow: presetModel?.contextWindow ?? customModelMatch?.contextWindow,
+  const handleSaveConfig = async () => {
+    if (saving) return;
+    setSaveError('');
+    let url: URL;
+    try { url = new URL(localApiUrl.trim()); if (!['http:', 'https:'].includes(url.protocol)) throw new Error(); }
+    catch { setSaveError(copy('请输入有效的 HTTP 或 HTTPS 服务地址。', 'Enter a valid HTTP or HTTPS endpoint.')); return; }
+    if (!localModel.trim()) { setSaveError(copy('请填写模型名称。', 'Enter a model name.')); return; }
+    const provider = getProvider(localProvider);
+    let originChanged = localProvider !== llmConfig.providerId;
+    try { originChanged ||= new URL(llmConfig.apiUrl).origin !== url.origin; } catch { originChanged = true; }
+    if (originChanged && provider?.needsApiKey && keyAction !== 'replace') {
+      setSaveError(copy('更换模型服务后，请为新服务填写密钥。原有密钥不会被自动发送到新服务。', 'Enter a credential for the new service. The saved key is not reused across services.')); return;
+    }
+    const payload: Record<string, unknown> = {
+      providerId: localProvider, apiUrl: localApiUrl.trim(), model: localModel.trim(),
       supportsThinking: localSupportsThinking,
-    });
-    
-    setSaved(true);
-    setHasChanges(false);
-    showToast(
-      t('settings.modelSaved'),
-      'success'
-    );
-    setTimeout(() => setSaved(false), 2000);
+      contextWindow: provider?.models.find(item => item.id === localModel.trim())?.contextWindow,
+    };
+    if (keyAction === 'replace') payload.apiKey = localApiKey.trim();
+    if (keyAction === 'clear') payload.apiKey = '';
+    setSaving(true);
+    try {
+      await setLlmConfig(payload); setSaved(true); setLocalApiKey(''); setKeyAction('preserve');
+      showToast(copy('模型连接已保存', 'Connection saved'), 'success');
+    } catch (error) { setSaveError(copy('保存失败：', 'Save failed: ') + String(error)); }
+    finally { setSaving(false); }
   };
-  return (
-    <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="settings-layout" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {/* Settings Atlas — persistent left rail */}
-        <nav className="settings-atlas-rail" aria-label={isZh ? '设置分类' : 'Settings categories'}>
-          <div className="settings-atlas-rail-title">
-            {isZh ? '设置' : 'Settings'}
-          </div>
-          <div className="settings-atlas-items">
-            {([
-              { id: 'general', icon: <IconSettings size={15} />, label: t('settings.tabGeneral') },
-              { id: 'ai', icon: <IconBrain size={15} />, label: t('settings.tabAi') },
-              { id: 'review', icon: <IconSync size={15} />, label: t('settings.tabReview') },
-              { id: 'ext', icon: <IconGlobe size={15} />, label: t('settings.tabExt') },
-              { id: 'memory', icon: <IconDatabase size={15} />, label: t('settings.tabMemory') },
-              { id: 'organize', icon: <IconSliders size={15} />, label: t('settings.tabOrganize') },
-              { id: 'shortcuts', icon: <IconKeyboard size={15} />, label: isZh ? '快捷键' : 'Shortcuts' },
-            ] as const).map(item => (
-              <button
-                key={item.id}
-                type="button"
-                className={`settings-atlas-item ${activeTab === item.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(item.id)}
-                aria-current={activeTab === item.id ? 'page' : undefined}
-              >
-                {item.icon}
-                <span className="settings-atlas-item-label">{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
+  const testConnection = async () => {
+    if (hasChanges || testing) return;
+    setTesting(true); setTestResult('');
+    try {
+      await chatWithLlm({ messages: [{ role: 'user', content: 'Reply with OK.' }], apiUrl: llmConfig.apiUrl,
+        apiKey: llmConfig.apiKey || undefined, model: llmConfig.model, providerId: llmConfig.providerId });
+      setTestResult(copy('服务已返回响应。', 'The service returned a response.'));
+    } catch (error) { setTestResult(copy('连接测试失败：', 'Connection test failed: ') + String(error)); }
+    finally { setTesting(false); }
+  };
+  const generalProps = { isZh, methodology: state.methodology, setMethodology: (m: string) => setMethodology(m as any), showToast, dataPath, dbPath, dailyNotePath, setDailyNotePath, newFolderDefaultPath, setNewFolderDefaultPath };
+  const renderPage = (id: SettingsPage) => {
+    switch (id) {
+      case 'general': return <GeneralSettingsTab {...generalProps} section="appearance" />;
+      case 'workspace': return <>
+        <div className="settings-section-card settings-vaults"><h3>{copy('已打开的知识库', 'Open vaults')}</h3>
+          <p>{copy('知识库是存放 Markdown 笔记的本地文件夹。移出工作区不会删除文件。', 'A vault is a local folder of Markdown notes. Removing it from the workspace keeps its files.')}</p>
+          {(state.vaultPaths?.length ? state.vaultPaths : state.vaultPath ? [state.vaultPath] : []).map(path => <div className="settings-vault-row" key={path}><div><strong>{path.split(/[/\\]/).filter(Boolean).pop()}</strong><code>{path}</code></div>{path === state.vaultPath ? <span>{copy('主知识库', 'Primary')}</span> : <button className="btn btn-sm" onClick={() => void setPrimaryVaultPath(path)}>{copy('设为主库', 'Make primary')}</button>}<button className="btn btn-ghost btn-sm" aria-label={copy(`移出工作区：${path}`, `Remove from workspace: ${path}`)} onClick={() => void removeVaultPath(path)}>{copy('移出', 'Remove')}</button></div>)}
+          <button className="btn btn-sm" onClick={async () => { try { const path = await openFolder({ directory: true, multiple: false }); if (typeof path === 'string') await addVaultPath(path); } catch (error) { showToast(String(error), 'error'); } }}>{copy('打开知识库…', 'Open vault…')}</button>
+        </div><GeneralSettingsTab {...generalProps} section="workspace" /></>;
+      case 'models': return <AiSettingsTab isZh={isZh} llmConfig={llmConfig} draftProviderId={localProvider}
+        localApiUrl={localApiUrl} setLocalApiUrl={setLocalApiUrl} localApiKey={localApiKey}
+        setLocalApiKey={value => { setLocalApiKey(value); setKeyAction(value ? 'replace' : 'preserve'); }}
+        localModel={localModel} setLocalModel={setLocalModel} customModel="" setCustomModel={() => {}}
+        localSupportsThinking={localSupportsThinking} setLocalSupportsThinking={setLocalSupportsThinking}
+        saved={saved} hasChanges={hasChanges} saving={saving} saveError={saveError} keyAction={keyAction}
+        handleProviderChange={changeProvider} handleModelChange={value => { setLocalModel(value); dirtyModel(); }}
+        handleSaveConfig={handleSaveConfig} onConfigDirty={dirtyModel} onDiscard={resetConnection}
+        onRemoveKey={() => { setLocalApiKey(''); setKeyAction('clear'); dirtyModel(); }}
+        onTest={testConnection} testing={testing} testResult={testResult} />;
+      case 'agent': return <OrganizeSettingsTab isZh={isZh} />;
+      case 'search': return <><EmbeddingConfigSection isZh={isZh} /><RerankSettingsSection /></>;
+      case 'memory': return <><CoreMemorySection /><AiMemorySection section="memory" /></>;
+      case 'tools': return <><McpServersSection isZh={isZh} /><McpServerExposeSection /><SkillDirectoriesSection /></>;
+      case 'permissions': return <SecuritySettingsSection isZh={isZh} vaultPath={state.vaultPath} />;
+      case 'review': return <ReviewSettingsSection />;
+      case 'storage': return <><AiMemorySection section="storage" /><GeneralSettingsTab {...generalProps} section="storage" /></>;
+      case 'shortcuts': return <ShortcutsSettingsTab isZh={isZh} key={state.lang} />;
+    }
+  };
 
-        {/* Right: documented configuration surface */}
-        <div className="settings-content-wrapper">
-          {activeTab === 'general' && (
-            <GeneralSettingsTab
-              isZh={isZh}
-              methodology={state.methodology}
-              setMethodology={(m) => setMethodology(m as any)}
-              showToast={showToast}
-              dataPath={dataPath}
-              dbPath={dbPath}
-              dailyNotePath={dailyNotePath}
-              setDailyNotePath={setDailyNotePath}
-              newFolderDefaultPath={newFolderDefaultPath}
-              setNewFolderDefaultPath={setNewFolderDefaultPath}
-            />
-          )}
-
-          {activeTab === 'ai' && (
-            <AiSettingsTab
-              isZh={isZh}
-              llmConfig={llmConfig}
-              localApiUrl={localApiUrl}
-              setLocalApiUrl={setLocalApiUrl}
-              localApiKey={localApiKey}
-              setLocalApiKey={setLocalApiKey}
-              localModel={localModel}
-              setLocalModel={setLocalModel}
-              customModel={customModel}
-              setCustomModel={setCustomModel}
-              localSupportsThinking={localSupportsThinking}
-              setLocalSupportsThinking={setLocalSupportsThinking}
-              saved={saved}
-              hasChanges={hasChanges}
-              handleProviderChange={handleProviderChange}
-              handleModelChange={handleModelChange}
-              handleSaveConfig={handleSaveConfig}
-              onConfigDirty={() => setHasChanges(true)}
-            />
-          )}
-
-          {activeTab === 'review' && (
-            <div className="settings-tab-content">
-              <ReviewSettingsSection />
-            </div>
-          )}
-
-          {activeTab === 'ext' && (
-            <div className="settings-tab-content">
-              {/* ── Agent Permissions + Recycle Bin ──────────────────────── */}
-              <SecuritySettingsSection isZh={isZh} vaultPath={state.vaultPath} />
-
-              {/* ── MCP ───────────────────────────────────────────────────────
-                  One heading over two cards that point opposite ways. They used
-                  to sit here as peers both labelled "MCP", which is the one
-                  arrangement guaranteed to be misread: the outbound card is
-                  harmless, the inbound one hands your notes to another process.
-                  The group header states the split once so each card's arrow is
-                  read as a direction rather than as decoration. */}
-              <div className="settings-mcp-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <div>
-                  <h2 style={sectionTitle}>
-                    <IconPlug size={18} /> {t('settings.mcp.groupTitle')}
-                  </h2>
-                  <p style={{
-                    fontSize: 'var(--text-xs)', color: 'var(--text-secondary)',
-                    margin: '4px 0 0 0', lineHeight: 1.7,
-                  }}>
-                    {t('settings.mcp.groupDesc')}
-                  </p>
-                </div>
-
-                {/* Outbound: this app → external MCP servers. */}
-                <McpServersSection isZh={isZh} />
-
-                {/* Inbound: external agents → this vault, read-only. */}
-                <McpServerExposeSection />
-              </div>
-
-              {/* ── Skill Directories ────────────────────────────────────── */}
-              <SkillDirectoriesSection />
-            </div>
-          )}
-
-          {activeTab === 'memory' && (
-            <div className="settings-tab-content">
-              {/* ── Agent Core Memory ────────────────────────────────────── */}
-              <CoreMemorySection />
-              
-              {/* ── Agent Persistent Memory ──────────────────────────────── */}
-              <AiMemorySection />
-            </div>
-          )}
-
-          {activeTab === 'organize' && (
-            <div className="settings-tab-content">
-              {/* Embedding Engine Section */}
-              <EmbeddingConfigSection isZh={isZh} />
-              {/* Retrieval / Rerank — the stage after retrieval, so it sits with
-                  the embedding engine rather than under Extensions. */}
-              <RerankSettingsSection />
-              {/* Smart Organize Section */}
-              <OrganizeSettingsTab isZh={isZh} />
-            </div>
-          )}
-
-          {activeTab === 'shortcuts' && (
-            <div className="settings-tab-content">
-              <ShortcutsSettingsTab isZh={isZh} key={state.lang} />
-            </div>
-          )}
-        </div>
-      </div>
-
-    </div>
-  );
+  return <SettingsDrafts.Provider value={reportDraft}><div className="settings-container"><div className="settings-workbench">
+    <header className="settings-workbench-header"><div><h1>{copy('设置', 'Settings')}</h1><p>{copy('知识管理 Agent 的工作方式与运行环境', 'Configure your knowledge-management Agent')}</p></div><span className="settings-scope-badge">{copy('应用默认值', 'Application defaults')}</span>
+      <div className="settings-search-field"><IconSearch size={16} /><input ref={searchRef} type="search" aria-label={copy('搜索设置', 'Search settings')} placeholder={copy('搜索设置，例如模型、权限、每日笔记', 'Search settings, e.g. model, permissions, daily notes')} value={query} onChange={event => setQuery(event.target.value)} /><kbd>Ctrl / ⌘ F</kbd></div>
+      <select className="settings-workbench-select" aria-label={copy('设置分类', 'Settings category')} value={active} onChange={event => navigate(event.target.value as SettingsPage)}>{groups.map(group => <optgroup key={group.id} label={group.label}>{SETTINGS_CATEGORIES.filter(item => item.group === group.id).map(item => <option key={item.id} value={item.id}>{isZh ? item.zh : item.en}</option>)}</optgroup>)}</select>
+    </header>
+    <nav className="settings-workbench-nav" aria-label={copy('设置分类', 'Settings categories')}>{groups.map(group => <div key={group.id} className="settings-nav-group"><h2>{group.label}</h2>{SETTINGS_CATEGORIES.filter(item => item.group === group.id).map(item => { const Icon = icons[item.id]; return <button key={item.id} type="button" aria-current={!query && active === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon size={15} /><span>{isZh ? item.zh : item.en}</span>{(item.id === 'models' ? hasChanges : drafts[item.id]) && <i className="settings-dirty-dot" aria-hidden="true" />}</button>; })}</div>)}</nav>
+    <main className="settings-workbench-content" aria-label={copy('设置内容', 'Settings content')}>
+      {query.trim() && <p className="settings-search-count" role="status">{copy(`找到 ${results.length} 个相关设置分区`, `${results.length} matching settings sections`)}</p>}
+      {query.trim() && results.length === 0 && <div className="settings-search-empty"><h2>{copy('没有找到相关设置', 'No matching settings')}</h2><p>{copy('试试“模型”“索引”“权限”等关键词。', 'Try model, indexing, or permissions.')}</p><button className="btn btn-sm" onClick={() => setQuery('')}>{copy('清除搜索', 'Clear search')}</button></div>}
+      {SETTINGS_CATEGORIES.filter(item => visited.has(item.id) || visible.includes(item.id)).map(item => <section key={item.id} className="settings-workbench-page" style={!visible.includes(item.id) ? { display: 'none' } : undefined} aria-labelledby={`settings-page-${item.id}`}><header className="settings-page-heading"><h2 id={`settings-page-${item.id}`}>{isZh ? item.zh : item.en}</h2><p>{isZh ? item.descriptionZh : item.descriptionEn}</p>{['general','workspace','review','permissions'].includes(item.id) && <span>{copy(item.id === 'workspace' ? '笔记规则是应用默认值；文件列表属于当前工作区。' : '此分区的偏好在更改后生效。', item.id === 'workspace' ? 'Note rules are application defaults; the folder list belongs to this workspace.' : 'Preferences in this section apply when changed.')}</span>}</header>{renderPage(item.id)}</section>)}
+    </main>
+    {dirty && <div className="settings-workbench-draft-status" role="status">{copy('有尚未保存的改动，切换设置分区不会丢失草稿。', 'Unsaved changes. Your drafts are kept when switching settings categories.')}</div>}
+    <ConfirmModal isOpen={leaving !== null} title={copy('离开设置？', 'Leave settings?')} message={copy('尚未保存的改动将被丢弃。你也可以返回设置继续编辑并保存。', 'Unsaved changes will be discarded. Return to settings to keep editing and save them.')} confirmLabel={copy('丢弃并离开', 'Discard and leave')} cancelLabel={copy('继续编辑', 'Keep editing')} variant="warning" onCancel={() => setLeaving(null)} onConfirm={() => { if (leaving) { allowLeave.current = true; setView(leaving); } }} />
+  </div></div></SettingsDrafts.Provider>;
 }
 
-// ── Clear Data Dialog ──────────────────────────────────────────────
-
-interface ClearCategory {
-  key: string;
-  label_zh: string;
-  label_en: string;
-  desc_zh: string;
-  desc_en: string;
-  danger?: boolean;
-}
-
+interface ClearCategory { key: string; label_zh: string; label_en: string; desc_zh: string; desc_en: string; danger?: boolean }
 const CLEAR_CATEGORIES: ClearCategory[] = [
 { key: 'db_cache', label_zh: '文件元数据缓存', label_en: 'File Metadata Cache', desc_zh: '文件同步记录、分块等。清除后需重新同步。', desc_en: 'Sync records, chunks. Requires re-sync.' },
 { key: 'card_meta', label_zh: '笔记卡片属性', label_en: 'Note Card Attributes', desc_zh: 'AI 生成的标签、类型、知识冲突等。', desc_en: 'AI-generated tags, types, contradictions.' },
@@ -794,6 +712,7 @@ function OrganizeSettingsTab({ isZh }: { isZh: boolean }) {
 
   const isDefault = JSON.stringify(config) === JSON.stringify(ORGANIZE_DEFAULTS);
   const hasUnsavedChanges = JSON.stringify(config) !== JSON.stringify(savedConfig);
+  useSettingsDraft('agent', hasUnsavedChanges);
 
   return (
     <div className="settings-tab-content">

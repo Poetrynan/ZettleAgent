@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { IconRobot } from '../icons';
+import { IconSync } from '../icons';
 import { t } from '../../lib/i18n';
 import type { SchedulerStatus } from '../../lib/tauri';
 
@@ -11,6 +11,11 @@ interface AgentAutoOrganizeCardProps {
   isZh: boolean;
   onStart: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
+  onRunOnce?: () => void | Promise<void>;
+  runOnceDisabled?: boolean;
+  organizing?: boolean;
+  unavailable?: boolean;
+  onRetry?: () => void | Promise<void>;
 }
 
 function formatInterval(secs: number, isZh: boolean): string {
@@ -56,6 +61,11 @@ export function AgentAutoOrganizeCard({
   isZh,
   onStart,
   onStop,
+  onRunOnce,
+  runOnceDisabled = false,
+  organizing = false,
+  unavailable = false,
+  onRetry,
 }: AgentAutoOrganizeCardProps) {
   const running = !!status?.running;
   const processed = status?.notes_processed ?? 0;
@@ -63,7 +73,7 @@ export function AgentAutoOrganizeCard({
   const apiCalls = status?.api_calls_used ?? 0;
   const hasActivity = processed > 0 || reconciled > 0 || apiCalls > 0;
   const intervalLabel = formatInterval(intervalSecs, isZh);
-  const toggleDisabled = (!vaultReady && !running) || starting;
+  const toggleDisabled = (!vaultReady && !running) || starting || unavailable || !status;
 
   const lastRunLabel = status?.last_run
     ? new Date(status.last_run).toLocaleString(isZh ? 'zh-CN' : undefined, {
@@ -93,14 +103,14 @@ export function AgentAutoOrganizeCard({
       <header className="agent-auto-header">
         <div className="agent-auto-brand">
           <div className="agent-auto-icon-wrap" aria-hidden="true">
-            <IconRobot size={18} />
+            <IconSync size={18} />
           </div>
           <div className="agent-auto-brand-text">
             <h3 id="agent-auto-title" className="agent-auto-title">
-              {t('dashboard.agentTitle')}
+              {isZh ? '整理笔记' : 'Organize notes'}
             </h3>
             <p id="agent-auto-desc" className="agent-auto-desc">
-              {t('dashboard.agentDesc' as any)}
+              {isZh ? '补全标签、笔记类型和关联。可以执行一次，也可以在后台定期处理。' : 'Add tags, note types, and connections. Run once or organize periodically in the background.'}
             </p>
           </div>
         </div>
@@ -123,7 +133,7 @@ export function AgentAutoOrganizeCard({
             </span>
             <span className="agent-auto-toggle-copy">
               <span className="agent-auto-toggle-status" aria-live="polite">
-                {running ? t('dashboard.running') : t('dashboard.stopped')}
+                {unavailable ? (isZh ? '状态暂不可用' : 'Status unavailable') : !status ? (isZh ? '正在读取状态…' : 'Loading status…') : running ? (isZh ? '后台整理已开启' : 'Background enabled') : (isZh ? '后台整理已暂停' : 'Background paused')}
               </span>
               <span className="agent-auto-toggle-hint">
                 {running
@@ -135,7 +145,15 @@ export function AgentAutoOrganizeCard({
         </div>
       </header>
 
-      <div className="agent-auto-bento" role="group" aria-label={t('dashboard.agentMetrics' as any)}>
+      <div className="dash-organize-actions">
+        {onRunOnce && <button className="btn btn-sm" onClick={() => void onRunOnce()} disabled={runOnceDisabled || starting || !status}>
+          {organizing ? (isZh ? '正在整理…' : 'Organizing…') : (isZh ? '执行一次' : 'Run once')}
+        </button>}
+        {unavailable && onRetry && <button className="btn btn-ghost btn-sm" onClick={() => void onRetry()}>{isZh ? '重试整理状态' : 'Retry organization status'}</button>}
+        <span>{isZh ? '只处理需要更新的笔记' : 'Only notes that need updating'}</span>
+      </div>
+
+      {status && !unavailable && <><p className="dash-organize-metric-caption">{isZh ? '累计整理记录' : 'Recorded organization totals'}</p><div className="agent-auto-bento" role="group" aria-label={t('dashboard.agentMetrics' as any)}>
         <StatTile
           value={reconciled}
           label={t('dashboard.reconciled')}
@@ -157,14 +175,14 @@ export function AgentAutoOrganizeCard({
         />
         <StatTile
           value={apiCalls}
-          label={t('dashboard.apiCalls')}
+          label={isZh ? '模型请求' : 'Model requests'}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
           }
         />
-      </div>
+      </div></>}
 
       <footer className="agent-auto-footer">
         <div className="agent-auto-meta">

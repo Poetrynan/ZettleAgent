@@ -96,7 +96,7 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   // Remember whether the user folded this section away.
   const [isExpanded, setIsExpandedState] = useState(() => {
-    try { return localStorage.getItem('zettel:dash-gaps-expanded') !== 'false'; } catch { return true; }
+    try { return localStorage.getItem('zettel:dash-gaps-expanded') === 'true'; } catch { return false; }
   });
   const setIsExpanded = (next: boolean) => {
     setIsExpandedState(next);
@@ -111,7 +111,7 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
   const [analysisMode, setAnalysisMode] = useState<'quick' | 'agent' | null>(null);
   const [agentLog, setAgentLog] = useState<LogItem[]>([]);
   const [streamedResponse, setStreamedResponse] = useState('');
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState(false);
 
   // ── 修复：目标 → 诊断/计划 → 预览 → 部分批准 → 提交 → 验证 → 结果 ──
   const [fixPhase, setFixPhase] = useState<FixPhase>('idle');
@@ -143,10 +143,12 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
             setPlan(existingPlan);
             // 默认只勾选高置信度 (>= 0.8) 的提议
             const highConf = existingPlan.proposals
-              .filter((p) => p.confidence >= 0.8)
+              .filter((p) => p.confidence >= AUTO_SELECT_CONFIDENCE)
               .map((p) => p.id);
-            setSelectedIds(highConf.length > 0 ? highConf : existingPlan.proposals.map((p) => p.id));
-            setFixPhase('preview_ready');
+            setSelectedIds(highConf);
+            setHasAnalyzed(true);
+            setIsExpanded(true);
+            setFixPhase('awaiting_approval');
           }
         })
         .catch((err) => setFixError(String(err)));
@@ -165,10 +167,12 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
               setPlan(existingPlan);
               // 默认只勾选高置信度 (>= 0.8) 的提议
               const highConf = existingPlan.proposals
-                .filter((p) => p.confidence >= 0.8)
+                .filter((p) => p.confidence >= AUTO_SELECT_CONFIDENCE)
                 .map((p) => p.id);
-              setSelectedIds(highConf.length > 0 ? highConf : existingPlan.proposals.map((p) => p.id));
-              setFixPhase('preview_ready');
+              setSelectedIds(highConf);
+              setHasAnalyzed(true);
+              setIsExpanded(true);
+              setFixPhase('awaiting_approval');
             }
           })
           .catch((err) => setFixError(String(err)));
@@ -198,7 +202,7 @@ export function KnowledgeGapAnalysis({ initialPlanId }: KnowledgeGapAnalysisProp
     setAiSummary('');
     setStreamedResponse('');
     setAgentLog([]);
-    setShowLogs(true);
+    setShowLogs(false);
     setActiveTab('overview');
 
     const totalSteps = mode === 'quick' ? 4 : 2;
@@ -597,30 +601,6 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
   const hubs = graphData?.nodes.filter(n => n.is_hub) || [];
   const smallClusters = graphData?.clusters.filter(c => c.node_count <= 2 && c.node_count > 0) || [];
 
-  const orphanRatio = totalNotes > 0 ? orphans.length / totalNotes : 0;
-  const islandRatio = graphData && graphData.clusters.length > 0 ? smallClusters.length / graphData.clusters.length : 0;
-  const hubRatio = totalNotes > 0 ? hubs.length / totalNotes : 0;
-
-  const healthScore = totalNotes > 0
-    ? Math.max(0, Math.min(100, Math.round(100 - (orphanRatio * 45) - (islandRatio * 35) - (hubRatio * 20))))
-    : 100;
-
-  const strokeDashoffset = 251.2 - (healthScore / 100) * 251.2; // Circumference of radius 40 circle
-
-  const getScoreColor = (score: number) => {
-    if (score >= 85) return 'var(--success, #10B981)';
-    if (score >= 70) return 'var(--accent-secondary, #3B82F6)';
-    if (score >= 50) return 'var(--warning, #F59E0B)';
-    return 'var(--danger, #EF4444)';
-  };
-
-  const getScoreLabel = (score: number) => {
-    if (score >= 85) return state.lang === 'zh' ? '健康状况极佳' : 'Excellent Health';
-    if (score >= 70) return state.lang === 'zh' ? '结构良好' : 'Good Structure';
-    if (score >= 50) return state.lang === 'zh' ? '有待优化' : 'Needs Optimization';
-    return state.lang === 'zh' ? '存在严重盲区' : 'Critical Issues';
-  };
-
   // Extract a brief bullet point overview for the dashboard summary
   const getQuickRecommendation = (text: string) => {
     if (!text) return '';
@@ -638,14 +618,16 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
       <button
         className="gap-analysis-header"
         onClick={() => setIsExpanded(!isExpanded)}
-        aria-label="Toggle knowledge gap analysis"
+        aria-label={state.lang === 'zh' ? '知识结构诊断' : 'Knowledge structure diagnosis'}
+        aria-expanded={isExpanded}
+        aria-controls="gap-analysis-content"
       >
         <div className="gap-analysis-header-left">
           <IconTarget size={18} />
           <h3>{t('gap.title')}</h3>
           {hasAnalyzed && (
-            <span className="gap-header-score" style={{ backgroundColor: getScoreColor(healthScore) + '22', color: getScoreColor(healthScore) }}>
-              {healthScore}
+            <span className="gap-header-score">
+              {totalNotes > 0 ? (state.lang === 'zh' ? `${orphans.length} 篇未连接` : `${orphans.length} unconnected`) : '—'}
             </span>
           )}
         </div>
@@ -655,19 +637,19 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
       </button>
 
       {isExpanded && (
-        <div className="gap-analysis-content">
+        <div className="gap-analysis-content" id="gap-analysis-content">
           {/* ── Initial CTA ── */}
           {!hasAnalyzed && !isAnalyzing && (
             <div className="gap-analysis-cta">
               <div className="gap-cta-icon">
                 <IconTarget size={28} />
               </div>
-              <p>{t('gap.cta')}</p>
+              <p>{!state.vaultPath ? (state.lang === 'zh' ? '打开知识库后，可以检查孤立笔记、重复主题和缺失的关联。' : 'Open a vault to inspect orphan notes, overlapping topics, and missing links.') : t('gap.cta')}</p>
               <div className="gap-cta-buttons">
                 <button
                   className="gap-btn gap-btn-secondary"
                   onClick={() => analyze('quick')}
-                  disabled={isAnalyzing}
+                  disabled={isAnalyzing || !state.vaultPath}
                 >
                   <IconTarget size={15} />
                   <span>{t('gap.runQuick')}</span>
@@ -675,9 +657,9 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                 <button
                   className="gap-btn gap-btn-primary"
                   onClick={() => analyze('agent')}
-                  disabled={isAnalyzing}
+                  disabled={isAnalyzing || !state.vaultPath}
                 >
-                  <IconRobot size={15} />
+                  <IconBrain size={15} />
                   <span>{t('gap.runAgent')}</span>
                 </button>
               </div>
@@ -708,8 +690,8 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                 </div>
               ) : (
                 <div className="gap-agent-loading-section">
-                  {/* Streaming Terminal logs during agent run */}
-                  <div className="gap-terminal-wrapper">
+                  <button className="btn btn-ghost btn-sm" aria-expanded={showLogs} onClick={() => setShowLogs(!showLogs)}>{state.lang === 'zh' ? '执行详情' : 'Execution details'}</button>
+                  {showLogs && <div className="gap-terminal-wrapper">
                     <div className="gap-terminal-header">
                       <div className="terminal-dots">
                         <span className="dot dot-red" />
@@ -717,7 +699,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                         <span className="dot dot-green" />
                       </div>
                       <span className="terminal-title">
-                        {state.lang === 'zh' ? 'AI Agent 诊断终端' : 'AI Agent Diagnostic Terminal'}
+                        {state.lang === 'zh' ? '诊断进度' : 'Diagnosis activity'}
                       </span>
                     </div>
                     <div className="gap-terminal-body" style={{ maxHeight: '140px' }}>
@@ -738,7 +720,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                       </div>
                       <div ref={logEndRef} />
                     </div>
-                  </div>
+                  </div>}
 
                   {streamedResponse && (
                     <div className="gap-analysis-ai gap-ai-streaming">
@@ -761,12 +743,20 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
           {hasAnalyzed && !isAnalyzing && (
             <div className="gap-results-container">
               {/* Tab Selector */}
-              <div className="gap-tabs" role="tablist">
+              <div className="gap-tabs" role="tablist" aria-label={state.lang === 'zh' ? '诊断结果' : 'Diagnosis results'} onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const tabs = ['overview', 'diagnostics', 'report', 'fix'] as const;
+                const current = tabs.indexOf(activeTab);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (current + (event.key === 'ArrowRight' ? 1 : -1) + 4) % 4;
+                setActiveTab(tabs[next]);
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+              }}>
                 <button
                   className={`gap-tab ${activeTab === 'overview' ? 'active' : ''}`}
                   onClick={() => setActiveTab('overview')}
                   role="tab"
-                  aria-selected={activeTab === 'overview'}
+                  aria-selected={activeTab === 'overview'} tabIndex={activeTab === 'overview' ? 0 : -1} id="gap-tab-overview" aria-controls="gap-tab-panel"
                 >
                   <IconChart size={14} />
                   <span>{state.lang === 'zh' ? '健康总览' : 'Overview'}</span>
@@ -775,7 +765,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                   className={`gap-tab ${activeTab === 'diagnostics' ? 'active' : ''}`}
                   onClick={() => setActiveTab('diagnostics')}
                   role="tab"
-                  aria-selected={activeTab === 'diagnostics'}
+                  aria-selected={activeTab === 'diagnostics'} tabIndex={activeTab === 'diagnostics' ? 0 : -1} id="gap-tab-diagnostics" aria-controls="gap-tab-panel"
                 >
                   <IconActivity size={14} />
                   <span>{state.lang === 'zh' ? '结构诊断' : 'Diagnostics'}</span>
@@ -787,7 +777,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                   className={`gap-tab ${activeTab === 'report' ? 'active' : ''}`}
                   onClick={() => setActiveTab('report')}
                   role="tab"
-                  aria-selected={activeTab === 'report'}
+                  aria-selected={activeTab === 'report'} tabIndex={activeTab === 'report' ? 0 : -1} id="gap-tab-report" aria-controls="gap-tab-panel"
                 >
                   <IconBrain size={14} />
                   <span>{state.lang === 'zh' ? '深度分析' : 'AI Report'}</span>
@@ -796,7 +786,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                   className={`gap-tab ${activeTab === 'fix' ? 'active' : ''}`}
                   onClick={() => setActiveTab('fix')}
                   role="tab"
-                  aria-selected={activeTab === 'fix'}
+                  aria-selected={activeTab === 'fix'} tabIndex={activeTab === 'fix' ? 0 : -1} id="gap-tab-fix" aria-controls="gap-tab-panel"
                 >
                   <IconTools size={14} />
                   <span>{t('gap.plan.sectionFix')}</span>
@@ -804,67 +794,19 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
               </div>
 
               {/* ── Tab Contents ── */}
-              <div className="gap-tab-content-wrapper">
+              <div className="gap-tab-content-wrapper" role="tabpanel" id="gap-tab-panel" aria-labelledby={`gap-tab-${activeTab}`}>
                 
                 {/* 1. OVERVIEW TAB */}
                 {activeTab === 'overview' && (
                   <div className="gap-overview-tab animated-fade-in">
                     <div className="gap-score-section">
-                      <div className="gap-score-gauge-container">
-                        <svg width="100" height="100" viewBox="0 0 100 100" className="gap-health-gauge">
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke="var(--border-subtle, #e2e8f0)"
-                            strokeWidth="7"
-                          />
-                          <circle
-                            cx="50"
-                            cy="50"
-                            r="40"
-                            fill="transparent"
-                            stroke={getScoreColor(healthScore)}
-                            strokeWidth="7.5"
-                            strokeDasharray="251.2"
-                            strokeDashoffset={strokeDashoffset}
-                            strokeLinecap="butt"
-                            transform="rotate(-90 50 50)"
-                            style={{ transition: 'stroke-dashoffset 0.8s ease-out, stroke 0.5s ease' }}
-                          />
-                          <text
-                            x="50"
-                            y="46"
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            className="gap-health-gauge-value"
-                            style={{ fill: 'var(--text-primary)', fontSize: '22px', fontWeight: '800', fontFamily: 'inherit' }}
-                          >
-                            {healthScore}
-                          </text>
-                          <text
-                            x="50"
-                            y="66"
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            className="gap-health-gauge-label"
-                            style={{ fill: 'var(--text-tertiary)', fontSize: '8px', fontWeight: '700', textTransform: 'none', letterSpacing: 0 }}
-                          >
-                            {state.lang === 'zh' ? '健康度' : 'HEALTH'}
-                          </text>
-                        </svg>
-                        <div className="gap-score-text">
-                          <span className="gap-score-status" style={{ color: getScoreColor(healthScore) }}>
-                            {getScoreLabel(healthScore)}
-                          </span>
-                          <p className="gap-score-desc">
-                            {state.lang === 'zh'
-                              ? `基于笔记库中 ${totalNotes} 篇笔记的关系网络及孤立率进行图谱诊断。`
-                              : `Diagnostic review computed over your vault of ${totalNotes} notes.`
-                            }
-                          </p>
-                        </div>
+                      <div className="gap-structure-summary">
+                        <h4>{totalNotes === 0
+                          ? (state.lang === 'zh' ? '暂无可评估的图谱数据' : 'No graph data to assess yet')
+                          : (state.lang === 'zh' ? `已检查 ${totalNotes} 篇笔记` : `${totalNotes} notes inspected`)}</h4>
+                        <p>{state.lang === 'zh'
+                          ? '下方列出当前主知识库的结构线索。未连接的笔记可能是新想法，枢纽笔记也可能是有意建立的目录，请结合内容判断。'
+                          : 'These findings describe the primary vault. Unconnected notes may be new ideas; hubs may be intentional indexes. Review their content before making changes.'}</p>
                       </div>
 
                       {/* Score Metrics Grid */}
@@ -999,7 +941,7 @@ Be specific and concise. Use bullet points. Max 200 words. ${langInstruction}`;
                           {analysisMode === 'agent' ? <IconRobot size={14} /> : <IconBrain size={14} />}
                           <span>
                             {analysisMode === 'agent'
-                              ? (state.lang === 'zh' ? 'AI Agent 深度诊断报告' : 'AI Agent Deep Diagnostic Report')
+                              ? (state.lang === 'zh' ? '深度诊断报告' : 'Deep diagnosis report')
                               : t('gap.aiTitle')}
                           </span>
                         </div>

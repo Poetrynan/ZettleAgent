@@ -573,7 +573,7 @@ export const en = {
     'review.allCaughtUp': 'All caught up! No notes to review today.',
 
     // Knowledge Gap Analysis
-    'gap.title': 'Knowledge Gap Analysis',
+    'gap.title': 'Knowledge structure',
     'gap.cta': 'Analyze your vault to discover knowledge blind spots, isolated clusters, and missing connections.',
     'gap.run': 'Run Analysis',
     'gap.rerun': 'Re-analyze',
@@ -590,7 +590,7 @@ export const en = {
     'gap.stepOrphan': 'Detecting orphan notes...',
     'gap.stepIsland': 'Detecting knowledge islands...',
     'gap.stepAi': 'AI deep analysis...',
-    'gap.runAgent': 'AI Agent Deep Diagnosis',
+    'gap.runAgent': 'Deep diagnosis',
     'gap.runQuick': 'Quick Diagnosis',
     'gap.agentLogTitle': 'Agent Diagnostic Activity Log',
     'gap.agentLogToolStart': 'Calling tool {name} with arguments: {args}',

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getLang } from '../../lib/i18n';
+import { useDialog } from '../../hooks/useDialog';
 import {
   IconClose,
   IconSync,
@@ -19,7 +20,8 @@ interface QuickActionsHelpProps {
 }
 
 export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
-  const [activeTab, setActiveTab] = useState<'actions' | 'matrix' | 'workflow'>('actions');
+  const [activeTab, setActiveTab] = useState<'guide' | 'actions' | 'matrix' | 'workflow'>('guide');
+  const dialogRef = useDialog(isOpen, onClose);
   if (!isOpen) return null;
 
   const isZh = getLang() === 'zh';
@@ -160,11 +162,16 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-help-title"
+        tabIndex={-1}
         className="modal-container"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '780px',
-          height: '86vh',
+          maxWidth: activeTab === 'guide' ? '600px' : '780px',
+          height: activeTab === 'guide' ? 'auto' : '86vh',
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--bg-primary)',
@@ -196,22 +203,23 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
               justifyContent: 'center',
               color: 'var(--accent-primary)',
             }}>
-              <IconBrain size={18} />
+              <IconSearch size={18} />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: 'var(--text-md, 15px)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                {isZh ? '快捷操作与检索架构指南' : 'Quick Actions & Search Architecture'}
+              <h2 id="dashboard-help-title" style={{ margin: 0, fontSize: 'var(--text-md, 15px)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {isZh ? '使用你的工作台' : 'Using your workspace'}
               </h2>
               <p style={{ margin: '2px 0 0 0', fontSize: 'var(--text-xs, 12px)', color: 'var(--text-tertiary)' }}>
                 {isZh
-                  ? '深入了解卡片盒知识库的同步机制、多维检索矩阵与 AI 自进化工作流'
-                  : 'Architecture guide for vault synchronization, multi-tier search, and AI workflows'}
+                  ? '从日常笔记到知识库维护，按需要选择操作。'
+                  : 'Choose the tools you need, from everyday notes to vault maintenance.'}
               </p>
             </div>
           </div>
           <button
             className="btn btn-ghost btn-icon-sm"
             onClick={onClose}
+            aria-label={isZh ? '关闭帮助' : 'Close help'}
             style={{ borderRadius: 'var(--radius-sm, 4px)' }}
           >
             <IconClose size={16} />
@@ -225,15 +233,18 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
           background: 'var(--bg-primary)',
           padding: '0 var(--space-5)',
           gap: 'var(--space-2)',
+          flexWrap: 'wrap',
           flexShrink: 0,
         }}>
           {[
-            { id: 'actions', label: isZh ? '核心操作指南' : 'Action Guides', icon: <IconSync size={14} /> },
-            { id: 'matrix', label: isZh ? '双引擎检索矩阵' : 'Search Matrix', icon: <IconDatabase size={14} /> },
-            { id: 'workflow', label: isZh ? '最佳实践工作流' : 'Best Practices', icon: <IconChart size={14} /> },
+            { id: 'guide', label: isZh ? '快速上手' : 'Getting started', icon: <IconCheck size={14} /> },
+            { id: 'actions', label: isZh ? '操作详情' : 'Details', icon: <IconSync size={14} /> },
+            { id: 'matrix', label: isZh ? '检索原理' : 'Search internals', icon: <IconDatabase size={14} /> },
+            { id: 'workflow', label: isZh ? '工作流' : 'Workflow', icon: <IconChart size={14} /> },
           ].map((tab) => (
             <button
               key={tab.id}
+              aria-pressed={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               style={{
                 padding: 'var(--space-3) var(--space-3)',
@@ -258,6 +269,13 @@ export function QuickActionsHelp({ isOpen, onClose }: QuickActionsHelpProps) {
 
         {/* Content Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {activeTab === 'guide' && <dl className="dash-help-guide">
+            <dt>{isZh ? '先浏览笔记' : 'Start with your notes'}</dt><dd>{isZh ? '点击首页的笔记数打开笔记列表；有打开的笔记时，可以直接继续写作。' : 'Select the note count to browse your notes, or continue writing in an open note.'}</dd>
+            <dt>{isZh ? '需要时更新搜索索引' : 'Update search when needed'}</dt><dd>{isZh ? '“更新索引”只处理新增与变化的内容。失败的片段可以单独重试。' : 'Update index handles new and changed content. Failed passages have a separate retry action.'}</dd>
+            <dt>{isZh ? '选择整理方式' : 'Choose how to organize'}</dt><dd>{isZh ? '“执行一次”处理当前待更新笔记。开启后台整理后，应用会定期检查。需要先在设置里配置模型。' : 'Run once processes notes that need updating. Background organization checks periodically. Configure a model in Settings first.'}</dd>
+            <dt>{isZh ? '先检查，再决定改动' : 'Inspect before changing'}</dt><dd>{isZh ? '本地检查可以找到失效链接和孤立笔记。结构诊断中的修改计划需要先预览，由你选择提议后再应用。' : 'Local checks find broken links and orphan notes. For structural changes, preview a plan and select proposals before applying.'}</dd>
+            <dt>{isZh ? '维护工具放在页面底部' : 'Maintenance lives at the bottom'}</dt><dd>{isZh ? '同步文件、导出 Canvas 和全部重建向量都是按需操作。通常使用“更新索引”即可。' : 'Sync files, export Canvas, and rebuild vectors as needed. Updating the index is enough for everyday use.'}</dd>
+          </dl>}
           {/* TAB 1: ACTIONS */}
           {activeTab === 'actions' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>

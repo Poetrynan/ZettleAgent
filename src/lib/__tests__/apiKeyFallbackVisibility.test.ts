@@ -80,6 +80,20 @@ describe('plaintext fallback visibility', () => {
     expect(status?.has_key).toBe(true);
   });
 
+  it('keeps the fallback credential when saving only a model change', async () => {
+    setApiKey.mockRejectedValue(new Error('credential command unavailable'));
+    getApiKeyStatus.mockResolvedValue(NO_KEY);
+    const storage = await freshStorage();
+    await storage.saveLlmConfig({ model: 'old-model', apiKey: 'test-only-fallback-key' });
+    setApiKey.mockClear();
+
+    await storage.saveLlmConfig({ model: 'new-model' });
+
+    expect(storeState.get('llmConfig')).toEqual({ model: 'new-model', apiKey: 'test-only-fallback-key' });
+    expect(setApiKey).not.toHaveBeenCalled();
+    expect((await storage.getSecretStatus(true))?.protected).toBe(false);
+  });
+
   it('stays silent when there was no key to fall back with', async () => {
     // Clearing the key must not invent a scary "unprotected key" banner.
     setApiKey.mockRejectedValue(new Error('command set_api_key not allowed'));

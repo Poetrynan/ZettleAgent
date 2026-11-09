@@ -72,7 +72,7 @@ export interface BaseContextType {
   setState: React.Dispatch<React.SetStateAction<BaseState>>;
   setCurrentFile: (path: string | null) => void;
   setAppLang: (lang: Lang) => void;
-  setLlmConfig: (config: Partial<LlmConfig>) => void;
+  setLlmConfig: (config: Partial<LlmConfig>) => Promise<void>;
   setView: (view: View) => void;
   setPendingDeepLink: (link: PendingDeepLink | null) => void;
   consumePendingDeepLink: (target: 'canvas' | 'knowledge' | 'note') => PendingDeepLink | null;
@@ -233,19 +233,21 @@ export function BaseProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, lang }));
   }, []);
 
-  const setLlmConfig = useCallback((partial: Partial<LlmConfig>) => {
-    setState((s) => {
-      const newConfig = { ...s.llmConfig, ...partial };
-      saveLlmConfigToStore(newConfig).catch(err => 
-        console.error('Failed to persist LLM config:', err)
-      );
-      return { ...s, llmConfig: newConfig };
-    });
+  const llmConfigRef = useRef(state.llmConfig);
+  llmConfigRef.current = state.llmConfig;
+  const setLlmConfig = useCallback(async (partial: Partial<LlmConfig>) => {
+    const next = { ...llmConfigRef.current, ...partial };
+    const payload: Record<string, unknown> = { ...next };
+    if (!Object.prototype.hasOwnProperty.call(partial, 'apiKey')) delete payload.apiKey;
+    await saveLlmConfigToStore(payload);
+    llmConfigRef.current = next;
+    setState(s => ({ ...s, llmConfig: next }));
   }, []);
 
 
 
   const setView = useCallback((view: View) => {
+    if (!window.dispatchEvent(new CustomEvent('zettel:before-navigate', { cancelable: true, detail: { view } }))) return;
     setState((s) => ({ ...s, view }));
   }, []);
 
