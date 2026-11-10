@@ -13,24 +13,22 @@
 //! envelope rather than contorting those.
 //!
 //! ## What is exposed
-//! - **Tools**: a read-only subset of the internal tool catalogue, dispatched
-//!   straight through [`crate::tools::internal_tools::try_execute`]. No retrieval
-//!   logic is reimplemented — `search_notes` here is the exact same hybrid
-//!   FTS+vector+RRF path the in-app agent uses.
+//! - **Tools**:
+//!   - Read-only search & retrieval: dispatched straight through [`crate::tools::internal_tools::try_execute`].
+//!   - Proposal writes: external agents may stage proposed notes, edits, and relations via [`crate::knowledge::changeset`].
 //! - **Resources**: every note as a `zettel://` URI (see [`uri`]).
 //! - **Prompts**: a couple of Zettelkasten method templates.
 //!
-//! ## Why read-only (the write-approval problem)
-//! The app's write gate ([`crate::llm::approval`]) is **Tauri-event driven**: a
-//! write raises an event the desktop UI answers with `approve_tool_call` /
-//! `reject_tool_call`. An external MCP client over stdio is not in that loop —
-//! there is no window to pop, and nobody to click approve. Exposing writes would
-//! therefore mean either (a) silently writing the user's vault with no consent,
-//! or (b) blocking forever on an approval that can never arrive. Both are wrong,
-//! so the server is read-only by construction: only tools that
-//! [`crate::llm::approval::is_read_only_tool`] classifies as side-effect-free are
-//! ever advertised or dispatched. Opt-in writes are left for a future design that
-//! can route approval somewhere the external client can actually see it.
+//! ## Zero Silent Writes & Safe Proposals (the write-approval solution)
+//! Direct destructive writes (`create_note`, `edit_note`, etc.) are blocked over stdio MCP because
+//! an external client cannot respond to interactive in-app approval dialogs.
+//!
+//! Instead, ZettelAgent provides **Proposal-based Writes** (`propose_create_note`,
+//! `propose_edit_note`, `propose_relation`):
+//! - Operations are staged in SQLite as a pending ChangeSet (`actor: "mcp:external"`, `state: "proposed"`).
+//! - The user reviews diffs and approves or rejects proposals inside the desktop UI (Knowledge Center -> Change Review).
+//! - The external client queries `get_proposal_status` with `changeset_id` to track approval and commit progress.
+//! - Zero silent vault overwrites occur without explicit human consent.
 //!
 //! ## stdio hygiene
 //! In stdio mode **stdout carries protocol frames only**. Every log line goes to
@@ -40,9 +38,14 @@
 
 pub mod uri;
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+
+use crate::knowledge::changeset::{self, NewChangeSet, NewOp, RelationOp};
+use crate::knowledge::object_store;
+use crate::knowledge::types::{ChangeOpKind, ChangeSetState, ObjectKind, SourceRef};
+use crate::tools::internal_tools::helpers::{normalize_db_path, resolve_path_multi_vault};
 
 /// Protocol version we implement. Kept identical to the client half so the two
 /// never drift (`mcp_client` sends the same string in its `initialize`).
@@ -71,6 +74,14 @@ const EXPOSED_TOOLS: &[&str] = &[
     "get_backlinks",      // Zettelkasten link following — graph_ops.rs:170
     "get_note_tags",      // graph_ops.rs:240
     "get_note_metadata",  // graph_ops.rs:308
+];
+
+/// Proposal-based write and review tools available to external MCP clients.
+pub const PROPOSAL_TOOLS: &[&str] = &[
+    "propose_create_note",
+    "propose_edit_note",
+    "propose_relation",
+    "get_proposal_status",
 ];
 
 /// Shared server state. Mirrors what `execute_tool` receives in-app: a DB handle
@@ -221,7 +232,7 @@ fn initialize_result() -> Value {
             "name": "ZettelAgent",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "instructions": "Read-only access to a ZettelAgent knowledge vault. Use `search_notes` for hybrid semantic+keyword search, `read_note` to fetch a note by path, and the `zettel://` resources to browse notes. Writes are intentionally not exposed.",
+        "instructions": "Access to a ZettelAgent knowledge vault. Use `search_notes` for hybrid semantic+keyword search, `read_note` to fetch a note by path, and the `zettel://` resources to browse notes. For writes, use proposal tools (`propose_create_note`, `propose_edit_note`, `propose_relation`) to stage changes for human review in ZettelAgent desktop, and `get_proposal_status` to query review status. Direct silent overwrites are blocked by design.",
     })
 }
 
@@ -233,7 +244,7 @@ fn tools_list_result() -> Value {
     // rename `parameters` → `inputSchema` (the one field name MCP and the
     // OpenAI-style `ToolDef` disagree on).
     let defs = crate::tools::internal_tools::get_internal_tool_defs();
-    let tools: Vec<Value> = defs
+    let mut tools: Vec<Value> = defs
         .into_iter()
         .filter(|d| EXPOSED_TOOLS.contains(&d.function.name.as_str()))
         .map(|d| {
@@ -244,7 +255,107 @@ fn tools_list_result() -> Value {
             })
         })
         .collect();
+
+    tools.extend(proposal_tool_defs());
     json!({ "tools": tools })
+}
+
+fn proposal_tool_defs() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "propose_create_note",
+            "description": "Propose creating a new Markdown note in the vault. Staged as a pending ChangeSet in ZettelAgent for human review and approval (Zero-Silent-Overwrite). The file is NOT written to disk until approved by the user.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path (or vault-rooted path) for the new note. Must end with .md, e.g. 'concepts/entropy.md'."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown body content of the proposed note."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional human-readable explanation of why this note is being proposed."
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional list of initial tags to associate with the note."
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }),
+        json!({
+            "name": "propose_edit_note",
+            "description": "Propose modifying an existing Markdown note in the vault. Staged as a pending ChangeSet diff in ZettelAgent for human review. Existing file contents are never overwritten silently.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the existing note to modify (relative to vault root or stored path)."
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "Complete new Markdown content for the note."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional explanation of the proposed modifications."
+                    }
+                },
+                "required": ["path", "new_content"]
+            }
+        }),
+        json!({
+            "name": "propose_relation",
+            "description": "Propose establishing a typed semantic relation (edge) between two notes in the knowledge graph. Staged as a ChangeSet for user review before linking.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_path": {
+                        "type": "string",
+                        "description": "Path of the source note (origin of relation)."
+                    },
+                    "target_path": {
+                        "type": "string",
+                        "description": "Path of the target note (destination of relation)."
+                    },
+                    "relation_type": {
+                        "type": "string",
+                        "description": "Semantic relation type: 'supports', 'contradicts', 'depends_on', 'related', 'extends', or 'example_of'."
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence score between 0.0 and 1.0 (defaults to 0.8)."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional rationale explaining why this relation holds."
+                    }
+                },
+                "required": ["source_path", "target_path", "relation_type"]
+            }
+        }),
+        json!({
+            "name": "get_proposal_status",
+            "description": "Check the review and execution status of a previously submitted ChangeSet proposal (e.g. 'proposed', 'previewed', 'approved', 'committed', 'rejected', 'conflicted').",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "changeset_id": {
+                        "type": "string",
+                        "description": "The unique identifier of the changeset returned when proposed."
+                    }
+                },
+                "required": ["changeset_id"]
+            }
+        }),
+    ]
 }
 
 fn handle_tools_call(
@@ -257,18 +368,29 @@ fn handle_tools_call(
         .and_then(|n| n.as_str())
         .ok_or((INVALID_PARAMS, "Invalid params: missing tool 'name'".to_string()))?;
 
+    // MCP nests the args under `arguments`; try_execute wants a JSON string.
+    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    if PROPOSAL_TOOLS.contains(&name) {
+        return match name {
+            "propose_create_note" => handle_propose_create_note(state, &args),
+            "propose_edit_note" => handle_propose_edit_note(state, &args),
+            "propose_relation" => handle_propose_relation(state, &args),
+            "get_proposal_status" => handle_get_proposal_status(state, &args),
+            other => Err((INTERNAL_ERROR, format!("Unhandled proposal tool '{}'", other))),
+        };
+    }
+
     // Gate on the exposed allow-list *before* touching the dispatcher. This is
     // the enforcement point for read-only: a client asking for `create_note`
-    // (or any un-exposed / write tool) is refused here, never dispatched.
+    // (or any un-exposed / direct write tool) is refused here, never dispatched.
     if !EXPOSED_TOOLS.contains(&name) {
         return Err((
             INVALID_PARAMS,
-            format!("Unknown or unavailable tool '{}'. This server is read-only; call tools/list.", name),
+            format!("Unknown or unavailable tool '{}'. Direct writes are disabled; use proposal tools (propose_create_note, propose_edit_note, propose_relation) or call tools/list.", name),
         ));
     }
 
-    // MCP nests the args under `arguments`; try_execute wants a JSON string.
-    let args = params.get("arguments").cloned().unwrap_or(json!({}));
     let args_str = args.to_string();
 
     // Default LlmConfig is fine: every exposed tool is pure retrieval and never
@@ -295,6 +417,514 @@ fn handle_tools_call(
         // Should be unreachable given the allow-list, but map it honestly.
         None => Err((INTERNAL_ERROR, format!("Tool '{}' is not dispatchable", name))),
     }
+}
+
+// ── Proposal Handlers ──────────────────────────────────────────────────────
+
+fn handle_propose_create_note(
+    state: &McpServerState,
+    args: &Value,
+) -> Result<Value, (i64, String)> {
+    let path = match args.get("path").and_then(|p| p.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'path'".to_string(), true)),
+    };
+
+    if path.contains("..") || path.contains('\0') {
+        return Ok(text_content("Security error: Path cannot contain '..' traversal or null bytes".to_string(), true));
+    }
+
+    if !path.to_lowercase().ends_with(".md") {
+        return Ok(text_content("Error: Note path must end with .md".to_string(), true));
+    }
+
+    let content = match args.get("content").and_then(|c| c.as_str()) {
+        Some(c) => c,
+        None => return Ok(text_content("Error: Missing required parameter 'content'".to_string(), true)),
+    };
+
+    let reason = args.get("reason").and_then(|r| r.as_str()).map(|s| s.to_string());
+
+    let resolved = match resolve_path_multi_vault(path, &state.vault_path, &state.all_vault_paths) {
+        Ok(p) => p,
+        Err(e) => return Ok(text_content(format!("Security / path error: {}", e), true)),
+    };
+
+    if resolved.exists() {
+        return Ok(text_content(
+            format!("File already exists at '{}'. Use propose_edit_note to propose modifications.", path),
+            true,
+        ));
+    }
+
+    let stored_path = normalize_db_path(&resolved);
+
+    let conn = state.db.lock().map_err(|_| (INTERNAL_ERROR, "DB lock error".to_string()))?;
+
+    let existing_db: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM files WHERE path = ?1 COLLATE NOCASE",
+            params![&stored_path],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| (INTERNAL_ERROR, e.to_string()))?;
+
+    if existing_db.is_some() {
+        return Ok(text_content(
+            format!("Note already indexed in database at '{}'. Use propose_edit_note instead.", path),
+            true,
+        ));
+    }
+
+    let mut new_cs = NewChangeSet::new("mcp:external");
+    new_cs.intent = Some(format!("External MCP proposal: create note '{}'", path));
+    new_cs.scopes = state.all_vault_paths.clone();
+
+    let cs = match changeset::propose(&conn, &new_cs) {
+        Ok(cs) => cs,
+        Err(e) => return Ok(text_content(format!("Failed to stage proposal: {}", e), true)),
+    };
+
+    let op = NewOp {
+        op_kind: ChangeOpKind::Create,
+        target_object_id: None,
+        legacy_path: Some(stored_path.clone()),
+        legacy_chunk_id: None,
+        new_content: Some(content.to_string()),
+        patch: None,
+        reason: reason.clone().or_else(|| Some("Created via MCP external proposal".to_string())),
+        evidence_ids: Vec::new(),
+        tool_name: "propose_create_note".to_string(),
+        target_kind: ObjectKind::Document,
+        side_effects: None,
+        observed_read: None,
+    };
+
+    let add_res = match changeset::add_op(&conn, &cs.id, &new_cs.scopes, &op) {
+        Ok(res) => res,
+        Err(e) => return Ok(text_content(format!("Failed to add operation: {}", e), true)),
+    };
+
+    if let Err(refusal) = add_res {
+        return Ok(text_content(format!("Proposal refused: {}", refusal.message()), true));
+    }
+
+    let dry_run = match changeset::dry_run(&conn, &cs.id) {
+        Ok(report) => report,
+        Err(e) => return Ok(text_content(format!("Dry run failed: {}", e), true)),
+    };
+
+    let status_str = if dry_run.has_conflicts {
+        "conflicted"
+    } else {
+        "previewed"
+    };
+
+    let payload = json!({
+        "changeset_id": cs.id,
+        "status": status_str,
+        "action": "create_note",
+        "path": stored_path,
+        "has_conflicts": dry_run.has_conflicts,
+        "message": "Note creation proposal staged successfully. Awaiting human review in ZettelAgent.",
+        "review_hint": "Open ZettelAgent desktop (Knowledge Center -> Change Review) to inspect diff and approve. Use get_proposal_status with this changeset_id to track review and commit status."
+    });
+
+    Ok(text_content(serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()), false))
+}
+
+fn handle_propose_edit_note(
+    state: &McpServerState,
+    args: &Value,
+) -> Result<Value, (i64, String)> {
+    let path = match args.get("path").and_then(|p| p.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'path'".to_string(), true)),
+    };
+
+    if path.contains("..") || path.contains('\0') {
+        return Ok(text_content("Security error: Path cannot contain '..' traversal or null bytes".to_string(), true));
+    }
+
+    let new_content = match args.get("new_content").and_then(|c| c.as_str()) {
+        Some(c) => c,
+        None => return Ok(text_content("Error: Missing required parameter 'new_content'".to_string(), true)),
+    };
+
+    let reason = args.get("reason").and_then(|r| r.as_str()).map(|s| s.to_string());
+
+    let resolved = match resolve_path_multi_vault(path, &state.vault_path, &state.all_vault_paths) {
+        Ok(p) => p,
+        Err(e) => return Ok(text_content(format!("Security / path error: {}", e), true)),
+    };
+
+    if !resolved.exists() {
+        return Ok(text_content(
+            format!("File does not exist: '{}'. Use propose_create_note to propose creating a new note.", path),
+            true,
+        ));
+    }
+
+    let stored_path = normalize_db_path(&resolved);
+
+    let conn = state.db.lock().map_err(|_| (INTERNAL_ERROR, "DB lock error".to_string()))?;
+
+    let target_obj = object_store::find_by_source(&conn, &SourceRef::file(&stored_path)).ok().flatten();
+    let target_object_id = target_obj.map(|o| o.id);
+
+    let mut new_cs = NewChangeSet::new("mcp:external");
+    new_cs.intent = Some(format!("External MCP proposal: edit note '{}'", path));
+    new_cs.scopes = state.all_vault_paths.clone();
+
+    let cs = match changeset::propose(&conn, &new_cs) {
+        Ok(cs) => cs,
+        Err(e) => return Ok(text_content(format!("Failed to stage proposal: {}", e), true)),
+    };
+
+    let op = NewOp {
+        op_kind: ChangeOpKind::Edit,
+        target_object_id,
+        legacy_path: Some(stored_path.clone()),
+        legacy_chunk_id: None,
+        new_content: Some(new_content.to_string()),
+        patch: None,
+        reason: reason.clone().or_else(|| Some("Edited via MCP external proposal".to_string())),
+        evidence_ids: Vec::new(),
+        tool_name: "propose_edit_note".to_string(),
+        target_kind: ObjectKind::Document,
+        side_effects: None,
+        observed_read: None,
+    };
+
+    let add_res = match changeset::add_op(&conn, &cs.id, &new_cs.scopes, &op) {
+        Ok(res) => res,
+        Err(e) => return Ok(text_content(format!("Failed to add operation: {}", e), true)),
+    };
+
+    if let Err(refusal) = add_res {
+        return Ok(text_content(format!("Proposal refused: {}", refusal.message()), true));
+    }
+
+    let dry_run = match changeset::dry_run(&conn, &cs.id) {
+        Ok(report) => report,
+        Err(e) => return Ok(text_content(format!("Dry run failed: {}", e), true)),
+    };
+
+    let status_str = if dry_run.has_conflicts {
+        "conflicted"
+    } else {
+        "previewed"
+    };
+
+    let payload = json!({
+        "changeset_id": cs.id,
+        "status": status_str,
+        "action": "edit_note",
+        "path": stored_path,
+        "has_conflicts": dry_run.has_conflicts,
+        "message": "Note edit proposal staged successfully. Awaiting human review in ZettelAgent.",
+        "review_hint": "Open ZettelAgent desktop (Knowledge Center -> Change Review) to inspect diff and approve. Use get_proposal_status with this changeset_id to track review and commit status."
+    });
+
+    Ok(text_content(serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()), false))
+}
+
+fn handle_propose_relation(
+    state: &McpServerState,
+    args: &Value,
+) -> Result<Value, (i64, String)> {
+    let source_path = match args.get("source_path").and_then(|p| p.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'source_path'".to_string(), true)),
+    };
+    let target_path = match args.get("target_path").and_then(|p| p.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'target_path'".to_string(), true)),
+    };
+    let relation_type = match args.get("relation_type").and_then(|r| r.as_str()) {
+        Some(r) if !r.trim().is_empty() => r.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'relation_type'".to_string(), true)),
+    };
+
+    if source_path.contains("..") || target_path.contains("..") || source_path.contains('\0') || target_path.contains('\0') {
+        return Ok(text_content("Security error: Path cannot contain '..' traversal or null bytes".to_string(), true));
+    }
+
+    let confidence = args.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.8).clamp(0.0, 1.0);
+    let reason = args.get("reason").and_then(|r| r.as_str()).map(|s| s.to_string());
+
+    let res_source = match resolve_path_multi_vault(source_path, &state.vault_path, &state.all_vault_paths) {
+        Ok(p) => p,
+        Err(e) => return Ok(text_content(format!("Source path error: {}", e), true)),
+    };
+    let res_target = match resolve_path_multi_vault(target_path, &state.vault_path, &state.all_vault_paths) {
+        Ok(p) => p,
+        Err(e) => return Ok(text_content(format!("Target path error: {}", e), true)),
+    };
+
+    let norm_source = normalize_db_path(&res_source);
+    let norm_target = normalize_db_path(&res_target);
+
+    let conn = state.db.lock().map_err(|_| (INTERNAL_ERROR, "DB lock error".to_string()))?;
+
+    // Check if relation already exists
+    let exists = changeset::relation_exists(&conn, &norm_source, &norm_target, relation_type).unwrap_or(false);
+    if exists {
+        return Ok(text_content(
+            format!("Relation already exists between '{}' and '{}' with type '{}'", norm_source, norm_target, relation_type),
+            true,
+        ));
+    }
+
+    let rel_payload = RelationOp {
+        source_path: norm_source.clone(),
+        target_path: norm_target.clone(),
+        relation_type: relation_type.to_string(),
+        confidence,
+        reason: reason.clone(),
+        origin: "external_mcp".to_string(),
+        old_confidence: None,
+        old_reason: None,
+        expected_source_version: None,
+        expected_target_version: None,
+    };
+
+    let patch_str = match serde_json::to_string(&rel_payload) {
+        Ok(s) => s,
+        Err(e) => return Ok(text_content(format!("Serialization error: {}", e), true)),
+    };
+
+    let mut new_cs = NewChangeSet::new("mcp:external");
+    new_cs.intent = Some(format!("External MCP proposal: relation {} --[{}]--> {}", norm_source, relation_type, norm_target));
+    new_cs.scopes = state.all_vault_paths.clone();
+
+    let cs = match changeset::propose(&conn, &new_cs) {
+        Ok(cs) => cs,
+        Err(e) => return Ok(text_content(format!("Failed to stage proposal: {}", e), true)),
+    };
+
+    let op = NewOp {
+        op_kind: ChangeOpKind::AddRelation,
+        target_object_id: None,
+        legacy_path: Some(norm_source.clone()),
+        legacy_chunk_id: None,
+        new_content: None,
+        patch: Some(patch_str),
+        reason: reason.clone().or_else(|| Some(format!("Proposed {} relation via MCP", relation_type))),
+        evidence_ids: Vec::new(),
+        tool_name: "propose_relation".to_string(),
+        target_kind: ObjectKind::Relation,
+        side_effects: None,
+        observed_read: None,
+    };
+
+    let add_res = match changeset::add_op(&conn, &cs.id, &new_cs.scopes, &op) {
+        Ok(res) => res,
+        Err(e) => return Ok(text_content(format!("Failed to add operation: {}", e), true)),
+    };
+
+    if let Err(refusal) = add_res {
+        return Ok(text_content(format!("Proposal refused: {}", refusal.message()), true));
+    }
+
+    let dry_run = match changeset::dry_run(&conn, &cs.id) {
+        Ok(report) => report,
+        Err(e) => return Ok(text_content(format!("Dry run failed: {}", e), true)),
+    };
+
+    let status_str = if dry_run.has_conflicts {
+        "conflicted"
+    } else {
+        "previewed"
+    };
+
+    let payload = json!({
+        "changeset_id": cs.id,
+        "status": status_str,
+        "action": "add_relation",
+        "source_path": norm_source,
+        "target_path": norm_target,
+        "relation_type": relation_type,
+        "confidence": confidence,
+        "has_conflicts": dry_run.has_conflicts,
+        "message": "Relation proposal staged successfully. Awaiting human review in ZettelAgent.",
+        "review_hint": "Open ZettelAgent desktop (Knowledge Center -> Change Review) to inspect and approve. Use get_proposal_status with this changeset_id to track review and commit status."
+    });
+
+    Ok(text_content(serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()), false))
+}
+
+fn handle_get_proposal_status(
+    state: &McpServerState,
+    args: &Value,
+) -> Result<Value, (i64, String)> {
+    let changeset_id = match args.get("changeset_id").and_then(|id| id.as_str()) {
+        Some(id) if !id.trim().is_empty() => id.trim(),
+        _ => return Ok(text_content("Error: Missing required parameter 'changeset_id'".to_string(), true)),
+    };
+
+    let conn = state.db.lock().map_err(|_| (INTERNAL_ERROR, "DB lock error".to_string()))?;
+
+    let cs = match changeset::get(&conn, changeset_id) {
+        Ok(Some(cs)) => cs,
+        Ok(None) => return Ok(text_content(format!("ChangeSet with id '{}' not found", changeset_id), true)),
+        Err(e) => return Ok(text_content(format!("Error fetching changeset: {}", e), true)),
+    };
+
+    let ops = changeset::list_ops(&conn, changeset_id).unwrap_or_default();
+    let ops_summary: Vec<Value> = ops
+        .iter()
+        .map(|op| {
+            json!({
+                "op_id": op.id,
+                "seq": op.seq,
+                "op_kind": op.op_kind.as_str(),
+                "path": op.legacy_path,
+                "reason": op.reason,
+            })
+        })
+        .collect();
+
+    let is_committed = cs.state == ChangeSetState::Committed;
+    let is_approved = cs.state == ChangeSetState::Approved;
+    let is_rejected = cs.state == ChangeSetState::Rejected;
+
+    let payload = json!({
+        "changeset_id": cs.id,
+        "actor": cs.actor,
+        "state": cs.state.as_str(),
+        "intent": cs.intent,
+        "is_committed": is_committed,
+        "is_approved": is_approved,
+        "is_rejected": is_rejected,
+        "created_at_ms": cs.created_at_ms,
+        "updated_at_ms": cs.updated_at_ms,
+        "commit_error": cs.commit_error,
+        "ops": ops_summary,
+    });
+
+    Ok(text_content(serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()), false))
+}
+
+/// Apply an approved MCP proposal ChangeSet to disk and DB, then record its commit.
+///
+/// This is invoked when the user approves an `mcp:external` proposal in the desktop review UI,
+/// turning the staged proposal into actual file modifications and graph edges.
+pub fn apply_proposal_changeset(
+    conn: &Connection,
+    vault_override: Option<&str>,
+    changeset_id: &str,
+) -> anyhow::Result<usize> {
+    let cs = changeset::get(conn, changeset_id)?
+        .ok_or_else(|| anyhow::anyhow!("ChangeSet {} not found", changeset_id))?;
+
+    if cs.state != ChangeSetState::Approved {
+        anyhow::bail!(
+            "ChangeSet {} is in state '{}' - only approved proposals can be applied",
+            changeset_id,
+            cs.state.as_str()
+        );
+    }
+
+    let (primary_vault, all_vaults) = if let Some(vo) = vault_override {
+        (vo.to_string(), vec![vo.to_string()])
+    } else {
+        match resolve_vaults(conn, &[]) {
+            Ok((p, a)) => (p, a),
+            Err(_) => {
+                let p: String = conn
+                    .query_row(
+                        "SELECT scope FROM knowledge_audit WHERE actor = ?1 AND action = 'changeset_proposed' ORDER BY created_at_ms DESC LIMIT 1",
+                        params![&cs.actor],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or_default();
+                let a = if p.is_empty() { Vec::new() } else { vec![p.clone()] };
+                (p, a)
+            }
+        }
+    };
+
+    let ops = changeset::list_ops(conn, changeset_id)?;
+    for op in &ops {
+        match op.op_kind {
+            ChangeOpKind::Create => {
+                let path = op
+                    .legacy_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("Create op missing legacy_path"))?;
+                let content = op.new_content.as_deref().unwrap_or("");
+                let full_path = resolve_path_multi_vault(path, &primary_vault, &all_vaults)?;
+                if let Some(parent) = full_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let sanitized = crate::frontmatter::sanitize_frontmatter(content);
+                crate::file_lock::safe_write(&full_path, &sanitized)?;
+
+                let stored = normalize_db_path(&full_path);
+                let title = full_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Untitled");
+                conn.execute(
+                    "INSERT OR REPLACE INTO files (path, hash, title) VALUES (?1, ?2, ?3)",
+                    params![&stored, "mcp_proposal", title],
+                )?;
+
+                let new_obj = object_store::NewObject::new(ObjectKind::Document, &stored, &cs.actor)
+                    .with_source(SourceRef::file(&stored))
+                    .with_title(title)
+                    .with_content(content);
+                let obj = object_store::create_object(conn, new_obj)?;
+                conn.execute(
+                    "UPDATE changeset_ops SET target_object_id = ?1 WHERE id = ?2",
+                    params![&obj.id, &op.id],
+                )?;
+            }
+            ChangeOpKind::Edit => {
+                let path = op
+                    .legacy_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("Edit op missing legacy_path"))?;
+                let content = op.new_content.as_deref().unwrap_or("");
+                let full_path = resolve_path_multi_vault(path, &primary_vault, &all_vaults)?;
+                let sanitized = crate::frontmatter::sanitize_frontmatter(content);
+                crate::file_lock::safe_write(&full_path, &sanitized)?;
+
+                let stored = normalize_db_path(&full_path);
+                conn.execute(
+                    "UPDATE files SET hash = 'mcp_proposal' WHERE path = ?1",
+                    params![&stored],
+                )?;
+
+                if op.target_object_id.is_none() {
+                    if let Ok(Some(obj)) = object_store::find_by_source(conn, &SourceRef::file(&stored)) {
+                        let _ = conn.execute(
+                            "UPDATE changeset_ops SET target_object_id = ?1 WHERE id = ?2",
+                            params![&obj.id, &op.id],
+                        );
+                    }
+                }
+            }
+            ChangeOpKind::AddRelation => {
+                if let Some(payload) = changeset::relation_payload(op) {
+                    let _ = crate::knowledge::relations::add_relation(
+                        conn,
+                        &payload,
+                        Some(changeset_id),
+                        None,
+                    )?;
+                }
+            }
+            other => {
+                log::warn!("Unsupported op kind in external proposal: {:?}", other);
+            }
+        }
+    }
+
+    let versioned = changeset::record_commit(conn, changeset_id)?;
+    Ok(versioned)
 }
 
 // ── resources/list + resources/read ────────────────────────────────────────
@@ -746,6 +1376,8 @@ mod tests {
         crate::db::register_sqlite_vec();
         let conn = Connection::open_in_memory().unwrap();
         crate::db::schema::setup_database_schema(&conn).unwrap();
+        crate::db::schema::migrate_schema_columns(&conn).unwrap();
+        crate::knowledge::migration::run_knowledge_migrations(&conn).unwrap();
 
         let vault = std::env::temp_dir().join(format!(
             "zettel_mcp_{}_{}",
@@ -852,7 +1484,7 @@ mod tests {
         let e = env("toolslist");
         let v = call(&e, r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
         let tools = v["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), EXPOSED_TOOLS.len());
+        assert_eq!(tools.len(), EXPOSED_TOOLS.len() + PROPOSAL_TOOLS.len());
         for t in tools {
             assert!(t["name"].is_string(), "tool needs a name: {t}");
             assert!(
@@ -865,6 +1497,9 @@ mod tests {
             assert_eq!(t["inputSchema"]["type"], json!("object"), "bad schema for {}", t["name"]);
             assert!(t["inputSchema"]["properties"].is_object());
             assert!(t.get("parameters").is_none(), "must not leak the OpenAI field name");
+        }
+        for p in PROPOSAL_TOOLS {
+            assert!(tools.iter().any(|t| t["name"] == *p), "proposal tool {p} must be advertised");
         }
     }
 
@@ -1093,6 +1728,234 @@ mod tests {
         // Falls back to the persisted `vault_path` when no override is given.
         let (p2, _) = resolve_vaults(&conn, &[]).unwrap();
         assert_eq!(p2, e.state.vault_path);
+    }
+
+    // ── proposal writes ───────────────────────────────────────────────
+
+    #[test]
+    fn test_propose_create_note_stages_changeset_without_disk_overwrite() {
+        let e = env("prop_create");
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_create_note",
+                "arguments": {
+                    "path": "ideas/entropy.md",
+                    "content": "# Entropy\nA measure of randomness.",
+                    "reason": "Drafting fundamental physics note"
+                }
+            }
+        });
+
+        let v = call(&e, &req.to_string());
+        assert_eq!(v["result"]["isError"], json!(false), "call failed: {v}");
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+
+        let cs_id = payload["changeset_id"].as_str().unwrap();
+        assert!(!cs_id.is_empty());
+        assert_eq!(payload["action"], "create_note");
+        assert_eq!(payload["status"], "previewed");
+
+        // ZERO SILENT WRITES: File must NOT exist on disk!
+        assert!(!e.vault.join("ideas").join("entropy.md").exists(), "disk write must not happen without approval");
+
+        // Verify SQLite staged the changeset properly
+        let conn = e.state.db.lock().unwrap();
+        let cs = changeset::get(&conn, cs_id).unwrap().expect("changeset exists");
+        assert_eq!(cs.actor, "mcp:external");
+        assert_eq!(cs.state, ChangeSetState::Previewed);
+
+        let ops = changeset::list_ops(&conn, cs_id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op_kind, ChangeOpKind::Create);
+        assert_eq!(ops[0].new_content.as_deref(), Some("# Entropy\nA measure of randomness."));
+    }
+
+    #[test]
+    fn test_propose_edit_note_stages_patch() {
+        let e = env("prop_edit");
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_edit_note",
+                "arguments": {
+                    "path": "笔记/测试 笔记.md",
+                    "new_content": "# 测试\n\n更新后的内容。",
+                    "reason": "Fix wording"
+                }
+            }
+        });
+
+        let v = call(&e, &req.to_string());
+        assert_eq!(v["result"]["isError"], json!(false), "call failed: {v}");
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+
+        let cs_id = payload["changeset_id"].as_str().unwrap();
+
+        // Disk must retain original content until approved
+        let disk_content = std::fs::read_to_string(e.vault.join("笔记").join("测试 笔记.md")).unwrap();
+        assert!(disk_content.contains("这是一个关于知识管理的中文笔记"), "original content preserved");
+
+        let conn = e.state.db.lock().unwrap();
+        let cs = changeset::get(&conn, cs_id).unwrap().expect("changeset exists");
+        assert_eq!(cs.actor, "mcp:external");
+
+        let ops = changeset::list_ops(&conn, cs_id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op_kind, ChangeOpKind::Edit);
+        assert_eq!(ops[0].new_content.as_deref(), Some("# 测试\n\n更新后的内容。"));
+    }
+
+    #[test]
+    fn test_propose_relation_stages_edge() {
+        let e = env("prop_rel");
+        // Create second note for relation linking
+        let note2 = e.vault.join("second.md");
+        std::fs::write(&note2, "# Second Note\n").unwrap();
+        let stored2 = crate::tools::internal_tools::helpers::normalize_db_path(&note2);
+        {
+            let conn = e.state.db.lock().unwrap();
+            conn.execute(
+                "INSERT INTO files (path, hash, title) VALUES (?1, 'h2', 'Second Note')",
+                params![&stored2],
+            ).unwrap();
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_relation",
+                "arguments": {
+                    "source_path": "笔记/测试 笔记.md",
+                    "target_path": "second.md",
+                    "relation_type": "supports",
+                    "confidence": 0.95,
+                    "reason": "Physics foundation supports computational complexity"
+                }
+            }
+        });
+
+        let v = call(&e, &req.to_string());
+        assert_eq!(v["result"]["isError"], json!(false), "call failed: {v}");
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+
+        let cs_id = payload["changeset_id"].as_str().unwrap();
+        assert_eq!(payload["action"], "add_relation");
+
+        let conn = e.state.db.lock().unwrap();
+        let ops = changeset::list_ops(&conn, cs_id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op_kind, ChangeOpKind::AddRelation);
+        let rel = changeset::relation_payload(&ops[0]).expect("relation payload");
+        assert_eq!(rel.relation_type, "supports");
+        assert_eq!(rel.confidence, 0.95);
+    }
+
+    #[test]
+    fn test_get_proposal_status_queries_changeset() {
+        let e = env("prop_status");
+        let create_req = json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_create_note",
+                "arguments": {
+                    "path": "status_check.md",
+                    "content": "# Status Check\n"
+                }
+            }
+        });
+        let v1 = call(&e, &create_req.to_string());
+        let cs_id = serde_json::from_str::<Value>(v1["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["changeset_id"].as_str().unwrap().to_string();
+
+        let query_req = json!({
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "get_proposal_status",
+                "arguments": {
+                    "changeset_id": cs_id
+                }
+            }
+        });
+
+        let v2 = call(&e, &query_req.to_string());
+        assert_eq!(v2["result"]["isError"], json!(false));
+        let status_res: Value = serde_json::from_str(v2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(status_res["changeset_id"], cs_id);
+        assert_eq!(status_res["actor"], "mcp:external");
+        assert_eq!(status_res["is_committed"], false);
+        assert_eq!(status_res["is_approved"], false);
+        assert_eq!(status_res["ops"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_propose_traversal_path_is_rejected() {
+        let e = env("prop_trav");
+        let bad_req = json!({
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_create_note",
+                "arguments": {
+                    "path": "../../../evil.md",
+                    "content": "hacked"
+                }
+            }
+        });
+
+        let v = call(&e, &bad_req.to_string());
+        assert_eq!(v["result"]["isError"], json!(true));
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Security error") || text.contains("traversal"));
+    }
+
+    #[test]
+    fn test_apply_proposal_changeset_commits_changes() {
+        let e = env("prop_apply");
+        let create_req = json!({
+            "jsonrpc": "2.0",
+            "id": 16,
+            "method": "tools/call",
+            "params": {
+                "name": "propose_create_note",
+                "arguments": {
+                    "path": "applied.md",
+                    "content": "# Applied Note\nNow on disk."
+                }
+            }
+        });
+        let v = call(&e, &create_req.to_string());
+        let cs_id = serde_json::from_str::<Value>(v["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["changeset_id"].as_str().unwrap().to_string();
+
+        let conn = e.state.db.lock().unwrap();
+        // Simulate human approval via ChangeReview
+        changeset::record_decision(&conn, &cs_id, true).unwrap();
+
+        // Apply
+        let versioned = apply_proposal_changeset(&conn, Some(&e.vault.to_string_lossy()), &cs_id).unwrap();
+        assert_eq!(versioned, 1);
+
+        // Verify file is actually on disk now
+        let disk_file = e.vault.join("applied.md");
+        assert!(disk_file.exists(), "file must be created upon commit");
+        let content = std::fs::read_to_string(disk_file).unwrap();
+        assert!(content.contains("Now on disk."));
+
+        let cs = changeset::get(&conn, &cs_id).unwrap().unwrap();
+        assert_eq!(cs.state, ChangeSetState::Committed);
     }
 }
 

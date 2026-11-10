@@ -180,7 +180,7 @@ pub fn capability_of(name: &str) -> ToolCapability {
 /// 读工具能寻址什么 / what a read tool can address.
 fn read_targets(name: &str) -> &'static [ObjectKind] {
     match name {
-        "get_research_state" => &[ObjectKind::Collection, ObjectKind::Claim, ObjectKind::Resource],
+        "get_research_state" | "get_proposal_status" => &[ObjectKind::Collection, ObjectKind::Claim, ObjectKind::Resource],
         "trace_claim" | "preview_change_impact" | "generate_review_items" => &[ObjectKind::Claim, ObjectKind::Fact, ObjectKind::Document, ObjectKind::Relation],
         "read_memory" | "search_memory" => &[ObjectKind::Memory],
         "get_note_facts" | "query_temporal" | "get_timeline" | "get_global_timeline" => {
@@ -204,7 +204,8 @@ fn write_targets(name: &str) -> &'static [ObjectKind] {
         "create_research_project" | "update_research_state" => &[ObjectKind::Collection, ObjectKind::Claim],
         "update_memory" => &[ObjectKind::Memory],
         "propagate_fact_update" => &[ObjectKind::Fact, ObjectKind::Document],
-        "add_relation" | "delete_relation" | "batch_link_notes" => RELATION_KINDS,
+        "add_relation" | "delete_relation" | "batch_link_notes" | "propose_relation" => RELATION_KINDS,
+        "propose_create_note" | "propose_edit_note" => NOTE_KINDS,
         _ => NOTE_KINDS,
     }
 }

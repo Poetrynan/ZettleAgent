@@ -401,9 +401,18 @@ fn path_in_scope(path: &str, scopes: &[String]) -> bool {
     if scopes.is_empty() {
         return false;
     }
-    let normalized = path.replace('\\', "/");
+    fn clean(p: &str) -> String {
+        let mut s = p.replace('\\', "/");
+        if let Some(rest) = s.strip_prefix("//?/UNC/") {
+            s = format!("//{}", rest);
+        } else if let Some(rest) = s.strip_prefix("//?/") {
+            s = rest.to_string();
+        }
+        s
+    }
+    let normalized = clean(path);
     scopes.iter().any(|s| {
-        let prefix = s.replace('\\', "/");
+        let prefix = clean(s);
         normalized == prefix || normalized.starts_with(&format!("{}/", prefix.trim_end_matches('/')))
     })
 }
