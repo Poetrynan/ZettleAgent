@@ -74,6 +74,24 @@ pub const MEMORY_LIFECYCLE_TOOLS: &[&str] = &[
     "update_memory",
 ];
 
+/// Research Workflow Pack: source verification, citations, persistent state, claim trace & impact analysis
+pub const RESEARCH_WORKFLOW_TOOLS: &[&str] = &[
+    "read_source_range",
+    "verify_quote",
+    "capture_source",
+    "create_research_project",
+    "get_research_state",
+    "update_research_state",
+    "trace_claim",
+    "preview_change_impact",
+    "generate_review_items",
+    "resolve_reference",
+    "export_research_bundle",
+    "find_duplicate_groups",
+    "resolve_entity_aliases",
+    "calculate",
+];
+
 /// Read-focused knowledge tools that must be reachable without a discovery
 /// round-trip when the request is about structure, graph, canvas, or health.
 pub const KNOWLEDGE_BROAD_TOOLS: &[&str] = &[
@@ -105,6 +123,20 @@ pub const KNOWLEDGE_BROAD_TOOLS: &[&str] = &[
     "knowledge_graph_plan",
     "knowledge_create_moc_draft",
     "batch_read_notes",
+    "read_source_range",
+    "verify_quote",
+    "capture_source",
+    "create_research_project",
+    "get_research_state",
+    "update_research_state",
+    "trace_claim",
+    "preview_change_impact",
+    "generate_review_items",
+    "resolve_reference",
+    "export_research_bundle",
+    "find_duplicate_groups",
+    "resolve_entity_aliases",
+    "calculate",
 ];
 
 /// Signals that the request is about the knowledge base even when the
@@ -143,6 +175,18 @@ const KNOWLEDGE_SIGNALS: &[&str] = &[
     "审计",
     "卡片",
     "社区",
+    "核对",
+    "引文",
+    "出处",
+    "精读",
+    "对照",
+    "收件箱",
+    "查重",
+    "周回顾",
+    "主张",
+    "引用",
+    "来源",
+    "文献",
     // EN
     "note",
     "notes",
@@ -162,6 +206,13 @@ const KNOWLEDGE_SIGNALS: &[&str] = &[
     "lint",
     "bridge",
     "contradict",
+    "citation",
+    "verify",
+    "claim",
+    "triage",
+    "review",
+    "source",
+    "reference",
 ];
 
 /// True when the query mentions knowledge-domain work.
@@ -216,6 +267,8 @@ pub fn detect_domain(query: &str) -> &'static str {
         "graph_explore"
     } else if q.contains("证据") || q.contains("事实") || q.contains("时序") || q.contains("时间线") || q.contains("timeline") || q.contains("temporal") {
         "evidence_investigation"
+    } else if q.contains("核对") || q.contains("引文") || q.contains("精读") || q.contains("对照") || q.contains("对比") || q.contains("收件箱") || q.contains("查重") || q.contains("周回顾") || q.contains("citation") || q.contains("research") || q.contains("compare") {
+        "research_workflow"
     } else if q.contains("记忆") || q.contains("偏好") || q.contains("档案") || q.contains("memory") {
         "memory_lifecycle"
     } else {
@@ -244,6 +297,7 @@ pub fn expand_visible_tools(
         "graph_explore" => GRAPH_EXPLORE_TOOLS,
         "evidence_investigation" => EVIDENCE_INVESTIGATION_TOOLS,
         "memory_lifecycle" => MEMORY_LIFECYCLE_TOOLS,
+        "research_workflow" => RESEARCH_WORKFLOW_TOOLS,
         _ => KNOWLEDGE_BROAD_TOOLS,
     };
     let added = merge_named_tools(visible, catalogue, tools_to_add);
@@ -278,6 +332,11 @@ mod tests {
         assert_eq!(detect_domain("查看知识图谱社区分布"), "graph_explore");
         assert_eq!(detect_domain("探索这一结论的事实证据和时间线"), "evidence_investigation");
         assert_eq!(detect_domain("更新我的用户偏好记忆档案"), "memory_lifecycle");
+        assert_eq!(detect_domain("核对这句话是否出自卢曼原书"), "research_workflow");
+        assert_eq!(detect_domain("精读这一章并提取主张"), "research_workflow");
+        assert_eq!(detect_domain("对比支持与反对热量限制延寿的观点"), "research_workflow");
+        assert_eq!(detect_domain("整理收件箱并查重"), "research_workflow");
+        assert_eq!(detect_domain("做一下本周知识周回顾"), "research_workflow");
     }
 
     #[test]

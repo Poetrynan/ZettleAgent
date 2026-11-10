@@ -70,7 +70,8 @@
     "targets": "all",
     "resources": {
       "resources/ocr_models/*": "ocr_models/",
-      "resources/demo-vault/*.md": "demo-vault/"
+      "resources/demo-vault/*.md": "demo-vault/",
+      "resources/skills/**/*": "skills/"
     },
     "icon": [
       "icons/icon.png",

@@ -910,14 +910,8 @@ async fn run_agent_turn(
         ctx
     };
 
-    // Load Skill prompts from configured directories
-    let skills_context = {
-        if skill_dirs.is_empty() {
-            String::new()
-        } else {
-            crate::tools::skill_loader::collect_skill_prompts(&skill_dirs)
-        }
-    };
+    // Load Skill prompts from configured directories (including built-ins)
+    let skills_context = crate::tools::skill_loader::collect_skill_prompts(&skill_dirs);
 
     // A-1: System prompt is now constructed entirely on the backend.
     // Frontend sends flags (deep_thinking, web_search, current_file, attached_context)

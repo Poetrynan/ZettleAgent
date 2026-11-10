@@ -298,8 +298,85 @@ fn parse_manifest(path: &PathBuf) -> anyhow::Result<SkillManifest> {
     Ok(manifest)
 }
 
+/// Built-in research skills statically embedded in the binary.
+pub const BUILTIN_SKILLS: &[(&str, &str)] = &[
+    (
+        "verify-citation",
+        include_str!("../../resources/skills/verify-citation/SKILL.md"),
+    ),
+    (
+        "close-reading",
+        include_str!("../../resources/skills/close-reading/SKILL.md"),
+    ),
+    (
+        "perspective-compare",
+        include_str!("../../resources/skills/perspective-compare/SKILL.md"),
+    ),
+    (
+        "inbox-triage",
+        include_str!("../../resources/skills/inbox-triage/SKILL.md"),
+    ),
+    (
+        "weekly-review",
+        include_str!("../../resources/skills/weekly-review/SKILL.md"),
+    ),
+];
+
+pub fn get_builtin_skills() -> Vec<SkillInfo> {
+    BUILTIN_SKILLS
+        .iter()
+        .map(|(dir_name, content)| {
+            let fm = parse_skill_frontmatter(content).unwrap_or_default();
+            let name = fm.name.unwrap_or_else(|| dir_name.to_string());
+            let description = fm.description.unwrap_or_default();
+            let version = fm.version.unwrap_or_else(default_version);
+            let tools = fm.tools;
+            SkillInfo {
+                name,
+                description,
+                version,
+                tools,
+                directory: format!("builtin:{}", dir_name),
+                enabled: true,
+                has_skill_md: true,
+            }
+        })
+        .collect()
+}
+
+pub fn get_builtin_skill_body(name: &str) -> Option<String> {
+    BUILTIN_SKILLS
+        .iter()
+        .find(|(n, _)| *n == name || n.eq_ignore_ascii_case(name))
+        .map(|(_, content)| content.to_string())
+}
+
 /// Get detailed information about a skill, including SKILL.md content.
 pub fn get_skill_detail(skill_dir: &str) -> anyhow::Result<SkillDetail> {
+    if skill_dir.starts_with("builtin:") {
+        let builtin_id = skill_dir.strip_prefix("builtin:").unwrap_or(skill_dir);
+        if let Some(content) = get_builtin_skill_body(builtin_id) {
+            let fm = parse_skill_frontmatter(&content).unwrap_or_default();
+            let name = fm.name.unwrap_or_else(|| builtin_id.to_string());
+            let description = fm.description.unwrap_or_default();
+            let version = fm.version.unwrap_or_else(default_version);
+            let tools = fm.tools;
+            return Ok(SkillDetail {
+                info: SkillInfo {
+                    name,
+                    description,
+                    version,
+                    tools,
+                    directory: skill_dir.to_string(),
+                    enabled: true,
+                    has_skill_md: true,
+                },
+                skill_md_content: Some(content),
+                mcp_servers: Vec::new(),
+            });
+        }
+    }
+
     let dir = Path::new(skill_dir);
     if !dir.exists() || !dir.is_dir() {
         anyhow::bail!("Skill directory does not exist: {}", skill_dir);
@@ -402,6 +479,13 @@ pub fn scan_all_skill_directories(directories: &[String]) -> Vec<SkillInfo> {
         }
     }
 
+    // Append built-in skills if not already overridden by an external skill with the same name
+    for builtin in get_builtin_skills() {
+        if !all_skills.iter().any(|s| s.name.eq_ignore_ascii_case(&builtin.name)) {
+            all_skills.push(builtin);
+        }
+    }
+
     if let Ok(mut guard) = cache.lock() {
         *guard = (key, all_skills.clone());
     }
@@ -480,6 +564,22 @@ pub fn read_skill_body(directories: &[String], skill_name: &str) -> anyhow::Resu
             );
         }
     };
+
+    if skill.directory.starts_with("builtin:") {
+        let builtin_id = skill.directory.strip_prefix("builtin:").unwrap_or(&skill.name);
+        if let Some(content) = get_builtin_skill_body(builtin_id).or_else(|| get_builtin_skill_body(&skill.name)) {
+            let char_count = content.chars().count();
+            if char_count > SKILL_BODY_MAX_CHARS {
+                let head: String = content.chars().take(SKILL_BODY_MAX_CHARS).collect();
+                return Ok(format!(
+                    "{}...\n[Truncated — full content: {} chars]",
+                    head, char_count
+                ));
+            } else {
+                return Ok(content);
+            }
+        }
+    }
 
     let skill_md_path = std::path::Path::new(&skill.directory).join("SKILL.md");
     if !skill_md_path.exists() {
@@ -1001,8 +1101,8 @@ mod tests {
             "SKILL.md body leaked into the system prompt — progressive disclosure regressed:\n{fragment}"
         );
         assert!(!fragment.contains("# Instructions"));
-        // One compact line per skill, nothing more.
-        assert_eq!(fragment.lines().filter(|l| !l.trim().is_empty()).count(), 2);
+        // One compact line per skill, plus the built-in research skills.
+        assert_eq!(fragment.lines().filter(|l| !l.trim().is_empty()).count(), 2 + BUILTIN_SKILLS.len());
     }
 
     #[test]
@@ -1037,5 +1137,69 @@ mod tests {
         // Must be classified read-only, or the approval gate would prompt the
         // user every time the model looks up a skill.
         assert!(crate::llm::approval::is_read_only_tool("read_skill"));
+    }
+
+    #[test]
+    fn builtin_research_skills_are_discovered_automatically_even_with_empty_dirs() {
+        let skills = scan_all_skill_directories(&[]);
+        assert!(skills.len() >= 5);
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"verify-citation"));
+        assert!(names.contains(&"close-reading"));
+        assert!(names.contains(&"perspective-compare"));
+        assert!(names.contains(&"inbox-triage"));
+        assert!(names.contains(&"weekly-review"));
+
+        // Prompt index includes all 5 builtin skills
+        let index = collect_skill_prompts(&[]);
+        assert!(index.contains("verify-citation"));
+        assert!(index.contains("close-reading"));
+        assert!(index.contains("perspective-compare"));
+        assert!(index.contains("inbox-triage"));
+        assert!(index.contains("weekly-review"));
+    }
+
+    #[test]
+    fn builtin_research_skills_can_be_read_via_read_skill_body() {
+        let empty_dirs: Vec<String> = vec![];
+        for name in [
+            "verify-citation",
+            "close-reading",
+            "perspective-compare",
+            "inbox-triage",
+            "weekly-review",
+        ] {
+            let body = read_skill_body(&empty_dirs, name).expect("builtin skill must load");
+            assert!(body.contains("Core Principles") || body.contains("Core Rules"), "{name} must have instructions");
+            assert!(body.contains("Execution Phases"), "{name} must have execution phases");
+        }
+    }
+
+    #[test]
+    fn builtin_skill_detail_returns_content() {
+        let detail = get_skill_detail("builtin:verify-citation").expect("detail must load");
+        assert_eq!(detail.info.name, "verify-citation");
+        assert!(detail.skill_md_content.is_some());
+        assert!(detail.skill_md_content.unwrap().contains("Verify Citation"));
+    }
+
+    #[test]
+    fn external_skill_overrides_builtin_with_same_name() {
+        let root = temp_root("override_builtin");
+        make_skill(
+            &root,
+            "verify-citation",
+            &[(
+                "SKILL.md",
+                "---\nname: verify-citation\ndescription: Custom override for verify-citation\n---\nCustom instructions.\n",
+            )],
+        );
+        let dirs = vec![root.to_str().unwrap().to_string()];
+        let skills = scan_all_skill_directories(&dirs);
+        let custom = skills.iter().find(|s| s.name == "verify-citation").unwrap();
+        assert_eq!(custom.description, "Custom override for verify-citation");
+
+        let body = read_skill_body(&dirs, "verify-citation").unwrap();
+        assert!(body.contains("Custom instructions."));
     }
 }
