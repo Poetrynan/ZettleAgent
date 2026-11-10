@@ -489,6 +489,10 @@ pipeline_log::init(&app_data_dir);
             commands::research_verify_quote,
             commands::research_capture_source,
             commands::research_action,
+            commands::get_workflow_configs,
+            commands::update_workflow_config,
+            commands::run_workflow_now,
+            commands::get_workflow_history,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

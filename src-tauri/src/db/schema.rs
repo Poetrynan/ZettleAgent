@@ -488,6 +488,49 @@ pub fn setup_database_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // ── Knowledge Workflows (Automation Engine) ──
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS workflow_configs (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            trigger_json TEXT NOT NULL,
+            scope_json TEXT NOT NULL,
+            budget_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS workflow_runs (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            is_dry_run INTEGER NOT NULL DEFAULT 0,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            duration_ms INTEGER DEFAULT 0,
+            api_calls_used INTEGER DEFAULT 0,
+            tokens_used INTEGER DEFAULT 0,
+            items_processed INTEGER DEFAULT 0,
+            changeset_id TEXT,
+            summary_json TEXT,
+            error_message TEXT
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs(workflow_id);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_time ON workflow_runs(started_at DESC);",
+        [],
+    )?;
+
     Ok(())
 }
 

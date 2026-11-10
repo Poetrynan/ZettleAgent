@@ -42,6 +42,7 @@ pub mod research;
 pub mod sources;
 pub mod retrieval;
 pub mod types;
+pub mod workflows;
 pub mod write_guard;
 
 use rusqlite::Connection;

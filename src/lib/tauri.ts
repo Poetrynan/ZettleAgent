@@ -3058,5 +3058,123 @@ export async function scanCommitments(limit?: number): Promise<CommitmentScan> {
   return invoke<CommitmentScan>('knowledge_scan_commitments', { limit });
 }
 
+// ── Knowledge Workflows (Automation Engine) ─────────────────────────
+
+export type WorkflowKind = 'source_ingestion' | 'fact_impact_sentinel' | 'weekly_review';
+
+export type WorkflowTrigger =
+  | { type: 'manual' }
+  | { type: 'scheduled'; interval_secs: number }
+  | { type: 'file_event'; path_pattern: string; debounce_ms: number };
+
+export interface WorkflowScope {
+  path_patterns: string[];
+  tag_filters: string[];
+  ignore_patterns: string[];
+}
+
+export interface BudgetCap {
+  max_api_calls: number;
+  max_tokens: number;
+  timeout_secs: number;
+}
+
+export type WorkflowApprovalMode = 'review_required' | 'read_only_preview';
+
+export interface WorkflowConfig {
+  id: string;
+  kind: WorkflowKind;
+  name: string;
+  description: string;
+  enabled: boolean;
+  trigger: WorkflowTrigger;
+  scope: WorkflowScope;
+  budget: BudgetCap;
+  approval_mode: WorkflowApprovalMode;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WorkflowRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'budget_exhausted'
+  | 'failed'
+  | 'cancelled';
+
+export interface ActionSummary {
+  action_type: string;
+  target: string;
+  description: string;
+  diff_preview?: string;
+}
+
+export interface WorkflowRunRecord {
+  id: string;
+  workflow_id: string;
+  kind: WorkflowKind;
+  status: WorkflowRunStatus;
+  is_dry_run: boolean;
+  started_at: string;
+  completed_at?: string;
+  duration_ms: number;
+  api_calls_used: number;
+  tokens_used: number;
+  items_processed: number;
+  changeset_id?: string;
+  summary_json?: string;
+  error_message?: string;
+}
+
+export interface WorkflowRunResult {
+  run_id: string;
+  workflow_id: string;
+  kind: WorkflowKind;
+  status: WorkflowRunStatus;
+  is_dry_run: boolean;
+  items_processed: number;
+  api_calls_used: number;
+  tokens_used: number;
+  changeset_id?: string;
+  summary_markdown: string;
+  actions: ActionSummary[];
+}
+
+/** 获取所有知识工作流配置 */
+export async function getWorkflowConfigs(): Promise<WorkflowConfig[]> {
+  return invoke<WorkflowConfig[]>('get_workflow_configs');
+}
+
+/** 更新知识工作流配置 (范围、预算、触发器) */
+export async function updateWorkflowConfig(config: WorkflowConfig): Promise<void> {
+  return invoke<void>('update_workflow_config', { config });
+}
+
+/** 立即执行工作流 (支持 dry_run 试运行预览) */
+export async function runWorkflowNow(
+  workflowId: string,
+  dryRun: boolean = false,
+  vaultPath?: string,
+): Promise<WorkflowRunResult> {
+  return invoke<WorkflowRunResult>('run_workflow_now', {
+    workflowId,
+    dryRun,
+    vaultPath,
+  });
+}
+
+/** 获取工作流历史运行审计记录 */
+export async function getWorkflowHistory(
+  workflowId?: string,
+  limit?: number,
+): Promise<WorkflowRunRecord[]> {
+  return invoke<WorkflowRunRecord[]>('get_workflow_history', {
+    workflowId,
+    limit,
+  });
+}
+
+
 
 

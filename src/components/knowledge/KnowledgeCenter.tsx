@@ -12,6 +12,7 @@ import { ChangeReview } from './ChangeReview';
 import { TaskCenter } from './TaskCenter';
 import { KnowledgeHealth } from './KnowledgeHealth';
 import { KnowledgeGapAnalysis } from '../dashboard/KnowledgeGapAnalysis';
+import { WorkflowDashboard } from './workflows/WorkflowDashboard';
 import { KcCount } from './states';
 import { useInboxCounts } from './useInboxCounts';
 import {
@@ -46,7 +47,7 @@ import '../../styles/knowledge-center.css';
  * 不复制一份。后续批次会把它们逐个升级成完整页面，那时两处一起变。
  */
 
-export type KnowledgePage = 'inbox' | 'research' | 'claims' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity' | 'gap_analysis';
+export type KnowledgePage = 'inbox' | 'research' | 'claims' | 'workflows' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity' | 'gap_analysis';
 
 /**
  * 页面配对应图标与多语言词条。全部取自 `components/icons.tsx`，不新画。
@@ -60,6 +61,7 @@ const PAGES: {
   { key: 'inbox', labelKey: 'knowledge.tab.inbox', hintKey: 'knowledge.tabHint.inbox', Icon: IconClipboard },
   { key: 'research', labelKey: 'knowledge.tab.research', hintKey: 'knowledge.tabHint.research', Icon: IconInspect },
   { key: 'claims', labelKey: 'knowledge.tab.claims', hintKey: 'knowledge.tabHint.claims', Icon: IconStack },
+  { key: 'workflows', labelKey: 'knowledge.tab.workflows', hintKey: 'knowledge.tabHint.workflows', Icon: IconTimeline },
   { key: 'memory', labelKey: 'knowledge.tab.memory', hintKey: 'knowledge.tabHint.memory', Icon: IconBrain },
   { key: 'changes', labelKey: 'knowledge.tab.changes', hintKey: 'knowledge.tabHint.changes', Icon: IconMerge },
   { key: 'tasks', labelKey: 'knowledge.tab.tasks', hintKey: 'knowledge.tabHint.tasks', Icon: IconCheck },
@@ -200,6 +202,12 @@ export function KnowledgeCenter() {
             <ClaimsWorkspace
               vaultPath={vaultPath}
               onOpenFile={openFile}
+            />
+          )}
+          {page === 'workflows' && (
+            <WorkflowDashboard
+              vaultPath={vaultPath}
+              onOpenChangeReview={() => setPage('changes')}
             />
           )}
           {/* 记忆与变更都有了完整页面（变更：一个 diff 渲染器、一套状态词、一条时间线、
