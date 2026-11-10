@@ -77,7 +77,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
         "search_notes"                  // search_ops.rs:23
             | "read_source_range" | "verify_quote" | "get_research_state" | "trace_claim"
             | "preview_change_impact" | "find_duplicate_groups" | "resolve_entity_aliases"
-            | "calculate" | "resolve_reference" | "generate_review_items"
+            | "calculate" | "resolve_reference" | "generate_review_items" | "get_proposal_status"
             | "list_notes"              // search_ops.rs:237
             | "find_similar_notes"      // search_ops.rs:310
             | "search_by_tag"           // search_ops.rs:390

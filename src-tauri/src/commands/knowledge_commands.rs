@@ -479,7 +479,8 @@ pub async fn knowledge_preview_changeset(
 /// 记录用户对一个批次的裁决 / record the user's decision on a change set.
 ///
 /// 只改状态，不写文件。批准之后真实写回由 Agent 的工具路径完成，然后由
-/// `changeset::record_commit` 记账。
+/// `changeset::record_commit` 记账。若为外部 MCP 客户端提出的提案 (`mcp:external`)，
+/// 批准后自动应用变更并记录提交。
 #[tauri::command]
 pub async fn knowledge_decide_changeset(
     state: State<'_, AppState>,
@@ -487,7 +488,14 @@ pub async fn knowledge_decide_changeset(
     approved: bool,
 ) -> Result<types::ChangeSet, ZettelError> {
     let conn = state.db.lock()?;
-    Ok(changeset::record_decision(&conn, &changeset_id, approved)?)
+    let cs = changeset::record_decision(&conn, &changeset_id, approved)?;
+    if approved && cs.actor == "mcp:external" {
+        if let Err(e) = crate::tools::mcp_server::apply_proposal_changeset(&conn, None, &changeset_id) {
+            log::error!("Failed to commit approved MCP changeset {}: {}", changeset_id, e);
+            let _ = changeset::mark_failed(&conn, &changeset_id, &e.to_string());
+        }
+    }
+    Ok(cs)
 }
 
 /// 已经落地的批次 / change sets that already reached a terminal state.
