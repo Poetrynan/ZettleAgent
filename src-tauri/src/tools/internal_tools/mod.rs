@@ -2,6 +2,7 @@
 // Tool definitions and dispatch live here; implementations are in sub-modules.
 
 mod search_ops;
+mod research_ops;
 // `pub(crate)` so the trash / undo commands can reuse `note_ops::move_to_trash`
 // instead of growing a second recycle-bin implementation.
 pub(crate) mod note_ops;
@@ -19,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 pub fn get_internal_tool_defs() -> Vec<ToolDef> {
-    vec![
+    let mut tools = vec![
         // 1. search_notes
         ToolDef {
             tool_type: "function".to_string(),
@@ -1533,7 +1534,9 @@ pub fn get_internal_tool_defs() -> Vec<ToolDef> {
                 }),
             },
         },
-    ]
+    ];
+    tools.extend(research_ops::defs());
+    tools
 }
 
 
@@ -1546,6 +1549,9 @@ pub async fn try_execute(
     all_vault_paths: &[String],
     llm_config: &crate::llm::LlmConfig,
 ) -> Option<anyhow::Result<String>> {
+    if let Some(result) = research_ops::try_execute(name, arguments, db, vault_path, all_vault_paths).await {
+        return Some(result);
+    }
     let result = match name {
         // Search operations
         "search_notes" => {

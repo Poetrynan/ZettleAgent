@@ -146,7 +146,7 @@ impl NewObject {
 
 // ── 行映射 / row mapping ────────────────────────────────────────────────────
 
-const OBJECT_COLUMNS: &str = "id, kind, scope, parent_id, source_type, source_id, title,
+pub(crate) const OBJECT_COLUMNS: &str = "id, kind, scope, parent_id, source_type, source_id, title,
      canonical_content, content_format, status, current_version, created_at_ms, updated_at_ms,
      valid_from_ms, valid_to_ms, supersedes_id, confidence, user_confirmed, metadata_json";
 
@@ -158,7 +158,7 @@ fn parse_enum<T>(
     f(&raw).ok_or(ObjectError::UnknownEnum { column, value: raw })
 }
 
-fn map_object(row: &Row<'_>) -> ObjectResult<KnowledgeObject> {
+pub(crate) fn map_object(row: &Row<'_>) -> ObjectResult<KnowledgeObject> {
     let source_type: Option<String> = row.get(4)?;
     let source_id: Option<String> = row.get(5)?;
     Ok(KnowledgeObject {

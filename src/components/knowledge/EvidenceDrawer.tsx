@@ -100,7 +100,15 @@ function EvidenceCard({
       <div className="kc-evidence-head">
         <span className="kc-evidence-source">{shortSourceLabel(ev)}</span>
         {ev.locator && onOpenSource ? (
-          <button className="kc-btn kc-btn-quiet" onClick={() => onOpenSource(ev.locator!)}>
+          <button
+            className="kc-btn kc-btn-quiet"
+            onClick={() => {
+              const fullLoc = ev.locator!.startsWith('#')
+                ? `${ev.source_id}${ev.locator}`
+                : ev.locator!;
+              onOpenSource(fullLoc);
+            }}
+          >
             {t('knowledge.context.openSource')}
           </button>
         ) : (

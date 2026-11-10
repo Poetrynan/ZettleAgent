@@ -485,6 +485,10 @@ pipeline_log::init(&app_data_dir);
             commands::knowledge_memory_detail,
             commands::knowledge_memory_edit,
             commands::knowledge_memory_restore,
+            commands::research_read_source,
+            commands::research_verify_quote,
+            commands::research_capture_source,
+            commands::research_action,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

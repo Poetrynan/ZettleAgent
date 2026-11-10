@@ -4,6 +4,8 @@ import { t } from '../../lib/i18n';
 import type { TranslationKey } from '../../lib/i18n';
 import { useApp } from '../../contexts/AppContext';
 import { KnowledgeInbox } from './KnowledgeInbox';
+import { ResearchWorkspace } from './ResearchWorkspace';
+import { ClaimsWorkspace } from './ClaimsWorkspace';
 import { AgentActivity } from './AgentActivity';
 import { MemoryCenter } from './MemoryCenter';
 import { ChangeReview } from './ChangeReview';
@@ -17,7 +19,9 @@ import {
   IconChart,
   IconCheck,
   IconClipboard,
+  IconInspect,
   IconMerge,
+  IconStack,
   IconTimeline,
 } from '../icons';
 import '../../styles/knowledge-center.css';
@@ -42,7 +46,7 @@ import '../../styles/knowledge-center.css';
  * 不复制一份。后续批次会把它们逐个升级成完整页面，那时两处一起变。
  */
 
-export type KnowledgePage = 'inbox' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity' | 'gap_analysis';
+export type KnowledgePage = 'inbox' | 'research' | 'claims' | 'memory' | 'changes' | 'tasks' | 'health' | 'activity' | 'gap_analysis';
 
 /**
  * 页面配对应图标与多语言词条。全部取自 `components/icons.tsx`，不新画。
@@ -54,6 +58,8 @@ const PAGES: {
   Icon: ComponentType<{ size?: number }>;
 }[] = [
   { key: 'inbox', labelKey: 'knowledge.tab.inbox', hintKey: 'knowledge.tabHint.inbox', Icon: IconClipboard },
+  { key: 'research', labelKey: 'knowledge.tab.research', hintKey: 'knowledge.tabHint.research', Icon: IconInspect },
+  { key: 'claims', labelKey: 'knowledge.tab.claims', hintKey: 'knowledge.tabHint.claims', Icon: IconStack },
   { key: 'memory', labelKey: 'knowledge.tab.memory', hintKey: 'knowledge.tabHint.memory', Icon: IconBrain },
   { key: 'changes', labelKey: 'knowledge.tab.changes', hintKey: 'knowledge.tabHint.changes', Icon: IconMerge },
   { key: 'tasks', labelKey: 'knowledge.tab.tasks', hintKey: 'knowledge.tabHint.tasks', Icon: IconCheck },
@@ -181,6 +187,19 @@ export function KnowledgeCenter() {
               onOpenPage={setPage}
               onChanged={refresh}
               onOpenChat={state.isChatOpen ? undefined : toggleChat}
+            />
+          )}
+          {page === 'research' && (
+            <ResearchWorkspace
+              vaultPath={vaultPath}
+              onOpenFile={openFile}
+              onOpenChat={state.isChatOpen ? undefined : toggleChat}
+            />
+          )}
+          {page === 'claims' && (
+            <ClaimsWorkspace
+              vaultPath={vaultPath}
+              onOpenFile={openFile}
             />
           )}
           {/* 记忆与变更都有了完整页面（变更：一个 diff 渲染器、一套状态词、一条时间线、

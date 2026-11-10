@@ -15,6 +15,8 @@ pub mod fast_path;
 /// Each agent only has access to a subset of the 58 internal tools.
 
 pub const KNOWLEDGE_TOOLS: &[&str] = &[
+    "read_source_range", "verify_quote", "capture_source", "create_research_project", "get_research_state", "update_research_state",
+    "trace_claim", "preview_change_impact", "find_duplicate_groups", "generate_review_items", "resolve_reference", "export_research_bundle", "resolve_entity_aliases", "calculate",
     "todo_write",
     "search_notes", "list_notes", "read_note", "batch_read_notes",
     "find_similar_notes", "search_by_tag",
@@ -39,6 +41,8 @@ pub const KNOWLEDGE_TOOLS: &[&str] = &[
 ];
 
 pub const CREATOR_TOOLS: &[&str] = &[
+    "read_source_range", "verify_quote", "capture_source", "create_research_project", "get_research_state", "update_research_state",
+    "trace_claim", "preview_change_impact", "generate_review_items", "resolve_reference", "export_research_bundle", "resolve_entity_aliases", "calculate",
     "todo_write",
     "search_notes", "list_notes", "read_note", "batch_read_notes",
     "find_similar_notes", "search_by_tag", "get_note_tags",
@@ -56,6 +60,8 @@ pub const CREATOR_TOOLS: &[&str] = &[
 ];
 
 pub const CURATOR_TOOLS: &[&str] = &[
+    "read_source_range", "verify_quote", "capture_source", "get_research_state", "update_research_state", "trace_claim", "preview_change_impact",
+    "find_duplicate_groups", "generate_review_items", "resolve_reference", "export_research_bundle", "resolve_entity_aliases", "calculate",
     "todo_write",
     "search_notes", "list_notes", "read_note", "batch_read_notes",
     "find_similar_notes",

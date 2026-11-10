@@ -105,7 +105,7 @@ pub fn capability_of(name: &str) -> ToolCapability {
     }
 
     // 出网：本地什么都不改，但内容会离开这台机器，所以单独一类。
-    if matches!(name, "web_search" | "fetch_web_content") {
+    if matches!(name, "web_search" | "fetch_web_content" | "resolve_reference") {
         return ToolCapability {
             effect: Effect::Network,
             risk,
@@ -180,6 +180,8 @@ pub fn capability_of(name: &str) -> ToolCapability {
 /// 读工具能寻址什么 / what a read tool can address.
 fn read_targets(name: &str) -> &'static [ObjectKind] {
     match name {
+        "get_research_state" => &[ObjectKind::Collection, ObjectKind::Claim, ObjectKind::Resource],
+        "trace_claim" | "preview_change_impact" | "generate_review_items" => &[ObjectKind::Claim, ObjectKind::Fact, ObjectKind::Document, ObjectKind::Relation],
         "read_memory" | "search_memory" => &[ObjectKind::Memory],
         "get_note_facts" | "query_temporal" | "get_timeline" | "get_global_timeline" => {
             &[ObjectKind::Document, ObjectKind::Fact]
@@ -199,6 +201,7 @@ const RELATION_KINDS: &[ObjectKind] = &[ObjectKind::Relation];
 /// 未登记的工具落到 `NOTE_KINDS`：一个没登记的工具不该被推断出"能改记忆"。
 fn write_targets(name: &str) -> &'static [ObjectKind] {
     match name {
+        "create_research_project" | "update_research_state" => &[ObjectKind::Collection, ObjectKind::Claim],
         "update_memory" => &[ObjectKind::Memory],
         "propagate_fact_update" => &[ObjectKind::Fact, ObjectKind::Document],
         "add_relation" | "delete_relation" | "batch_link_notes" => RELATION_KINDS,
@@ -226,6 +229,27 @@ pub fn write_needs_review(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn knowledge_workbench_reads_and_writes_have_explicit_permissions() {
+        for name in ["read_source_range", "verify_quote", "get_research_state", "trace_claim",
+            "preview_change_impact", "find_duplicate_groups", "resolve_entity_aliases", "calculate"] {
+            let cap = capability_of(name);
+            assert_eq!(cap.effect, Effect::Read, "{name}");
+            assert!(!cap.requires_changeset, "{name}");
+            assert_eq!(cap.risk, RiskLevel::Low, "{name}");
+        }
+        for (name, kind) in [("capture_source", ObjectKind::Document),
+            ("create_research_project", ObjectKind::Collection),
+            ("update_research_state", ObjectKind::Collection),
+            ("export_research_bundle", ObjectKind::Document)] {
+            let cap = capability_of(name);
+            assert_eq!(cap.effect, Effect::Write, "{name}");
+            assert!(cap.requires_changeset && cap.requires_scope, "{name}");
+            assert!(may_target(name, kind), "{name}");
+        }
+        assert_eq!(capability_of("resolve_reference").effect, Effect::Network);
+    }
 
     /// 没登记的工具按最危险处理 / an unregistered tool is treated as dangerous.
     ///

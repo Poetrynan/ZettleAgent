@@ -539,6 +539,9 @@ pub fn untrusted_content_boundary(tool_name: &str, output: &str) -> HookOutcome 
     let (source, origin) = match tool_name {
         "web_search" | "fetch_web_content" => ("web", web_origin(tool_name, output)),
         n if n.starts_with("mcp_") => ("mcp", n.to_string()),
+        "capture_source" | "resolve_reference" | "read_source_range" | "verify_quote" => {
+            ("source", tool_name.to_string())
+        }
         _ => return HookOutcome::default(),
     };
 
@@ -1183,6 +1186,16 @@ mod tests {
             let out = untrusted_content_boundary(tool, "# A note\nbody");
             assert!(out.replace_content.is_none(), "`{tool}` must NOT be wrapped");
             assert!(is_noop(&out), "`{tool}` must be a full no-op");
+        }
+    }
+
+    #[test]
+    fn research_external_sources_keep_the_untrusted_boundary() {
+        let _g = taint_guard();
+        for tool in ["capture_source", "resolve_reference", "read_source_range", "verify_quote"] {
+            let out = untrusted_content_boundary(tool, "source passage");
+            let wrapped = out.replace_content.expect("Research sources may contain external instructions");
+            assert!(wrapped.contains("source passage") && wrapped.contains("<untrusted_data"));
         }
     }
 

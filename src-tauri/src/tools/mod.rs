@@ -42,6 +42,7 @@ pub const CORE_TOOLS: &[&str] = &[
     "search_notes",          // internal_tools/search_ops.rs:23
     "list_notes",            // internal_tools/search_ops.rs:237
     "read_note",             // internal_tools/note_ops.rs:10
+    "read_source_range", "verify_quote",
     "batch_read_notes",      // internal_tools/note_ops.rs:735 — one call instead of N
     "find_similar_notes",    // internal_tools/search_ops.rs:310
     "search_by_tag",         // internal_tools/search_ops.rs:390

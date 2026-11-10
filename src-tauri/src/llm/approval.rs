@@ -75,6 +75,9 @@ pub fn is_read_only_tool(name: &str) -> bool {
         name,
         // ── Search (search_ops.rs — SELECT / vector search only) ──
         "search_notes"                  // search_ops.rs:23
+            | "read_source_range" | "verify_quote" | "get_research_state" | "trace_claim"
+            | "preview_change_impact" | "find_duplicate_groups" | "resolve_entity_aliases"
+            | "calculate" | "resolve_reference" | "generate_review_items"
             | "list_notes"              // search_ops.rs:237
             | "find_similar_notes"      // search_ops.rs:310
             | "search_by_tag"           // search_ops.rs:390
@@ -332,6 +335,11 @@ impl RiskLevel {
 /// cheap to undo.
 pub fn base_risk_level(tool_name: &str) -> RiskLevel {
     match tool_name {
+        "read_source_range" | "verify_quote" | "get_research_state" | "trace_claim"
+        | "preview_change_impact" | "find_duplicate_groups" | "resolve_entity_aliases"
+        | "calculate" | "resolve_reference" | "generate_review_items" => RiskLevel::Low,
+        "capture_source" | "create_research_project" | "update_research_state"
+        | "export_research_bundle" => RiskLevel::Medium,
         // Low — additive, overwrites nothing, or read-only/derived-cache generation.
         "create_note" | "create_folder" | "create_canvas" | "append_to_note"
         | "generate_canvas_from_notes" | "query_graph_communities" | "generate_community_summaries"
